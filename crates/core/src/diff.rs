@@ -1191,7 +1191,7 @@ mod tests {
         let customer = get("public.customer");
         assert_eq!((customer.kind, customer.destructive), (ChangeKind::Added, false));
         assert_eq!(customer.sql, "CREATE TABLE public.customer (\n    id bigint NOT NULL\n);");
-        assert_eq!(customer.undo_steps[0].sql, "DROP TABLE public.customer;");
+        assert_eq!(customer.undo_steps[0].sql, "DROP TABLE IF EXISTS public.customer;");
         assert!(customer.before.is_none() && customer.after.as_deref().unwrap().starts_with("CREATE TABLE public.customer"));
 
         let order = get("public.order");
