@@ -1,0 +1,11 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body { @apply bg-bg text-fg font-sans text-base antialiased; }
+  :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+  }
+}

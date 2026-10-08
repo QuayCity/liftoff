@@ -1,0 +1,141 @@
+/* Design tokens, light and dark. */
+:root {
+  color-scheme: light;
+  --lo-bg: #f7f8fa;
+  --lo-surface: #ffffff;
+  --lo-surface-sunken: #eef0f3;
+  --lo-border: #dfe3e8;
+  --lo-border-input: #848c96;
+  --lo-text: #15181c;
+  --lo-text-muted: #565e68;
+  --lo-accent: #4a4fd6;
+  --lo-on-accent: #ffffff;
+  --lo-accent-subtle: #eceefe;
+  --lo-focus: #4a4fd6;
+  --lo-danger: #b42d25;
+  --lo-on-danger: #ffffff;
+  --lo-danger-subtle: #fdeceb;
+  --lo-success: #17734a;
+  --lo-success-subtle: #e6f4ec;
+  --lo-warning: #8f5300;
+  --lo-warning-subtle: #fff3de;
+  --lo-diff-add: #e3f5e9;
+  --lo-diff-remove: #fde8e8;
+  --lo-diff-change: #fff4d9;
+  --lo-titlebar: 40px;
+  --lo-statusbar: 26px;
+  --lo-sidepanel: 280px;
+  --lo-row: 32px;
+  --lo-row-compact: 28px;
+  --lo-control-sm: 28px;
+  --lo-control-md: 32px;
+  --lo-control-lg: 40px;
+  --lo-dialog-sm: 420px;
+  --lo-dialog-md: 560px;
+  --lo-dialog-lg: 760px;
+  --lo-fast: 100ms;
+  --lo-base: 160ms;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --lo-bg: #101216;
+    --lo-surface: #171a1f;
+    --lo-surface-sunken: #0b0d10;
+    --lo-border: #2a2f37;
+    --lo-border-input: #6f7884;
+    --lo-text: #e7e9ec;
+    --lo-text-muted: #9aa2ad;
+    --lo-accent: #8e93f7;
+    --lo-on-accent: #0e1030;
+    --lo-accent-subtle: #24264d;
+    --lo-focus: #8e93f7;
+    --lo-danger: #ff8078;
+    --lo-on-danger: #2a0806;
+    --lo-danger-subtle: #3b1714;
+    --lo-success: #4fc48c;
+    --lo-success-subtle: #11291d;
+    --lo-warning: #e9a73d;
+    --lo-warning-subtle: #33240c;
+    --lo-diff-add: #11301f;
+    --lo-diff-remove: #3b1719;
+    --lo-diff-change: #33280f;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --lo-bg: #101216;
+  --lo-surface: #171a1f;
+  --lo-surface-sunken: #0b0d10;
+  --lo-border: #2a2f37;
+  --lo-border-input: #6f7884;
+  --lo-text: #e7e9ec;
+  --lo-text-muted: #9aa2ad;
+  --lo-accent: #8e93f7;
+  --lo-on-accent: #0e1030;
+  --lo-accent-subtle: #24264d;
+  --lo-focus: #8e93f7;
+  --lo-danger: #ff8078;
+  --lo-on-danger: #2a0806;
+  --lo-danger-subtle: #3b1714;
+  --lo-success: #4fc48c;
+  --lo-success-subtle: #11291d;
+  --lo-warning: #e9a73d;
+  --lo-warning-subtle: #33240c;
+  --lo-diff-add: #11301f;
+  --lo-diff-remove: #3b1719;
+  --lo-diff-change: #33280f;
+}
+
+@theme inline {
+  --color-*: initial;  /* only our roles exist: no bg-red-500 escapes */
+  --color-bg: var(--lo-bg);
+  --color-surface: var(--lo-surface);
+  --color-surface-sunken: var(--lo-surface-sunken);
+  --color-border: var(--lo-border);
+  --color-border-input: var(--lo-border-input);
+  --color-fg: var(--lo-text);
+  --color-muted: var(--lo-text-muted);
+  --color-accent: var(--lo-accent);
+  --color-on-accent: var(--lo-on-accent);
+  --color-accent-subtle: var(--lo-accent-subtle);
+  --color-focus: var(--lo-focus);
+  --color-danger: var(--lo-danger);
+  --color-on-danger: var(--lo-on-danger);
+  --color-danger-subtle: var(--lo-danger-subtle);
+  --color-success: var(--lo-success);
+  --color-success-subtle: var(--lo-success-subtle);
+  --color-warning: var(--lo-warning);
+  --color-warning-subtle: var(--lo-warning-subtle);
+  --color-diff-add: var(--lo-diff-add);
+  --color-diff-remove: var(--lo-diff-remove);
+  --color-diff-change: var(--lo-diff-change);
+  --font-sans: 'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-xs--font-weight: 500;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-sm--font-weight: 400;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-base--font-weight: 400;
+  --text-lg: 16px;
+  --text-lg--line-height: 24px;
+  --text-lg--font-weight: 600;
+  --text-xl: 20px;
+  --text-xl--line-height: 28px;
+  --text-xl--font-weight: 600;
+  --text-display: 28px;
+  --text-display--line-height: 34px;
+  --text-display--font-weight: 700;
+  --spacing: 4px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+  --shadow-card: 0 1px 2px rgba(15,20,30,.06), 0 1px 3px rgba(15,20,30,.08);
+  --shadow-pop: 0 10px 28px rgba(15,20,30,.18);
+  --ease-lo: cubic-bezier(.2,.8,.2,1);
+}
