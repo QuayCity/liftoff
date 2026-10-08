@@ -5,6 +5,7 @@ services:
   pg:
     image: postgres:16-alpine
     container_name: liftoff-pg
+    restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: liftoff
     ports: ['55432:5432']
@@ -14,6 +15,7 @@ services:
   bouncer:
     image: edoburu/pgbouncer:latest
     container_name: liftoff-bouncer
+    restart: unless-stopped
     environment:
       DB_HOST: pg
       DB_USER: postgres
@@ -28,6 +30,7 @@ services:
   mssql:
     image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: liftoff-mssql
+    restart: unless-stopped
     environment:
       ACCEPT_EULA: 'Y'
       MSSQL_PID: Developer
