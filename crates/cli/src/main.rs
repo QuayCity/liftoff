@@ -5,6 +5,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use liftoff_core::config::{self, Config};
 use liftoff_core::runner::{self, Level, MigrateOptions};
+use liftoff_core::checks::{self, CheckOptions};
 use liftoff_core::{diff, license, Error, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -53,6 +54,27 @@ enum Command {
         /// Also run scripts older than the latest applied version
         #[arg(long)]
         out_of_order: bool,
+        /// Stop after this version
+        #[arg(long)]
+        target: Option<String>,
+        /// Print the SQL that would run instead of running it (Pro)
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Undo the latest applied migration with its U script (Pro)
+    Undo,
+    /// Pre-deploy checks: drift, what the pending scripts change, and the dry-run script (Pro).
+    /// With no flags, runs all three. Exits 13 when drift is found.
+    Check {
+        #[arg(long)]
+        drift: bool,
+        #[arg(long)]
+        changes: bool,
+        #[arg(long)]
+        dry_run: bool,
+        /// Scratch environment rebuilt for the comparison (default: the first with role "scratch")
+        #[arg(long)]
+        scratch: Option<String>,
     },
     /// Check applied scripts against the files: failures, edits, missing files, out-of-order scripts
     Validate,
@@ -117,6 +139,9 @@ enum Command {
         /// Also record the new script as applied on the dev database (it already has the change)
         #[arg(long)]
         record_on_dev: bool,
+        /// Also write the matching undo script (U…) (Pro)
+        #[arg(long)]
+        undo: bool,
     },
     /// Show the licence in use
     License,
@@ -132,7 +157,14 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            if json { println!("{}", json!({ "ok": false, "error": e.report() })) } else { eprintln!("error: {e}") }
+            // `check` already printed its report (with the error) for drift.
+            if matches!(e, Error::Drift(_)) {
+                eprintln!("error: {e}");
+            } else if json {
+                println!("{}", json!({ "ok": false, "error": e.report() }))
+            } else {
+                eprintln!("error: {e}")
+            }
             ExitCode::from(e.exit_code() as u8)
         }
     }
@@ -169,11 +201,51 @@ async fn run(cli: &Cli) -> Result<(Value, String)> {
             let infos = runner::info(&cfg, env).await?;
             Ok((to(&infos)?, info_table(&infos)))
         }
-        Command::Migrate { out_of_order } => {
+        Command::Migrate { out_of_order, target, dry_run } => {
             let cfg = Config::load(root)?;
-            let r = runner::migrate(&cfg, env, MigrateOptions { out_of_order: *out_of_order }, &log).await?;
-            let text = format!("Applied {} migration(s) to {} in {} ms", r.applied.len(), r.environment, r.execution_time_ms);
+            if *dry_run {
+                license::require("dry-run", cli.license.as_deref(), Some(root))?;
+            }
+            let opts = MigrateOptions { out_of_order: *out_of_order, target: target.clone(), dry_run: *dry_run };
+            let r = runner::migrate(&cfg, env, opts, &log).await?;
+            let text = match &r.dry_run_sql {
+                Some(sql) => sql.clone(),
+                None => format!("Applied {} migration(s) to {} in {} ms", r.applied.len(), r.environment, r.execution_time_ms),
+            };
             Ok((to(&r)?, text))
+        }
+        Command::Undo => {
+            let cfg = Config::load(root)?;
+            license::require("undo", cli.license.as_deref(), Some(root))?;
+            let r = runner::undo(&cfg, env, &log).await?;
+            Ok((to(&r)?, String::new()))
+        }
+        Command::Check { drift, changes, dry_run, scratch } => {
+            let cfg = Config::load(root)?;
+            license::require("check", cli.license.as_deref(), Some(root))?;
+            let all = !(*drift || *changes || *dry_run);
+            let opts = CheckOptions { drift: all || *drift, changes: all || *changes, dry_run: all || *dry_run };
+            let r = checks::check(&cfg, env, scratch.as_deref(), opts, &log).await?;
+            let mut text = Vec::new();
+            for (title, list) in [("Drift", &r.drift), ("Pending changes", &r.changes)] {
+                if let Some(list) = list {
+                    text.push(format!("{title}: {}", if list.is_empty() { "none".to_string() } else { list.len().to_string() }));
+                    text.extend(list.iter().map(|c| format!("  {:<8} {}{}", format!("{:?}", c.kind).to_lowercase(), c.name, if c.destructive { "  (may lose data)" } else { "" })));
+                }
+            }
+            if let Some(sql) = &r.dry_run_sql {
+                text.push(format!("Dry run:\n{sql}"));
+            }
+            if r.has_drift() {
+                // The report is the useful part: print it, then fail with the drift exit code.
+                if cli.output_type == Output::Json {
+                    println!("{}", json!({ "ok": false, "result": to(&r)?, "error": Error::Drift(r.environment.clone()).report() }));
+                } else {
+                    println!("{}", text.join("\n"));
+                }
+                return Err(Error::Drift(r.environment.clone()));
+            }
+            Ok((to(&r)?, text.join("\n")))
         }
         Command::Validate => {
             let cfg = Config::load(root)?;
@@ -231,7 +303,7 @@ async fn run(cli: &Cli) -> Result<(Value, String)> {
             let text = changes.iter().map(|c| format!("{:<8} {}{}", format!("{:?}", c.kind).to_lowercase(), c.name, if c.destructive { "  (may lose data)" } else { "" })).collect::<Vec<_>>().join("\n");
             Ok((to(&changes)?, if text.is_empty() { "No differences".into() } else { text }))
         }
-        Command::Generate { description, source, scratch, skip_destructive, dry_run, record_on_dev } => {
+        Command::Generate { description, source, scratch, skip_destructive, dry_run, record_on_dev, undo } => {
             let cfg = Config::load(root)?;
             license::require("generate", cli.license.as_deref(), Some(root))?;
             let mut changes = diff::dev_vs_migrations(&cfg, source.as_deref(), scratch.as_deref(), &log).await?;
@@ -243,11 +315,14 @@ async fn run(cli: &Cli) -> Result<(Value, String)> {
             if changes.is_empty() {
                 return Ok((json!({ "written": null }), "No differences; nothing written".into()));
             }
-            let g = diff::generate(&cfg, &changes, description)?;
+            let g = diff::generate(&cfg, &changes, description, *undo)?;
             if *dry_run {
                 return Ok((to(&g)?, g.sql.clone()));
             }
             let path = diff::save(&cfg, &g.file_name, &g.sql)?;
+            if let Some(u) = &g.undo {
+                diff::save(&cfg, &u.file_name, &u.sql)?;
+            }
             if *record_on_dev {
                 let (dev, _) = cfg.pick_role(source.as_deref(), config::Role::Dev)?;
                 runner::mark_applied(&cfg, Some(&dev), &g.file_name, &log).await?;

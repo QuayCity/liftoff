@@ -4,6 +4,7 @@
 use liftoff_core::config::{self, Config, Environment, Role};
 use liftoff_core::error::ErrorReport;
 use liftoff_core::runner::{self, Level, MigrateOptions};
+use liftoff_core::checks::{self, CheckOptions};
 use liftoff_core::{db, diff, license, Error};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -194,7 +195,7 @@ async fn migrations_info(path: String, env: String) -> R<Vec<runner::MigrationIn
 async fn migrate(app: AppHandle, path: String, env: String, out_of_order: bool) -> R<runner::MigrateResult> {
     let cfg = load(&path)?;
     let log = emitter(app);
-    runner::migrate(&cfg, Some(&env), MigrateOptions { out_of_order }, &log).await.map_err(rep)
+    runner::migrate(&cfg, Some(&env), MigrateOptions { out_of_order, ..Default::default() }, &log).await.map_err(rep)
 }
 
 fn emitter(app: AppHandle) -> impl Fn(Level, &str) + Sync {
@@ -239,10 +240,24 @@ async fn changes_diff(app: AppHandle, path: String) -> R<Vec<diff::Change>> {
 }
 
 #[tauri::command]
-fn migration_generate(path: String, changes: Vec<diff::Change>, description: String) -> R<diff::Generated> {
+fn migration_generate(path: String, changes: Vec<diff::Change>, description: String, with_undo: bool) -> R<diff::Generated> {
     let cfg = load(&path)?;
     license::require("generate", None, Some(&cfg.root)).map_err(rep)?;
-    diff::generate(&cfg, &changes, &description).map_err(rep)
+    diff::generate(&cfg, &changes, &description, with_undo).map_err(rep)
+}
+
+#[tauri::command]
+async fn undo(app: AppHandle, path: String, env: String) -> R<runner::Applied> {
+    let cfg = load(&path)?;
+    license::require("undo", None, Some(&cfg.root)).map_err(rep)?;
+    runner::undo(&cfg, Some(&env), &emitter(app)).await.map_err(rep)
+}
+
+#[tauri::command]
+async fn check(app: AppHandle, path: String, env: String, drift: bool, changes: bool, dry_run: bool) -> R<checks::CheckReport> {
+    let cfg = load(&path)?;
+    license::require("check", None, Some(&cfg.root)).map_err(rep)?;
+    checks::check(&cfg, Some(&env), None, CheckOptions { drift, changes, dry_run }, &emitter(app)).await.map_err(rep)
 }
 
 #[tauri::command]
@@ -313,6 +328,8 @@ pub fn run() {
             repair,
             clean,
             mark_applied,
+            undo,
+            check,
             scripts_list,
             script_add,
             capture,

@@ -55,7 +55,7 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
         onClose={onClose}
       />
       <main className="min-h-0 flex-1 overflow-auto">
-        {view === 'Environments' && <Environments project={project} onProject={onProject} />}
+        {view === 'Environments' && <Environments project={project} onProject={onProject} onSettings={() => setView('Settings')} />}
         {view === 'Changes' && <Changes project={project} onSettings={() => setView('Settings')} onEnvironments={() => setView('Environments')} />}
         {view === 'Settings' && <Settings project={project} onProject={onProject} />}
         {view === 'Scripts' && <Scripts project={project} />}

@@ -6,11 +6,15 @@ import { Button, Checkbox, Field, IconButton, Input, cx } from '../ui/controls'
 import { CommandBar, DataTable, EnvironmentColumn, LogConsole, type Env, type LogLine } from '../ui/data'
 import { Badge, Card, CodeBlock, EmptyState, InlineAlert, StatePill, type MigrationState } from '../ui/display'
 import { ConfirmDestructive, Dialog, useToast } from '../ui/overlays'
+import { Tabs } from 'radix-ui'
+import { Checks } from './Checks'
 import { ConnectionDialog } from './ConnectionDialog'
 
 type EnvStatus = { info?: MigrationInfo[]; error?: string; loading: boolean }
 const roleLabel = { dev: 'Dev', scratch: 'Scratch', test: 'Test', prod: 'Prod' } as const
 const pillState = (s: State): MigrationState => (s === 'below_baseline' ? 'ignored' : s)
+
+const tab = 'border-b-2 border-transparent px-3 py-1.5 text-sm text-muted hover:text-fg data-[state=active]:border-accent data-[state=active]:text-fg'
 
 const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
 function relative(iso: string) {
@@ -21,7 +25,7 @@ function relative(iso: string) {
 }
 const local = (iso: string | null) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—')
 
-export function Environments({ project, onProject }: { project: Project; onProject: (p: Project) => void }) {
+export function Environments({ project, onProject, onSettings }: { project: Project; onProject: (p: Project) => void; onSettings?: () => void }) {
   const toast = useToast()
   const envs = project.environments
   const [status, setStatus] = useState<Record<string, EnvStatus>>({})
@@ -34,6 +38,8 @@ export function Environments({ project, onProject }: { project: Project; onProje
   const [baselineFor, setBaselineFor] = useState<string | null>(null)
   const [cleanFor, setCleanFor] = useState<string | null>(null)
   const [captured, setCaptured] = useState<{ env: string; g: Generated } | null>(null)
+  // Drift results from the Checks tab, shown on the board until the next check.
+  const [drift, setDrift] = useState<Record<string, boolean>>({})
 
   const load = useCallback(async (name: string) => {
     setStatus((s) => ({ ...s, [name]: { ...s[name], loading: true } }))
@@ -97,6 +103,10 @@ export function Environments({ project, onProject }: { project: Project; onProje
       const n = r.removed_failed.length + r.realigned.length + r.forgotten.length
       return n ? `Repaired ${name}` : `${name} needed no repair`
     })
+    if (id === 'undo') return op(name, async () => {
+      const r = await api.undo(project.root, name)
+      return `Undid version ${r.version ?? ''} on ${name}`
+    })
     if (id === 'baseline') return setBaselineFor(name)
     if (id === 'capture') return op(name, async () => {
       setCaptured({ env: name, g: await api.capture(project.root, name, 'existing schema') })
@@ -116,6 +126,7 @@ export function Environments({ project, onProject }: { project: Project; onProje
       status: !st || st.loading ? 'checking' : st.error ? 'unreachable' : 'ok',
       pending: info.filter((i) => i.state === 'pending' || i.state === 'outdated').length,
       lastRun: last ? { when: relative(last), at: local(last), failed: lastFailed } : undefined,
+      drift: e.name in drift ? (drift[e.name] ? 'detected' : 'none') : undefined,
     }
   }
 
@@ -165,43 +176,55 @@ export function Environments({ project, onProject }: { project: Project; onProje
             </InlineAlert>
           )}
 
-          <Card className="max-h-96 overflow-auto">
-            <DataTable
-              caption={`Migrations on ${sel.name}`}
-              loading={!selStatus || (selStatus.loading && !selStatus.info)}
-              rows={selStatus?.info ?? []}
-              rowKey={(r) => r.script + (r.version ?? '')}
-              empty={<EmptyState icon={Database} text="No migration scripts yet. Write one from your changes in the Changes tab." />}
-              columns={[
-                { header: 'Version', cell: (r) => <span className="font-mono">{r.version ?? 'repeatable'}</span> },
-                { header: 'Description', cell: (r) => <span className="block max-w-80 truncate" title={r.description}>{r.description}</span> },
-                { header: 'State', cell: (r) => <span className="inline-flex items-center gap-2"><StatePill state={pillState(r.state)} />{r.checksum_mismatch && <span className="text-xs text-danger">changed after it ran</span>}</span> },
-                { header: 'Ran on', cell: (r) => local(r.installed_on), className: 'text-muted whitespace-nowrap' },
-                { header: 'Took', cell: (r) => (r.execution_time_ms != null ? `${r.execution_time_ms} ms` : '—'), className: 'text-right tabular-nums' },
-              ]}
-            />
-          </Card>
+          <Tabs.Root defaultValue="migrations" className="flex flex-col gap-4">
+            <Tabs.List aria-label={`${sel.name} views`} className="flex border-b border-border">
+              <Tabs.Trigger value="migrations" className={tab}>Migrations</Tabs.Trigger>
+              <Tabs.Trigger value="checks" className={tab}>Checks</Tabs.Trigger>
+            </Tabs.List>
+            <Tabs.Content value="migrations" className="flex flex-col gap-4">
+            <Card className="max-h-96 overflow-auto">
+              <DataTable
+                caption={`Migrations on ${sel.name}`}
+                loading={!selStatus || (selStatus.loading && !selStatus.info)}
+                rows={selStatus?.info ?? []}
+                rowKey={(r) => r.script + (r.version ?? '')}
+                empty={<EmptyState icon={Database} text="No migration scripts yet. Write one from your changes in the Changes tab." />}
+                columns={[
+                  { header: 'Version', cell: (r) => <span className="font-mono">{r.version ?? 'repeatable'}</span> },
+                  { header: 'Description', cell: (r) => <span className="block max-w-80 truncate" title={r.description}>{r.description}</span> },
+                  { header: 'State', cell: (r) => <span className="inline-flex items-center gap-2"><StatePill state={pillState(r.state)} />{r.checksum_mismatch && <span className="text-xs text-danger">changed after it ran</span>}</span> },
+                  { header: 'Ran on', cell: (r) => local(r.installed_on), className: 'text-muted whitespace-nowrap' },
+                  { header: 'Took', cell: (r) => (r.execution_time_ms != null ? `${r.execution_time_ms} ms` : '—'), className: 'text-right tabular-nums' },
+                ]}
+              />
+            </Card>
 
-          <Card className="p-4">
-            <CommandBar
-              key={sel.name}
-              env={sel.name}
-              licensed={!!project.license}
-              running={running === sel.name}
-              onRun={(c) => command(sel.name, c.id)}
-              commands={[
-                { id: 'migrate', label: 'Run pending' },
-                { id: 'info', label: 'Refresh status' },
-                { id: 'validate', label: 'Validate' },
-                { id: 'repair', label: 'Repair history' },
-                ...(selStatus?.info?.length === 0 || selStatus?.info?.every((i) => !i.installed_on) ? [{ id: 'baseline', label: 'Baseline…' }] : []),
-                ...(sel.role === 'scratch' || sel.allow_clean ? [{ id: 'clean', label: 'Clean…', destructive: true }] : []),
-                { id: 'capture', label: 'Capture as script…', paid: true },
-              ]}
-            />
-          </Card>
+            <Card className="p-4">
+              <CommandBar
+                key={sel.name}
+                env={sel.name}
+                licensed={!!project.license}
+                running={running === sel.name}
+                onRun={(c) => command(sel.name, c.id)}
+                commands={[
+                  { id: 'migrate', label: 'Run pending' },
+                  { id: 'info', label: 'Refresh status' },
+                  { id: 'validate', label: 'Validate' },
+                  { id: 'repair', label: 'Repair history' },
+                  { id: 'undo', label: 'Undo latest', paid: true },
+                  ...(selStatus?.info?.length === 0 || selStatus?.info?.every((i) => !i.installed_on) ? [{ id: 'baseline', label: 'Baseline…' }] : []),
+                  ...(sel.role === 'scratch' || sel.allow_clean ? [{ id: 'clean', label: 'Clean…', destructive: true }] : []),
+                  { id: 'capture', label: 'Capture as script…', paid: true },
+                ]}
+              />
+            </Card>
 
-          {(log.length > 0 || running) && <div className={cx(running && running !== sel.name && 'opacity-70')}><LogConsole lines={log} status={logStatus} /></div>}
+            {(log.length > 0 || running) && <div className={cx(running && running !== sel.name && 'opacity-70')}><LogConsole lines={log} status={logStatus} /></div>}
+            </Tabs.Content>
+            <Tabs.Content value="checks">
+              <Checks key={sel.name} project={project} env={sel.name} onSettings={onSettings} onDrift={(env, d) => setDrift((m) => ({ ...m, [env]: d }))} />
+            </Tabs.Content>
+          </Tabs.Root>
         </section>
       )}
 

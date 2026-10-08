@@ -22,8 +22,13 @@ export type MigrationInfo = {
   state: State; installed_on: string | null; execution_time_ms: number | null; checksum_mismatch: boolean
 }
 export type MigrateResult = { environment: string; applied: { script: string; version: string | null; execution_time_ms: number; transactional: boolean }[]; execution_time_ms: number }
-export type Change = { id: string; object_type: string; name: string; kind: 'added' | 'changed' | 'removed'; destructive: boolean; sql: string; steps: { phase: number; sql: string }[] }
-export type Generated = { file_name: string; version: string; sql: string }
+export type Step = { phase: number; order?: number; sql: string }
+export type Change = {
+  id: string; object_type: string; name: string; kind: 'added' | 'changed' | 'removed'; destructive: boolean
+  sql: string; steps: Step[]; undo_steps: Step[]; before: string | null; after: string | null
+}
+export type Generated = { file_name: string; version: string; sql: string; undo: { file_name: string; sql: string } | null }
+export type CheckReport = { environment: string; applied_up_to: string | null; drift: Change[] | null; changes: Change[] | null; dry_run_sql: string | null }
 export type LogEvent = { level: 'info' | 'warn'; message: string }
 export type ScriptView = { kind: 'versioned' | 'repeatable' | 'undo' | 'baseline'; version: string | null; description: string; file_name: string; sql: string }
 export type RepairReport = { removed_failed: string[]; realigned: string[]; forgotten: string[] }
@@ -53,7 +58,9 @@ type Api = {
   scriptAdd(path: string, repeatable: boolean, description: string, sql: string): Promise<string>
   capture(path: string, env: string, description: string): Promise<Generated>
   changesDiff(path: string): Promise<Change[]>
-  migrationGenerate(path: string, changes: Change[], description: string): Promise<Generated>
+  migrationGenerate(path: string, changes: Change[], description: string, withUndo: boolean): Promise<Generated>
+  undo(path: string, env: string): Promise<{ script: string; version: string | null }>
+  check(path: string, env: string, opts: { drift: boolean; changes: boolean; dryRun: boolean }): Promise<CheckReport>
   migrationSave(path: string, fileName: string, sql: string): Promise<string>
   licenseActivate(text: string): Promise<LicenseStatus>
   onLog(cb: (e: LogEvent) => void): Promise<() => void>
@@ -82,7 +89,9 @@ const real: Api = {
   scriptAdd: (path, repeatable, description, sql) => invoke('script_add', { path, repeatable, description, sql }),
   capture: (path, env, description) => invoke('capture', { path, env, description }),
   changesDiff: (path) => invoke('changes_diff', { path }),
-  migrationGenerate: (path, changes, description) => invoke('migration_generate', { path, changes, description }),
+  migrationGenerate: (path, changes, description, withUndo) => invoke('migration_generate', { path, changes, description, withUndo }),
+  undo: (path, env) => invoke('undo', { path, env }),
+  check: (path, env, o) => invoke('check', { path, env, drift: o.drift, changes: o.changes, dryRun: o.dryRun }),
   migrationSave: (path, fileName, sql) => invoke('migration_save', { path, fileName, sql }),
   licenseActivate: (text) => invoke('license_activate', { text }),
   onLog: (cb) => listen<LogEvent>('run-log', (e) => cb(e.payload)),
@@ -200,23 +209,50 @@ const fakeApi: Api = {
   capture: async (_p, env, description) => {
     if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'generate' is part of LiftOff Pro.", 20)
     await wait(500)
-    return { file_name: `V20261008.1200__${description.replaceAll(' ', '_')}.sql`, version: '20261008.1200', sql: `-- ${description}\n-- captured from ${env}\n\nCREATE TABLE public.orders (\n    id bigserial\n);\n` }
+    return { file_name: `V20261008.1200__${description.replaceAll(' ', '_')}.sql`, version: '20261008.1200', sql: `-- ${description}\n-- captured from ${env}\n\nCREATE TABLE public.orders (\n    id bigserial\n);\n`, undo: null }
   },
   changesDiff: async () => {
     if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'diff' is part of LiftOff Pro. Set LIFTOFF_LICENSE (CI) or activate a licence in the desktop app.", 20)
     emit('info', "Rebuilding scratch database 'scratch' from migrations")
     await wait(600)
     emit('info', "Comparing 'local' with the migrations")
+    const customer = 'CREATE TABLE public.customer (\n    id bigint GENERATED ALWAYS AS IDENTITY,\n    email text NOT NULL\n);\nALTER TABLE public.customer ADD CONSTRAINT customer_pkey PRIMARY KEY (id);'
+    const ordersBefore = 'CREATE TABLE public.orders (\n    id bigserial,\n    note text\n);\nALTER TABLE public.orders ADD CONSTRAINT orders_pkey PRIMARY KEY (id);'
+    const ordersAfter = 'CREATE TABLE public.orders (\n    id bigserial,\n    note text NOT NULL,\n    paid_at timestamp with time zone\n);\nALTER TABLE public.orders ADD CONSTRAINT orders_pkey PRIMARY KEY (id);\nCREATE INDEX orders_paid_idx ON public.orders USING btree (paid_at);'
+    const cart = 'CREATE TABLE public.legacy_cart (\n    id integer NOT NULL\n);'
+    const view = 'CREATE VIEW public.daily_totals AS\n SELECT date(paid_at) AS day, count(*) AS orders\n   FROM public.orders\n  GROUP BY (date(paid_at));'
     return [
-      { id: 'table:public.customer', object_type: 'Tables', name: 'public.customer', kind: 'added', destructive: false, sql: 'CREATE TABLE public.customer (\n    id bigint GENERATED ALWAYS AS IDENTITY,\n    email text NOT NULL\n);', steps: [] },
-      { id: 'table:public.orders', object_type: 'Tables', name: 'public.orders', kind: 'changed', destructive: false, sql: 'ALTER TABLE public.orders ADD COLUMN paid_at timestamp with time zone;', steps: [] },
-      { id: 'table:public.legacy_cart', object_type: 'Tables', name: 'public.legacy_cart', kind: 'removed', destructive: true, sql: 'DROP TABLE public.legacy_cart;', steps: [] },
+      { id: 'table:public.customer', object_type: 'Tables', name: 'public.customer', kind: 'added', destructive: false, sql: customer, steps: [], undo_steps: [{ phase: 7, sql: 'DROP TABLE public.customer;' }], before: null, after: customer },
+      { id: 'table:public.orders', object_type: 'Tables', name: 'public.orders', kind: 'changed', destructive: false, sql: 'ALTER TABLE public.orders ALTER COLUMN note SET NOT NULL;\nALTER TABLE public.orders ADD COLUMN paid_at timestamp with time zone;\nCREATE INDEX orders_paid_idx ON public.orders USING btree (paid_at);', steps: [], undo_steps: [], before: ordersBefore, after: ordersAfter },
+      { id: 'table:public.legacy_cart', object_type: 'Tables', name: 'public.legacy_cart', kind: 'removed', destructive: true, sql: 'DROP TABLE public.legacy_cart;', steps: [], undo_steps: [], before: cart, after: null },
+      { id: 'view:public.daily_totals', object_type: 'Views', name: 'public.daily_totals', kind: 'added', destructive: false, sql: `${view};`, steps: [], undo_steps: [], before: null, after: view },
     ]
   },
-  migrationGenerate: async (_p, changes, description) => {
+  migrationGenerate: async (_p, changes, description, withUndo) => {
     const version = '20261008.1104'
     const sql = `-- ${description}\n-- Written by LiftOff. Review before committing.\n` + changes.map((c) => `\n-- ${c.kind} ${c.name}\n${c.sql}\n`).join('')
-    return { file_name: `V${version}__${description.replaceAll(' ', '_')}.sql`, version, sql }
+    const undo = withUndo ? { file_name: `U${version}__${description.replaceAll(' ', '_')}.sql`, sql: `-- Undo: ${description}\nDROP TABLE public.customer;\n` } : null
+    return { file_name: `V${version}__${description.replaceAll(' ', '_')}.sql`, version, sql, undo }
+  },
+  undo: async (_p, env) => {
+    await wait(300)
+    emit('info', `Undid the latest script on ${env}; it is pending again`)
+    fake.applied[env] = Math.max(0, (fake.applied[env] ?? 0) - 1)
+    return { script: 'U20261008.0840__daily_totals_view.sql', version: '20261008.0840' }
+  },
+  check: async (_p, env, o) => {
+    if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'check' is part of LiftOff Pro.", 20)
+    emit('info', `Rebuilding scratch database 'scratch' from migrations`)
+    await wait(600)
+    const drifted: Change = { id: 'table:public.orders', object_type: 'Tables', name: 'public.orders', kind: 'changed', destructive: false,
+      sql: 'ALTER TABLE public.orders ADD COLUMN hotfix integer;', steps: [], undo_steps: [],
+      before: 'CREATE TABLE public.orders (\n    id bigserial,\n    note text\n);', after: 'CREATE TABLE public.orders (\n    id bigserial,\n    note text,\n    hotfix integer\n);' }
+    return {
+      environment: env, applied_up_to: '20261003.1530',
+      drift: o.drift ? (env === 'staging' ? [drifted] : []) : null,
+      changes: o.changes ? fakeInfo(env).filter((i) => i.state === 'pending').map((i) => ({ ...drifted, id: `table:${i.description}`, name: `public.${i.description.replaceAll(' ', '_')}`, kind: 'added' as const, before: null })) : null,
+      dry_run_sql: o.dryRun ? `-- Dry run for ${env}: nothing below has been executed.\n\n-- V20261007.1102__tax_function.sql\nBEGIN;\ncreate function tax(amount numeric) ...;\nCOMMIT;\n` : null,
+    }
   },
   migrationSave: async (path, fileName) => `${path}/migrations/${fileName}`,
   licenseActivate: async (text) => {

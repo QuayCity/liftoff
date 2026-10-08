@@ -1,10 +1,12 @@
 // Changes workspace, slice version of S06: compare dev with the migrations, pick changes, write the next migration.
 import { CheckCircle2, GitCompareArrows, Lock } from 'lucide-react'
+import { Tabs } from 'radix-ui'
 import { useEffect, useRef, useState } from 'react'
 import { api, errorText, inTauri, type Change, type Generated, type Project } from '../api'
 import { Button, Checkbox, Field, Input } from '../ui/controls'
 import { ChangeList, LogConsole, type LogLine } from '../ui/data'
 import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
+import { DiffView } from '../ui/diffview'
 import { Dialog, useToast } from '../ui/overlays'
 
 export function Changes({ project, onSettings, onEnvironments }: { project: Project; onSettings: () => void; onEnvironments: () => void }) {
@@ -21,6 +23,7 @@ export function Changes({ project, onSettings, onEnvironments }: { project: Proj
   const [draft, setDraft] = useState<Generated | null>(null)
   const [saving, setSaving] = useState(false)
   const [recordOnDev, setRecordOnDev] = useState(true)
+  const [withUndo, setWithUndo] = useState(false)
   const [log, setLog] = useState<LogLine[]>([])
   const listening = useRef(false)
   const auto = useRef(!inTauri && new URLSearchParams(location.search).has('autocompare'))
@@ -89,7 +92,7 @@ export function Changes({ project, onSettings, onEnvironments }: { project: Proj
     setTouched(true)
     if (!description.trim() || chosen.length === 0) return
     try {
-      setDraft(await api.migrationGenerate(project.root, chosen, description.trim()))
+      setDraft(await api.migrationGenerate(project.root, chosen, description.trim(), withUndo))
     } catch (e) {
       setError(errorText(e))
     }
@@ -99,9 +102,10 @@ export function Changes({ project, onSettings, onEnvironments }: { project: Proj
     setSaving(true)
     try {
       await api.migrationSave(project.root, draft.file_name, draft.sql)
+      if (draft.undo) await api.migrationSave(project.root, draft.undo.file_name, draft.undo.sql)
       try {
         if (recordOnDev) await api.markApplied(project.root, dev.name, draft.file_name)
-        toast({ tone: 'success', title: `Wrote ${draft.file_name}` })
+        toast({ tone: 'success', title: draft.undo ? `Wrote ${draft.file_name} and its undo script` : `Wrote ${draft.file_name}` })
       } catch (e) {
         // The file is saved either way; only the bookkeeping on dev failed.
         toast({ tone: 'warning', title: `Wrote ${draft.file_name}, but couldn't record it on ${dev.name}: ${errorText(e)}` })
@@ -136,20 +140,20 @@ export function Changes({ project, onSettings, onEnvironments }: { project: Proj
         {error && <InlineAlert tone="danger" title="Comparison failed">{error}</InlineAlert>}
         {comparing && <LogConsole lines={log} status="streaming" />}
         {!comparing && changes === null && !error && (
-          <Card><EmptyState icon={GitCompareArrows} text={`Compare to see which tables in ${dev.name} differ from what your migration scripts create.`} /></Card>
+          <Card><EmptyState icon={GitCompareArrows} text={`Compare to see which tables, views, functions and types in ${dev.name} differ from what your migration scripts create.`} /></Card>
         )}
         {!comparing && changes?.length === 0 && (
           <Card><EmptyState icon={CheckCircle2} text={`${dev.name} matches your migration scripts. Nothing to write.`} /></Card>
         )}
         {!comparing && changes && changes.length > 0 && (
           <>
-            <div className="grid min-h-0 flex-1 grid-cols-[minmax(280px,2fr)_3fr] gap-4">
+            <div className="grid min-h-0 flex-1 grid-cols-[minmax(260px,1fr)_2fr] gap-4">
               <Card className="overflow-auto">
                 <ChangeList changes={changes.map((c) => ({ id: c.id, type: c.object_type, name: c.name, kind: c.kind, destructive: c.destructive }))}
                   selected={selected} onSelectedChange={setSelected} activeId={active} onActivate={(c) => setActive(c.id)} />
               </Card>
               <div className="flex min-h-0 flex-col gap-3 overflow-auto">
-                {current && <CodeBlock label={`SQL for ${current.name}`} code={current.sql} />}
+                {current && <Preview key={current.id} change={current} devName={dev.name} />}
                 {chosen.some((c) => c.destructive) && (
                   <InlineAlert tone="warning" title="This migration may lose data">Dropped tables or columns and type changes cannot be undone by running the script again. Check the SQL before saving.</InlineAlert>
                 )}
@@ -161,6 +165,7 @@ export function Changes({ project, onSettings, onEnvironments }: { project: Proj
               </div>
               <span className="pb-2 text-sm text-muted">{chosen.length} of {changes.length} selected</span>
               <span className="flex-1" />
+              <Checkbox checked={withUndo} onChange={setWithUndo} label="Also write an undo script" />
               <Button variant="primary" disabled={chosen.length === 0} onClick={write}>Write migration…</Button>
             </div>
           </>
@@ -172,11 +177,38 @@ export function Changes({ project, onSettings, onEnvironments }: { project: Proj
         {draft && (
           <div className="flex flex-col gap-3">
             <div className="max-h-[50vh] overflow-auto"><CodeBlock label="Generated script" code={draft.sql} /></div>
+            {draft.undo && (
+              <details>
+                <summary className="cursor-pointer text-sm text-muted">Undo script: {draft.undo.file_name}</summary>
+                <div className="mt-2 max-h-[30vh] overflow-auto"><CodeBlock label="Undo script" code={draft.undo.sql} /></div>
+              </details>
+            )}
             <Checkbox checked={recordOnDev} onChange={setRecordOnDev}
               label={`Record it as applied on ${dev.name}, which already has these changes`} />
           </div>
         )}
       </Dialog>
     </div>
+  )
+}
+
+const tab = 'border-b-2 border-transparent px-3 py-1.5 text-sm text-muted hover:text-fg data-[state=active]:border-accent data-[state=active]:text-fg'
+
+/** One change: side by side (what the migrations build vs dev), the SQL it adds, and its undo. */
+function Preview({ change, devName }: { change: Change; devName: string }) {
+  const undo = change.undo_steps.map((s) => s.sql).join('\n')
+  return (
+    <Tabs.Root defaultValue="diff" className="flex min-h-0 flex-col gap-3">
+      <Tabs.List aria-label={`Views of ${change.name}`} className="flex border-b border-border">
+        <Tabs.Trigger value="diff" className={tab}>Side by side</Tabs.Trigger>
+        <Tabs.Trigger value="sql" className={tab}>SQL</Tabs.Trigger>
+        <Tabs.Trigger value="undo" className={tab}>Undo</Tabs.Trigger>
+      </Tabs.List>
+      <Tabs.Content value="diff"><DiffView before={change.before} after={change.after} afterLabel={`In ${devName}`} /></Tabs.Content>
+      <Tabs.Content value="sql"><CodeBlock label={`SQL for ${change.name}`} code={change.sql} /></Tabs.Content>
+      <Tabs.Content value="undo">
+        {undo ? <CodeBlock label={`Undo SQL for ${change.name}`} code={undo} /> : <p className="text-sm text-muted">No undo steps for this change.</p>}
+      </Tabs.Content>
+    </Tabs.Root>
   )
 }

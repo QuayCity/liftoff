@@ -15,6 +15,8 @@ pub enum Error {
     Validate(String),
     #[error("{0}")]
     License(String),
+    #[error("drift found on '{0}': it has changes the migration scripts did not make")]
+    Drift(String),
     #[error("database error: {0}")]
     Db(#[from] tokio_postgres::Error),
     #[error("{0}")]
@@ -29,6 +31,7 @@ impl Error {
             Error::Migration { .. } => 11,
             Error::Validate(_) => 12,
             Error::License(_) => 20,
+            Error::Drift(_) => 13,
             Error::Db(_) | Error::Io(_) => 1,
         }
     }
@@ -40,6 +43,7 @@ impl Error {
             Error::Migration { .. } => "LIFTOFF_MIGRATION_FAILED",
             Error::Validate(_) => "LIFTOFF_VALIDATE",
             Error::License(_) => "LIFTOFF_LICENSE",
+            Error::Drift(_) => "LIFTOFF_DRIFT",
             Error::Db(_) => "LIFTOFF_DB",
             Error::Io(_) => "LIFTOFF_IO",
         }
