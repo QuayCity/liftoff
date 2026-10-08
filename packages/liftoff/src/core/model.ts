@@ -38,6 +38,11 @@ function readFolder(root: string): Map<string, string> {
   return out
 }
 
+/** Every file in the schema-model folder, relative to it, sorted (for object history, S20). */
+export function listFiles(cfg: Config): string[] {
+  return [...readFolder(cfg.root).keys()].sort()
+}
+
 /** The differences between the schema-model folder and what dev would write into it. */
 export function compareFiles(onDisk: Map<string, string>, dev: Map<string, string>): ModelChange[] {
   const paths = [...new Set([...onDisk.keys(), ...dev.keys()])].sort()

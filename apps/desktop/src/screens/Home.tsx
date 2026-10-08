@@ -1,5 +1,5 @@
 // S01 start page + S02 new project dialog.
-import { FolderOpen, FolderPlus, History } from 'lucide-react'
+import { FlaskConical, FolderOpen, FolderPlus, History } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, type Engine, errorText, isErrorReport, type ConvertReport, type Project, type Recent } from '../api'
 import { Button, Field, Input, RadioGroup, Select } from '../ui/controls'
@@ -51,6 +51,19 @@ export function Home({ onOpen }: { onOpen: (p: Project) => void }) {
       setOpening(null)
     }
   }
+  const trySample = async () => {
+    const folder = await api.pickFolder()
+    if (!folder) return
+    setOpening('sample')
+    setError(null)
+    try {
+      onOpen(await api.sampleCreate(folder))
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setOpening(null)
+    }
+  }
   const pick = async () => {
     const path = await api.pickFolder()
     if (path) await open(path)
@@ -67,7 +80,7 @@ export function Home({ onOpen }: { onOpen: (p: Project) => void }) {
         <p className="mt-1 text-muted">Turn database changes into reviewed migration scripts, then run them everywhere.</p>
       </header>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         <Card className="flex flex-col items-start gap-3 p-5">
           <FolderPlus aria-hidden className="size-6 text-accent" />
           <div>
@@ -82,7 +95,15 @@ export function Home({ onOpen }: { onOpen: (p: Project) => void }) {
             <h2 className="text-lg">Open a project</h2>
             <p className="text-sm text-muted">Pick a folder that already has a liftoff.toml.</p>
           </div>
-          <Button onClick={pick} loading={opening !== null && !recent?.some((r) => r.path === opening)}>Open folder…</Button>
+          <Button onClick={pick} loading={opening !== null && opening !== 'sample' && !recent?.some((r) => r.path === opening)}>Open folder…</Button>
+        </Card>
+        <Card className="flex flex-col items-start gap-3 p-5">
+          <FlaskConical aria-hidden className="size-6 text-accent" />
+          <div>
+            <h2 className="text-lg">Try the sample</h2>
+            <p className="text-sm text-muted">A small shop database in five scripts, to look around before using your own.</p>
+          </div>
+          <Button onClick={trySample} loading={opening === 'sample'}>Create sample…</Button>
         </Card>
       </div>
 

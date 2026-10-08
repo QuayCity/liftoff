@@ -201,6 +201,26 @@ test('F06-H1 commit the migration scripts with real git', async () => {
   expect(git('status', '--porcelain')).toContain('scratch-notes.txt')
 })
 
+test('S20-H1 the history of a schema-model object comes from real git', async () => {
+  test.skip(!hasLicense, 'needs ~/.liftoff/dev-license.txt')
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: project, encoding: 'utf8' }).trim()
+  const file = path.join(project, 'schema-model/public/tables/customers.sql')
+  // F06 committed the schema-model files with the scripts; this adds a second commit to the object.
+  fs.appendFileSync(file, 'COMMENT ON TABLE public.customers IS NULL;\n')
+  git('commit', '-am', 'Model: a note on customers')
+
+  await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Changes' }).click()
+  await page.getByRole('group', { name: 'Compare dev with' }).getByRole('button', { name: 'Schema model' }).click()
+  await page.getByRole('button', { name: 'Object history…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Object history' })
+  await dialog.getByRole('region', { name: 'Objects' }).getByRole('button', { name: 'public/tables/customers' }).click()
+  const commits = dialog.getByRole('region', { name: 'Commits' })
+  await expect(commits.getByRole('button').first()).toContainText('Model: a note on customers')
+  await expect(commits.getByRole('button', { name: /Add the first migrations/ })).toBeVisible()
+  await expect(dialog.getByRole('region', { name: 'What the commit changed' })).toContainText('COMMENT ON TABLE public.customers')
+  await page.keyboard.press('Escape')
+})
+
 test('X-CONSOLE no console errors in the real app', async () => {
   checkConsole()
 })

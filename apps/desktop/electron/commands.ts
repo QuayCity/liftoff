@@ -15,6 +15,7 @@ import * as license from '../../../packages/liftoff/src/core/license.ts'
 import { scan } from '../../../packages/liftoff/src/core/migration.ts'
 import * as model from '../../../packages/liftoff/src/core/model.ts'
 import * as runner from '../../../packages/liftoff/src/core/runner.ts'
+import { createSample } from '../../../packages/liftoff/src/core/sample.ts'
 
 /** What a command gets besides its arguments. */
 export type Host = {
@@ -113,6 +114,8 @@ const flywayProject = () => new LiftoffError('LIFTOFF_FLYWAY_PROJECT', 2, 'This 
 
 export const commands: Record<string, (a: Args, h: Host) => unknown> = {
   recent_projects: (_a, h) => readRecent(h).map((r) => ({ ...r, exists: fs.existsSync(path.join(r.path, PROJECT_FILE)) })),
+  /** S01: the sample project, in a new liftoff-sample folder inside the chosen one. */
+  sample_create: (a, h) => commands.project_open({ path: createSample(path.join(s(a, 'folder'), 'liftoff-sample')) }, h),
   recent_forget: (a, h) => writeRecent(h, readRecent(h).filter((r) => r.path !== a.path)),
 
   /* F01: projects and environments */
@@ -232,6 +235,15 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
     license.require('model', undefined, cfg.root)
     return model.save(cfg, a.changes as model.ModelChange[])
   },
+  model_files: (a) => {
+    const cfg = load(a.path)
+    license.require('model', undefined, cfg.root)
+    return model.listFiles(cfg)
+  },
+  /** S20: the commits that changed one schema-model file (path relative to schema-model/). */
+  object_history: (a) => git.history(s(a, 'path'), `${model.FOLDER}/${s(a, 'file')}`),
+  /** The file at a commit (its path as that commit has it, relative to the repository). */
+  object_at: (a) => git.showAt(s(a, 'path'), s(a, 'sha'), s(a, 'file')),
   project_save: (a) => {
     const root = s(a, 'path')
     // Placeholders are edited in liftoff.toml, not on this screen; keep them.

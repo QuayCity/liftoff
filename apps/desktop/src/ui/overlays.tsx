@@ -30,7 +30,7 @@ function useReturnFocus(open: boolean) {
   }
 }
 
-const dialogWidth = { sm: 'w-[420px]', md: 'w-[560px]', lg: 'w-[760px]' }
+const dialogWidth = { sm: 'w-[420px]', md: 'w-[560px]', lg: 'w-[760px]', xl: 'w-[1080px]' }
 const overlay = 'fixed inset-0 z-40 bg-fg/40'
 const panel = 'fixed top-1/2 left-1/2 z-50 max-h-[85vh] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-lg border border-border bg-surface p-5 shadow-pop'
 

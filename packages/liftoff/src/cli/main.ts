@@ -16,6 +16,7 @@ import * as flyway from '../core/flyway.ts'
 import * as license from '../core/license.ts'
 import * as model from '../core/model.ts'
 import * as runner from '../core/runner.ts'
+import { createSample } from '../core/sample.ts'
 import { FlywayArgError, translate, type Adhoc } from './flyway-args.ts'
 
 const VERSION = '0.1.0'
@@ -128,6 +129,7 @@ const COMMANDS: Record<string, Command> = {
       name: { type: 'string', help: 'Project name (default: the folder name)' },
       engine: { type: 'string', default: 'postgresql', help: 'postgresql or sqlserver' },
       'from-flyway': { type: 'boolean', help: "Convert the folder's flyway.toml or flyway.conf instead of starting empty (the originals stay)" },
+      sample: { type: 'boolean', help: 'Start from a small sample shop project (an empty folder only)' },
     },
     async run(ctx, v) {
       const name = str(v, 'name') ?? path.basename(fs.realpathSync(ctx.root)) ?? 'project'
@@ -142,6 +144,10 @@ const COMMANDS: Record<string, Command> = {
           `Next, per database: liftoff -e <environment> import-flyway-history --table ${r.flyway_table}`,
         ]
         return [r, text.join('\n')]
+      }
+      if (flag(v, 'sample')) {
+        createSample(ctx.root)
+        return [{ project: 'shop-sample', path: ctx.root }, `Created the sample project in ${ctx.root}; add an environment, then run its scripts`]
       }
       if (flyway.detect(ctx.root).length) process.stderr.write('note: this folder has a Flyway config; `liftoff init --from-flyway` converts it\n')
       init(ctx.root, name, str(v, 'engine')!)

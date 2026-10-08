@@ -88,6 +88,43 @@ export function diff(root: string, file: string): string {
   return git(root, ['diff', 'HEAD', '--', file])
 }
 
+export type Commit = {
+  sha: string
+  short: string
+  author: string
+  /** ISO 8601 */
+  date: string
+  message: string
+  /** the file's path in that commit (it follows renames) */
+  path: string
+  /** the file was deleted in this commit */
+  deleted: boolean
+}
+
+/** The commits that changed one file, newest first, following renames (S20). */
+export function history(root: string, file: string): Commit[] {
+  const out = git(root, ['log', '--follow', '--name-status', '-z', '--format=%x1e%H%x1f%h%x1f%an%x1f%aI%x1f%s', '--', file])
+  const commits: Commit[] = []
+  // Each record: "\x1e<header>\0\n<status>\0<path>\0", and for a rename "R100\0<old>\0<new>\0".
+  for (const record of out.split('\x1e').filter((r) => r.trim())) {
+    const [header, status = 'M', ...paths] = record.split('\0').map((p) => p.trim())
+    const [sha, short, author, date, message] = header.split('\x1f')
+    const named = paths.filter(Boolean)
+    const filePath = status.startsWith('R') || status.startsWith('C') ? named[1] : named[0]
+    commits.push({ sha, short, author, date, message, path: filePath ?? file, deleted: status === 'D' })
+  }
+  return commits
+}
+
+/** The file as it was in a commit; empty when it did not exist there. */
+export function showAt(root: string, sha: string, file: string): string {
+  try {
+    return git(root, ['show', `${sha}:${file}`])
+  } catch {
+    return ''
+  }
+}
+
 /** Commits exactly these paths (new files included), nothing else that happens to be staged. */
 export function commit(root: string, paths: string[], message: string): string {
   if (!paths.length) throw configError('choose at least one file to commit')

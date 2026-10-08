@@ -1,5 +1,6 @@
 // Changes workspace, slice version of S06: compare dev with the migrations, pick changes, write the next migration.
-import { CheckCircle2, GitCompareArrows, Lock } from 'lucide-react'
+import { FileClock, CheckCircle2, GitCompareArrows, Lock } from 'lucide-react'
+import { ObjectHistory } from './ObjectHistory'
 import { Tabs } from 'radix-ui'
 import { useEffect, useRef, useState } from 'react'
 import { api, errorText, inDesktop, type Change, type Generated, type ModelChange, type Project } from '../api'
@@ -294,6 +295,7 @@ function ModelChanges({ project, devName, onAgainst }: { project: Project; devNa
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [active, setActive] = useState<string | undefined>()
+  const [history, setHistory] = useState(false)
 
   const compare = async () => {
     setBusy('compare')
@@ -331,8 +333,10 @@ function ModelChanges({ project, devName, onAgainst }: { project: Project; devNa
         <AgainstToggle value="model" onChange={onAgainst} />
         <p className="text-sm">Compare <strong>{devName}</strong> with the schema-model folder</p>
         <span className="flex-1" />
+        <Button icon={FileClock} onClick={() => setHistory(true)}>Object history…</Button>
         <Button variant="primary" loading={busy === 'compare'} disabled={!!busy} onClick={compare}>{changes ? 'Compare again' : 'Compare'}</Button>
       </div>
+      <ObjectHistory open={history} onOpenChange={setHistory} project={project} />
       <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
         {error && <InlineAlert tone="danger" title="Comparison failed">{error}</InlineAlert>}
         {changes === null && !error && <Card><EmptyState icon={GitCompareArrows} text="The schema model keeps one file per object in git, so every table, view and function has its own history. Compare to see what dev has that the files do not." /></Card>}

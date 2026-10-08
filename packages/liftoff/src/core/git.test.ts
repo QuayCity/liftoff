@@ -4,7 +4,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import { GitError } from './errors.ts'
-import { classify, commit, diff, parseStatus, pull, push, run, status } from './git.ts'
+import { classify, commit, diff, history, parseStatus, pull, push, run, showAt, status } from './git.ts'
 
 test('reads git status --porcelain=v2', () => {
   const raw =
@@ -30,6 +30,33 @@ test('classifies git failures', () => {
   assert.equal(classify('! [rejected] main -> main (fetch first)\nerror: failed to push'), 'push_rejected')
   assert.equal(classify('fatal: not a git repository (or any of the parent directories): .git'), 'not_a_repository')
   assert.equal(classify('fatal: Not possible to fast-forward, aborting.'), 'diverged')
+})
+
+test("one file's history follows renames, inside a project subfolder (S20)", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-hist-'))
+  run(repo, ['init', '-b', 'main'])
+  for (const [k, v] of [['user.name', 'Ana'], ['user.email', 'ana@example.test'], ['commit.gpgsign', 'false']]) run(repo, ['config', k, v])
+  const proj = path.join(repo, 'proj')
+  const tables = path.join(proj, 'schema-model/public/tables')
+  fs.mkdirSync(tables, { recursive: true })
+  fs.writeFileSync(path.join(tables, 'a.sql'), 'create table a (id int);\n')
+  commit(proj, ['schema-model/public/tables/a.sql'], 'first: a')
+  fs.writeFileSync(path.join(tables, 'a.sql'), 'create table a (id int, x int);\n')
+  commit(proj, ['schema-model/public/tables/a.sql'], 'add x')
+  run(proj, ['mv', 'schema-model/public/tables/a.sql', 'schema-model/public/tables/b.sql'])
+  run(proj, ['commit', '-m', 'rename to b'])
+  fs.writeFileSync(path.join(tables, 'b.sql'), 'create table b (id int, x int, y int);\n')
+  commit(proj, ['schema-model/public/tables/b.sql'], 'add y')
+
+  const h = history(proj, 'schema-model/public/tables/b.sql')
+  assert.deepEqual(h.map((c) => [c.message, c.path, c.author]), [
+    ['add y', 'proj/schema-model/public/tables/b.sql', 'Ana'],
+    ['rename to b', 'proj/schema-model/public/tables/b.sql', 'Ana'],
+    ['add x', 'proj/schema-model/public/tables/a.sql', 'Ana'],
+    ['first: a', 'proj/schema-model/public/tables/a.sql', 'Ana'],
+  ])
+  assert.equal(showAt(proj, h[2].sha, h[2].path), 'create table a (id int, x int);\n')
+  assert.equal(showAt(proj, h[3].sha, 'proj/no/such/file.sql'), '')
 })
 
 test('a real repository with a remote: commit, push, rejected push, no merge on pull', () => {

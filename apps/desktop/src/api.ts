@@ -42,6 +42,7 @@ export type HistoryImport = { environment: string; imported: number; skipped: st
 export type GitStatus = { branch: string | null; upstream: string | null; ahead: number; behind: number; files: { path: string; change: string }[] }
 export type ModelChange = { path: string; object_type: string; kind: 'added' | 'changed' | 'removed'; before: string | null; after: string | null }
 export type CiOptions = { stages: string[]; branch: string; checks: boolean; install: string }
+export type ObjectCommit = { sha: string; short: string; author: string; date: string; message: string; path: string; deleted: boolean }
 export type RepairReport = { removed_failed: string[]; realigned: string[]; forgotten: string[] }
 
 /** The bridge electron/preload.ts puts on the window. */
@@ -82,6 +83,10 @@ type Api = {
   saveReport(path: string, report: CheckReport): Promise<string | null>
   modelStatus(path: string): Promise<ModelChange[]>
   modelSave(path: string, changes: ModelChange[]): Promise<number>
+  modelFiles(path: string): Promise<string[]>
+  objectHistory(path: string, file: string): Promise<ObjectCommit[]>
+  objectAt(path: string, sha: string, file: string): Promise<string>
+  sampleCreate(folder: string): Promise<Project>
   projectSave(path: string, project: ProjectSettings): Promise<Project>
   ciWorkflow(path: string, options: CiOptions): Promise<string>
   ciWrite(path: string, yaml: string, overwrite: boolean): Promise<string>
@@ -124,6 +129,10 @@ const real: Api = {
   migrate: (path, env, outOfOrder, allowNonEmpty = false) => invoke('migrate', { path, env, outOfOrder, allowNonEmpty }),
   modelStatus: (path) => invoke('model_status', { path }),
   modelSave: (path, changes) => invoke('model_save', { path, changes }),
+  modelFiles: (path) => invoke('model_files', { path }),
+  objectHistory: (path, file) => invoke('object_history', { path, file }),
+  objectAt: (path, sha, file) => invoke('object_at', { path, sha, file }),
+  sampleCreate: (folder) => invoke('sample_create', { folder }),
   projectSave: (path, project) => invoke('project_save', { path, project }),
   ciWorkflow: (path, options) => invoke('ci_workflow', { path, options }),
   ciWrite: (path, yaml, overwrite) => invoke('ci_write', { path, yaml, overwrite }),
@@ -244,6 +253,28 @@ const fakeApi: Api = {
     await wait()
     if (env === 'production') throw fail('LIFTOFF_CONNECT', "could not connect to 'production': timed out", 10)
     return fakeInfo(env)
+  },
+  modelFiles: async () => {
+    await wait()
+    return ['public/functions/tax(amount numeric).sql', 'public/tables/customer.sql', 'public/tables/orders.sql', 'public/views/order_totals.sql']
+  },
+  objectHistory: async (_p, file) => {
+    await wait()
+    if (file.includes('tax')) return []
+    const f = `schema-model/${file}`
+    return [
+      { sha: 'c3', short: 'c3d4e5f', author: 'Ana Ruiz', date: '2026-10-07T15:20:00+02:00', message: 'Track when orders are paid', path: f, deleted: false },
+      { sha: 'b2', short: 'b2c3d4e', author: 'Sam Okafor', date: '2026-10-03T09:12:00+02:00', message: 'Notes are required', path: f, deleted: false },
+      { sha: 'a1', short: 'a1b2c3d', author: 'Ana Ruiz', date: '2026-09-28T11:02:00+02:00', message: 'First schema model', path: f, deleted: false },
+    ]
+  },
+  objectAt: async (_p, sha) => {
+    const cols: Record<string, string> = { a1: '    note text', b2: '    note text NOT NULL', c3: '    note text NOT NULL,\n    paid_at timestamp with time zone' }
+    return `CREATE TABLE public.orders (\n    id bigserial,\n${cols[sha] ?? ''}\n);\n`
+  },
+  sampleCreate: async (folder) => {
+    await wait(300)
+    return { ...fakeProject(), root: `${folder}/liftoff-sample`, name: 'shop-sample', environments: [] }
   },
   modelStatus: async () => {
     if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'model' is part of LiftOff Pro.", 20)
