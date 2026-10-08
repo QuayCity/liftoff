@@ -95,6 +95,15 @@ impl Config {
         Ok(Config { root: root.to_path_buf(), project: file.project, environments })
     }
 
+    /// A project without liftoff.toml, for one-off CLI runs with `-url` (Flyway style).
+    pub fn adhoc(root: &Path, migrations: &str) -> Config {
+        Config {
+            root: root.to_path_buf(),
+            project: Project { name: "adhoc".into(), engine: d_engine(), migrations: migrations.into(), schemas: d_schemas(), history_table: d_table() },
+            environments: BTreeMap::new(),
+        }
+    }
+
     pub fn env(&self, name: &str) -> Result<&Environment> {
         match self.environments.get(name) {
             Some(e) => Ok(e),

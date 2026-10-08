@@ -2,11 +2,15 @@
 //! one JSON object per command on stdout with --output-type=json, logs on stderr,
 //! stable exit codes, never prompts.
 
+mod flyway_args;
+
 use clap::{Parser, Subcommand, ValueEnum};
+use flyway_args::Adhoc;
 use liftoff_core::config::{self, Config};
 use liftoff_core::runner::{self, Level, MigrateOptions};
 use liftoff_core::checks::{self, CheckOptions};
-use liftoff_core::{diff, license, Error, Result};
+use liftoff_core::config::{Environment, Role};
+use liftoff_core::{diff, flyway, license, Error, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -43,6 +47,18 @@ enum Command {
         name: Option<String>,
         #[arg(long, default_value = "postgresql")]
         engine: String,
+        /// Convert the folder's flyway.toml or flyway.conf instead of starting empty (the originals stay)
+        #[arg(long)]
+        from_flyway: bool,
+    },
+    /// Copy an environment's Flyway history into LiftOff's history table, once
+    ImportFlywayHistory {
+        /// Flyway's history table
+        #[arg(long, default_value = flyway::DEFAULT_TABLE)]
+        table: String,
+        /// Import even if applied scripts changed since they ran (stores the current files' checksums)
+        #[arg(long)]
+        accept_edited: bool,
     },
     /// Check that an environment is reachable
     #[command(alias = "testConnection")]
@@ -148,10 +164,17 @@ enum Command {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let (args, adhoc) = match flyway_args::translate(std::env::args().collect()) {
+        Ok(x) => x,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            return ExitCode::from(2);
+        }
+    };
+    let cli = Cli::parse_from(args);
     let json = cli.output_type == Output::Json;
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-    match rt.block_on(run(&cli)) {
+    match rt.block_on(run(&cli, &adhoc)) {
         Ok((value, text)) => {
             if json { println!("{}", json!({ "ok": true, "result": value })) } else if !text.is_empty() { println!("{text}") }
             ExitCode::SUCCESS
@@ -177,19 +200,33 @@ fn log(level: Level, msg: &str) {
     }
 }
 
-async fn run(cli: &Cli) -> Result<(Value, String)> {
+async fn run(cli: &Cli, adhoc: &Adhoc) -> Result<(Value, String)> {
     let root = &cli.project_dir;
-    let env = cli.environment.as_deref();
+    let env_name = cli.environment.clone().or_else(|| adhoc.url.as_ref().map(|_| "default".to_string()));
+    let env = env_name.as_deref();
     match &cli.command {
-        Command::Init { name, engine } => {
+        Command::Init { name, engine, from_flyway } => {
             let name = name.clone().unwrap_or_else(|| {
                 std::fs::canonicalize(root).ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| "project".into())
             });
+            if *from_flyway {
+                let r = flyway::convert(root, &name)?;
+                let mut text = vec![format!("Converted {} into {}", r.source, r.written.display())];
+                text.push(format!("  environments: {}", if r.environments.is_empty() { "none".into() } else { r.environments.join(", ") }));
+                text.push(format!("  migrations: {}   schemas: {}", r.migrations, r.schemas.join(", ")));
+                text.extend(r.notes.iter().map(|n| format!("  note: {n}")));
+                text.extend(r.not_converted.iter().map(|n| format!("  not converted: {n}")));
+                text.push(format!("Next, per database: liftoff -e <environment> import-flyway-history --table {}", r.flyway_table));
+                return Ok((to(&r)?, text.join("\n")));
+            }
+            if !flyway::detect(root).is_empty() {
+                eprintln!("note: this folder has a Flyway config; `liftoff init --from-flyway` converts it");
+            }
             config::init(root, &name, engine)?;
             Ok((json!({ "project": name, "path": root }), format!("Created {} in {}", config::PROJECT_FILE, root.display())))
         }
         Command::TestConnection => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             let (name, e) = cfg.pick(env)?;
             let c = liftoff_core::db::connect(&name, e).await?;
             let info = liftoff_core::db::server_info(&c).await?;
@@ -197,12 +234,12 @@ async fn run(cli: &Cli) -> Result<(Value, String)> {
             Ok((to(&info)?, text))
         }
         Command::Info => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             let infos = runner::info(&cfg, env).await?;
             Ok((to(&infos)?, info_table(&infos)))
         }
         Command::Migrate { out_of_order, target, dry_run } => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             if *dry_run {
                 license::require("dry-run", cli.license.as_deref(), Some(root))?;
             }
@@ -215,13 +252,13 @@ async fn run(cli: &Cli) -> Result<(Value, String)> {
             Ok((to(&r)?, text))
         }
         Command::Undo => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             license::require("undo", cli.license.as_deref(), Some(root))?;
             let r = runner::undo(&cfg, env, &log).await?;
             Ok((to(&r)?, String::new()))
         }
         Command::Check { drift, changes, dry_run, scratch } => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             license::require("check", cli.license.as_deref(), Some(root))?;
             let all = !(*drift || *changes || *dry_run);
             let opts = CheckOptions { drift: all || *drift, changes: all || *changes, dry_run: all || *dry_run };
@@ -247,33 +284,42 @@ async fn run(cli: &Cli) -> Result<(Value, String)> {
             }
             Ok((to(&r)?, text.join("\n")))
         }
+        Command::ImportFlywayHistory { table, accept_edited } => {
+            let cfg = load(cli, adhoc)?;
+            let r = flyway::import_history(&cfg, env, table, *accept_edited, &log).await?;
+            let mut text = vec![format!("Imported {} row(s) on {}", r.imported, r.environment)];
+            text.extend(r.skipped.iter().map(|s| format!("  skipped: {s}")));
+            text.extend(r.edited.iter().map(|s| format!("  accepted edit: {s}")));
+            text.extend(r.attention.iter().map(|s| format!("  needs attention: {s}")));
+            Ok((to(&r)?, text.join("\n")))
+        }
         Command::Validate => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             let infos = runner::validate_env(&cfg, env).await?;
             Ok((to(&infos)?, format!("{} script(s) checked; no problems", infos.len())))
         }
         Command::Baseline { version, description } => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             runner::baseline(&cfg, env, version, description, &log).await?;
             Ok((json!({ "baseline": version }), String::new()))
         }
         Command::Repair => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             let r = runner::repair(&cfg, env, &log).await?;
             Ok((to(&r)?, String::new()))
         }
         Command::Clean => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             let schemas = runner::clean(&cfg, env, &log).await?;
             Ok((json!({ "cleaned": schemas }), String::new()))
         }
         Command::MarkApplied { script } => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             runner::mark_applied(&cfg, env, script, &log).await?;
             Ok((json!({ "recorded": script }), String::new()))
         }
         Command::Add { description, repeatable, from_file } => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             let sql = match from_file {
                 Some(f) => std::fs::read_to_string(f)?,
                 None => String::new(),
@@ -282,7 +328,7 @@ async fn run(cli: &Cli) -> Result<(Value, String)> {
             Ok((json!({ "written": path }), format!("Created {}", path.display())))
         }
         Command::Capture { description, dry_run } => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             license::require("generate", cli.license.as_deref(), Some(root))?;
             let g = diff::capture(&cfg, env, description).await?;
             if *dry_run {
@@ -297,14 +343,14 @@ async fn run(cli: &Cli) -> Result<(Value, String)> {
             Ok((json!({ "written": path, "version": g.version }), hint))
         }
         Command::Diff { source, scratch } => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             license::require("diff", cli.license.as_deref(), Some(root))?;
             let changes = diff::dev_vs_migrations(&cfg, source.as_deref(), scratch.as_deref(), &log).await?;
             let text = changes.iter().map(|c| format!("{:<8} {}{}", format!("{:?}", c.kind).to_lowercase(), c.name, if c.destructive { "  (may lose data)" } else { "" })).collect::<Vec<_>>().join("\n");
             Ok((to(&changes)?, if text.is_empty() { "No differences".into() } else { text }))
         }
         Command::Generate { description, source, scratch, skip_destructive, dry_run, record_on_dev, undo } => {
-            let cfg = Config::load(root)?;
+            let cfg = load(cli, adhoc)?;
             license::require("generate", cli.license.as_deref(), Some(root))?;
             let mut changes = diff::dev_vs_migrations(&cfg, source.as_deref(), scratch.as_deref(), &log).await?;
             if *skip_destructive {
@@ -369,4 +415,52 @@ fn truncate(s: &str, n: usize) -> String {
 
 fn to<T: serde::Serialize>(v: &T) -> Result<Value> {
     serde_json::to_value(v).map_err(|e| Error::Config(e.to_string()))
+}
+
+/// liftoff.toml with Flyway-style command-line overrides applied. With `-url` and no liftoff.toml,
+/// a project is made up on the spot, the way the Flyway CLI works without a config file.
+fn load(cli: &Cli, adhoc: &Adhoc) -> Result<Config> {
+    let root = &cli.project_dir;
+    let mut cfg = if adhoc.url.is_some() && !root.join(config::PROJECT_FILE).exists() {
+        Config::adhoc(root, adhoc.locations.as_deref().unwrap_or("sql"))
+    } else {
+        Config::load(root)?
+    };
+    if let Some(l) = &adhoc.locations {
+        cfg.project.migrations = l.clone();
+    }
+    if let Some(s) = &adhoc.schemas {
+        cfg.project.schemas = s.clone();
+    }
+    if let Some(d) = &adhoc.default_schema {
+        cfg.project.schemas.retain(|s| s != d);
+        cfg.project.schemas.insert(0, d.clone());
+    }
+    if cfg.project.schemas.is_empty() {
+        cfg.project.schemas.push("public".into());
+    }
+    if let Some(t) = &adhoc.table {
+        if t.to_lowercase().contains("flyway") {
+            return Err(Error::Config(format!(
+                "-table={t} is Flyway's history table; LiftOff keeps its own. Import it once with `liftoff import-flyway-history --table {t}`"
+            )));
+        }
+        cfg.project.history_table = t.clone();
+    }
+    if let Some(url) = &adhoc.url {
+        let url = flyway::jdbc_to_url(url)
+            .or_else(|| url.starts_with("postgres").then(|| url.clone()))
+            .ok_or_else(|| Error::Config(format!("-url={url}: LiftOff supports PostgreSQL for now")))?;
+        let name = cli.environment.clone().unwrap_or_else(|| "default".into());
+        let old = cfg.environments.get(&name).cloned();
+        let env = Environment {
+            url,
+            user: adhoc.user.clone().or_else(|| old.as_ref().and_then(|o| o.user.clone())),
+            password: adhoc.password.clone().or_else(|| old.as_ref().and_then(|o| o.password.clone())),
+            role: old.as_ref().map(|o| o.role).unwrap_or(Role::Test),
+            allow_clean: adhoc.allow_clean || old.is_some_and(|o| o.allow_clean),
+        };
+        cfg.environments.insert(name, env);
+    }
+    Ok(cfg)
 }
