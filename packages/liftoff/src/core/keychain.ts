@@ -1,11 +1,14 @@
 // Passwords in the operating system's keychain: Windows Credential Manager, macOS Keychain or the
 // Secret Service on Linux. One entry per project folder and environment.
 //
-// The keychain module is optional: where it is missing (the single-file CI build) or switched
-// off with LIFTOFF_NO_KEYRING, passwords come from the user file or environment variables.
+// The keychain module is optional: where it cannot load (a CI runner without a keychain) or is
+// switched off with LIFTOFF_NO_KEYRING, passwords come from the user file or environment variables.
 
+import { createHash } from 'node:crypto'
 import * as fs from 'node:fs'
 import { createRequire } from 'node:module'
+import * as os from 'node:os'
+import * as path from 'node:path'
 
 const SERVICE = 'liftoff'
 
@@ -20,10 +23,35 @@ function keyring(): KeyringModule | null {
     try {
       loaded = createRequire(import.meta.url)('@napi-rs/keyring') as KeyringModule
     } catch {
-      loaded = null
+      loaded = fromSingleFile()
     }
   }
   return loaded
+}
+
+/**
+ * The single-file CLI carries the keychain's native module as an embedded asset (see
+ * scripts/build-cli.mjs). Native code loads from a file, so it is written once to the user's own
+ * cache folder and checked byte for byte against the embedded copy before every load.
+ */
+function fromSingleFile(): KeyringModule | null {
+  try {
+    const sea = process.getBuiltinModule('node:sea')
+    if (!sea?.isSea()) return null
+    const bytes = Buffer.from(sea.getRawAsset('keyring.node') as ArrayBuffer)
+    const base = process.platform === 'win32' ? process.env.LOCALAPPDATA : process.env.XDG_CACHE_HOME
+    const dir = path.join(base ?? path.join(os.homedir(), '.cache'), 'liftoff')
+    const file = path.join(dir, `keyring-${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}.node`)
+    if (!fs.existsSync(file) || !bytes.equals(fs.readFileSync(file))) {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+      fs.writeFileSync(file, bytes, { mode: 0o600 })
+    }
+    const m = { exports: {} as KeyringModule }
+    process.dlopen(m, file)
+    return m.exports
+  } catch {
+    return null
+  }
 }
 
 function account(root: string, env: string): string {

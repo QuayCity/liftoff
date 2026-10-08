@@ -200,6 +200,7 @@ const fake = {
     { path: 'public/tables/customer.sql', object_type: 'tables', kind: 'added', before: null, after: 'CREATE TABLE public.customer (\n    id bigint NOT NULL\n);\n' },
   ] as ModelChange[],
   gitRejectPush: new URLSearchParams(location.search).has('rejectpush'),
+  notGit: new URLSearchParams(location.search).has('nogit'),
 }
 const fakeProject = (): Project => ({ ...fake.project, license: fake.licensed ? demoLicense : null })
 const fakeInfo = (env: string): MigrationInfo[] =>
@@ -260,6 +261,7 @@ const fakeApi: Api = {
   },
   objectHistory: async (_p, file) => {
     await wait()
+    if (fake.notGit) throw fail('LIFTOFF_GIT_NOT_A_REPOSITORY', 'fatal: not a git repository (or any of the parent directories): .git', 1)
     if (file.includes('tax')) return []
     const f = `schema-model/${file}`
     return [

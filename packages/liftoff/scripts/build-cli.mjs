@@ -1,8 +1,8 @@
 // Builds the `liftoff` command line as one file that runs without Node installed:
 //   1. esbuild bundles the CLI, the core and the database drivers into build/liftoff.cjs
 //   2. Node's single-executable support turns that into build/liftoff(.exe), for this platform
-// The keychain module is native and not included: the single file reads passwords from
-// environment variables or liftoff.user.toml, which is what CI runners use anyway.
+// The keychain's native module goes in as an embedded asset (src/core/keychain.ts loads it), so
+// passwords the desktop app saved work from the single file too.
 //
 //   node scripts/build-cli.mjs            -> build/liftoff(.exe)
 //   node scripts/build-cli.mjs --js-only  -> just build/liftoff.cjs (run with `node build/liftoff.cjs`)
@@ -31,7 +31,13 @@ if (process.argv.includes('--js-only')) process.exit(0)
 const exe = path.join(out, process.platform === 'win32' ? 'liftoff.exe' : 'liftoff')
 const blob = path.join(out, 'sea-prep.blob')
 const seaConfig = path.join(out, 'sea-config.json')
-fs.writeFileSync(seaConfig, JSON.stringify({ main: path.join(out, 'liftoff.cjs'), output: blob, disableExperimentalSEAWarning: true, useCodeCache: true }))
+// The keychain's native binary for this platform: @napi-rs/keyring-<platform>-<arch>[-abi]/*.node
+const napi = path.join(root, 'node_modules', '@napi-rs')
+const pkg = fs.readdirSync(napi).find((d) => d.startsWith(`keyring-${process.platform}-${process.arch}`))
+const native = pkg && fs.readdirSync(path.join(napi, pkg)).find((f) => f.endsWith('.node'))
+if (!native) throw new Error(`no keychain binary for ${process.platform}-${process.arch} in ${napi}`)
+const assets = { 'keyring.node': path.join(napi, pkg, native) }
+fs.writeFileSync(seaConfig, JSON.stringify({ main: path.join(out, 'liftoff.cjs'), output: blob, disableExperimentalSEAWarning: true, useCodeCache: true, assets }))
 execFileSync(process.execPath, ['--experimental-sea-config', seaConfig], { stdio: 'inherit' })
 fs.copyFileSync(process.execPath, exe)
 const postject = path.join(root, 'node_modules', 'postject', 'dist', 'cli.js')

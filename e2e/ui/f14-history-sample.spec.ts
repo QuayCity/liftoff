@@ -44,3 +44,13 @@ test('S01-H3 try the sample project from the start page', async ({ page }) => {
   await expect(page.getByText('shop-sample').first()).toBeVisible()
   checkConsole()
 })
+
+test('BUG-014: outside a git repository the history explains itself instead of showing git output', async ({ page }) => {
+  await page.goto('/?open=1&ws=Changes&nogit')
+  await page.getByRole('group', { name: 'Compare dev with' }).getByRole('button', { name: 'Schema model' }).click()
+  await page.getByRole('button', { name: 'Object history…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Object history' })
+  await expect(dialog.getByRole('region', { name: 'Commits' })).toContainText('This project is not in a git repository')
+  await expect(dialog).not.toContainText('fatal:')
+  await expect(dialog).not.toContainText('Not committed yet')
+})

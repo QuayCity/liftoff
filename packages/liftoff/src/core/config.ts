@@ -155,7 +155,14 @@ export class Config {
       ['flyway:table', table],
     ])
     const own = this.environments.get(envName)?.placeholders ?? {}
-    for (const [k, v] of [...Object.entries(this.project.placeholders), ...Object.entries(own)]) m.set(k, tryInterpolate(v))
+    for (const [k, v] of [...Object.entries(this.project.placeholders), ...Object.entries(own)]) {
+      // A value from an unset variable must fail, not land in the database as `${env.X}`.
+      try {
+        m.set(k, interpolate(v))
+      } catch (e) {
+        throw configError(`placeholder '${k}': ${e instanceof Error ? e.message : e}`)
+      }
+    }
     return m
   }
 

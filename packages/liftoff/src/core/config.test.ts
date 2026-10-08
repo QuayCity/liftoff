@@ -74,3 +74,11 @@ test('keychain round trip', { skip: !process.env.LIFTOFF_TEST_KEYCHAIN && 'write
   assert.equal(Config.load(dir).env('dev').password, 'kc-secret')
   keychainDelete(dir, 'dev')
 })
+
+test('BUG-009: a placeholder whose environment variable is not set is an error, not literal text', () => {
+  const dir = tmp()
+  init(dir, 'shop', 'postgresql')
+  fs.appendFileSync(path.join(dir, PROJECT_FILE), '\n[project.placeholders]\nsecret = "${env.LIFTOFF_TEST_UNSET_VARIABLE}"\n\n[environments.test]\nurl = "postgres://h/db"\nrole = "test"\n')
+  const cfg = Config.load(dir)
+  assert.throws(() => cfg.placeholders('test'), /placeholder 'secret': environment variable LIFTOFF_TEST_UNSET_VARIABLE is not set/)
+})

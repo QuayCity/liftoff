@@ -72,6 +72,11 @@ export function scan(dir: string): Script[] {
       version = parseVersion(parsed.version)
       if (!version) throw configError(`${f.name}: version '${parsed.version}' must be numbers separated by . or _`)
     }
+    // The history table's columns: a longer name would run the script and then fail to record it.
+    for (const [what, value, max] of [['description', parsed.description, 200], ['version', parsed.version ?? '', 50], ['file name', f.name, 1000]] as const) {
+      const n = [...value].length
+      if (n > max) throw configError(`${f.name}: the ${what} is ${n} characters; the history table holds ${max}`)
+    }
     const file = path.join(f.parentPath, f.name)
     const bytes = fs.readFileSync(file)
     let sql: string

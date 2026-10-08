@@ -11,13 +11,15 @@ import * as path from 'node:path'
 import { test } from 'node:test'
 import { translate } from '../src/cli/flyway-args.ts'
 import { pgSchemaReset, sql } from './helpers.ts'
-import { Config } from '../src/core/config.ts'
+import { Config, init, saveEnvironment } from '../src/core/config.ts'
+import { keychainDelete } from '../src/core/keychain.ts'
 
 const base = process.env.LIFTOFF_TEST_PG
 const main = path.join(import.meta.dirname, '../src/cli/main.ts')
 
-function liftoff(dir: string, args: string[], license?: string) {
+function liftoff(dir: string, args: string[], license?: string, o: { keychain?: boolean } = {}) {
   const env: NodeJS.ProcessEnv = { ...process.env, LIFTOFF_NO_KEYRING: '1' }
+  if (o.keychain) delete env.LIFTOFF_NO_KEYRING
   delete env.LIFTOFF_LICENSE
   if (license) env.LIFTOFF_LICENSE = license
   const [cmd, pre] = process.env.LIFTOFF_CLI ? [process.env.LIFTOFF_CLI, []] : [process.execPath, [main]]
@@ -45,6 +47,43 @@ test('Flyway-style arguments', () => {
   assert.throws(() => translate(a('-callbacks=db/callbacks migrate')), /does not support/)
   assert.throws(() => translate(a('-configFiles=a.conf migrate')), /--from-flyway/)
   assert.throws(() => translate(a('-locations=classpath:db migrate')))
+})
+
+test('BUG-011: a password the desktop app saved in the keychain works from the CLI', { skip: (!base || !process.env.LIFTOFF_TEST_KEYCHAIN) && 'set LIFTOFF_TEST_PG and LIFTOFF_TEST_KEYCHAIN=1' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-kc-'))
+  init(dir, 'kc', 'postgresql')
+  const u = new URL(`${base}/shop_test`)
+  const password = decodeURIComponent(u.password)
+  u.password = ''
+  assert.equal(saveEnvironment(dir, 'test', { url: u.toString(), password, role: 'test', allow_clean: false, placeholders: {} }, true, true), 'keychain')
+  try {
+    const r = liftoff(dir, ['-e', 'test', 'test-connection'], undefined, { keychain: true })
+    assert.equal(r.code, 0, r.stderr)
+  } finally {
+    keychainDelete(dir, 'test')
+  }
+})
+
+test('BUG-011: no password at all says where to put one', { skip: !base && 'set LIFTOFF_TEST_PG' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-nopw-'))
+  init(dir, 'nopw', 'postgresql')
+  const u = new URL(`${base}/shop_test`)
+  u.password = ''
+  fs.appendFileSync(path.join(dir, 'liftoff.toml'), `\n[environments.test]\nurl = "${u}"\nrole = "test"\n`)
+  const started = Date.now()
+  const r = liftoff(dir, ['-e', 'test', 'test-connection'])
+  assert.ok(Date.now() - started < 15_000, 'BUG-012: a failed connection does not keep the process alive')
+  assert.equal(r.code, 10, r.stderr)
+  assert.match(r.stderr, /no password for 'test'.*LIFTOFF_ENV_TEST_PASSWORD/s)
+})
+
+test('BUG-013: an unreachable server says why', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-down-'))
+  init(dir, 'down', 'postgresql')
+  fs.appendFileSync(path.join(dir, 'liftoff.toml'), '\n[environments.down]\nurl = "postgres://postgres:x@localhost:1/none"\nrole = "test"\n')
+  const r = liftoff(dir, ['-e', 'down', 'test-connection'])
+  assert.equal(r.code, 10, r.stderr)
+  assert.match(r.stderr, /could not connect to 'down': .*(refused|ECONNREFUSED)/i)
 })
 
 test('the CI contract', { skip: !base && 'set LIFTOFF_TEST_PG' }, async () => {

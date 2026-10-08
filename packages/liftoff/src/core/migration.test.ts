@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
@@ -10,6 +11,7 @@ import {
   nextVersion,
   parseName,
   parseVersion,
+  scan,
   splitBatches,
   splitStatements,
   type Script,
@@ -92,4 +94,14 @@ test('statements split on ; outside quotes, dollar quotes and comments', () => {
   assert.ok(s[1].includes('$body$ select 1; $body$'))
   assert.ok(needsNoTransaction(s[2]))
   assert.ok(!needsNoTransaction(s[0]))
+})
+
+test("BUG-010: names that do not fit the history table are refused before anything runs", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-long-'))
+  fs.writeFileSync(path.join(dir, `V1__${'a'.repeat(201)}.sql`), 'select 1;\n')
+  assert.throws(() => scan(dir), /the description is 201 characters; the history table holds 200/)
+  fs.rmSync(dir, { recursive: true })
+  fs.mkdirSync(dir)
+  fs.writeFileSync(path.join(dir, `V${'1'.repeat(51)}__x.sql`), 'select 1;\n')
+  assert.throws(() => scan(dir), /the version is 51 characters; the history table holds 50/)
 })

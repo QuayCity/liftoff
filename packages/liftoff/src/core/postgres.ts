@@ -81,6 +81,11 @@ export function describePgError(e: unknown): string {
     const d = e as Error & { severity?: string; hint?: string }
     return `${d.severity}: ${d.message}${d.hint ? ` (hint: ${d.hint})` : ''}`
   }
+  // `localhost` is tried on IPv6 and IPv4; when both fail Node reports an AggregateError whose own
+  // message is empty.
+  if (e instanceof AggregateError && !e.message) {
+    return [...new Set(e.errors.map((x) => (x instanceof Error ? x.message : String(x))))].join('; ')
+  }
   return e instanceof Error ? e.message : String(e)
 }
 
@@ -121,7 +126,13 @@ export class PgConn implements Conn {
     const attempt = async (ssl: pg.ClientConfig['ssl']) => {
       const client = new pg.Client({ ...base, ssl })
       client.on('error', () => {}) // a dropped connection surfaces on the next query
-      await client.connect()
+      try {
+        await client.connect()
+      } catch (e) {
+        // A half-open socket would keep the process alive until the server gives up (a minute).
+        await client.end().catch(() => {})
+        throw e
+      }
       return client
     }
     try {
@@ -134,6 +145,10 @@ export class PgConn implements Conn {
         throw e
       }
     } catch (e) {
+      if (base.password === undefined && /password must be a string/i.test(describePgError(e))) {
+        const variable = `LIFTOFF_ENV_${envName.toUpperCase().replaceAll('-', '_')}_PASSWORD`
+        throw connectError(envName, `no password for '${envName}': save one in the desktop app, put it in liftoff.user.toml, or set ${variable}`)
+      }
       throw connectError(envName, describePgError(e))
     }
   }

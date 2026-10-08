@@ -201,6 +201,8 @@ export async function migrate(cfg: Config, envName: string | undefined, opts: Mi
     if (!target) throw configError(`target '${opts.target}' must be numbers separated by . or _`)
   }
   const scripts = scan(cfg.migrationsDir())
+  // Placeholder values are checked before anything runs (an unset variable fails here).
+  if (cfg.usesPlaceholders()) cfg.placeholders(cfg.pick(envName)[0])
   return withEnv(cfg, envName, async (c, name, env) => {
     const s = await c.serverInfo()
     log('info', `Connected to ${name} (${s.database} as ${s.user}, ${c.engine} ${s.version})`)

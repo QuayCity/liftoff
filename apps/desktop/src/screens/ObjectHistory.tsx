@@ -2,7 +2,7 @@
 // each one changed. Straight from git, following renames.
 import { FileClock, Search } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { api, errorText, type ObjectCommit, type Project } from '../api'
+import { api, errorText, isErrorReport, type ObjectCommit, type Project } from '../api'
 import { Button, cx, Input } from '../ui/controls'
 import { DiffView } from '../ui/diffview'
 import { EmptyState, InlineAlert, Spinner } from '../ui/display'
@@ -18,6 +18,7 @@ export function ObjectHistory({ open, onOpenChange, project }: { open: boolean; 
   const [at, setAt] = useState(0)
   const [versions, setVersions] = useState<{ before: string; after: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notGit, setNotGit] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -38,7 +39,8 @@ export function ObjectHistory({ open, onOpenChange, project }: { open: boolean; 
     setAt(0)
     api.objectHistory(project.root, file).then(setCommits, (e) => {
       setCommits([])
-      setError(errorText(e))
+      if (isErrorReport(e) && e.code === 'LIFTOFF_GIT_NOT_A_REPOSITORY') setNotGit(true)
+      else setError(errorText(e))
     })
   }, [file, project.root])
 
@@ -86,7 +88,9 @@ export function ObjectHistory({ open, onOpenChange, project }: { open: boolean; 
             )}
           </section>
           <section aria-label="Commits" className="min-h-0 overflow-auto rounded-md border border-border">
-            {commits === null ? <div className="p-2"><Spinner label="Loading commits" /></div> : commits.length === 0 ? (
+            {notGit ? (
+              <p className="p-3 text-sm text-muted">This project is not in a git repository, so its objects have no history yet. Commit the schema-model folder to start one.</p>
+            ) : commits === null ? <div className="p-2"><Spinner label="Loading commits" /></div> : commits.length === 0 ? (
               <p className="p-3 text-sm text-muted">Not committed yet: this object has no history in git.</p>
             ) : (
               <ol>
