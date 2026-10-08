@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api, inTauri, type Project } from './api'
 import { Changes } from './screens/Changes'
 import { Environments } from './screens/Environments'
 import { Home } from './screens/Home'
 import { Settings } from './screens/Settings'
-import { Later } from './screens/Later'
 import { Scripts } from './screens/Scripts'
 import { Commit } from './screens/Commit'
+import { Pipelines } from './screens/Pipelines'
 import { StatusBar, TitleBar, workspaces, type Workspace } from './ui/shell'
 
 const params = new URLSearchParams(location.search)
@@ -25,7 +25,25 @@ export function App() {
 type View = Workspace | 'Settings'
 
 function ProjectShell({ project, onProject, onClose }: { project: Project; onProject: (p: Project) => void; onClose: () => void }) {
-  const [view, setView] = useState<View>((params.get('ws') as View) || 'Environments')
+  // The last workspace per project comes back on the next open (per computer, best effort).
+  const remembered = (() => {
+    try {
+      return localStorage.getItem(`liftoff:view:${project.root}`) as View | null
+    } catch {
+      return null
+    }
+  })()
+  const [view, setViewRaw] = useState<View>((params.get('ws') as View) || remembered || 'Environments')
+  const [settingsDirty, setSettingsDirty] = useState(false)
+  const setView = useCallback((v: View) => {
+    if (settingsDirty && v !== 'Settings' && !window.confirm('Leave Settings without saving your changes?')) return
+    setViewRaw(v)
+    try {
+      localStorage.setItem(`liftoff:view:${project.root}`, v)
+    } catch {
+      /* storage unavailable: the app just starts on Environments next time */
+    }
+  }, [settingsDirty, project.root])
 
   // Ctrl/Cmd + 1..5 switches workspace.
   useEffect(() => {
@@ -38,7 +56,7 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [setView])
 
   const lic = project.license
   const licence = lic
@@ -59,10 +77,10 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
         <h1 className="sr-only">{`${view}: ${project.name}`}</h1>
         {view === 'Environments' && <Environments project={project} onProject={onProject} onSettings={() => setView('Settings')} />}
         {view === 'Changes' && <Changes project={project} onProject={onProject} onSettings={() => setView('Settings')} onEnvironments={() => setView('Environments')} />}
-        {view === 'Settings' && <Settings project={project} onProject={onProject} />}
+        {view === 'Settings' && <Settings project={project} onProject={onProject} onDirty={setSettingsDirty} />}
         {view === 'Scripts' && <Scripts project={project} />}
         {view === 'Commit' && <Commit project={project} />}
-        {view === 'Pipelines' && <Later what={view} />}
+        {view === 'Pipelines' && <Pipelines project={project} />}
       </main>
       <StatusBar path={project.root} engine={`PostgreSQL · ${project.schemas.join(', ')}`} licence={licence} />
     </div>

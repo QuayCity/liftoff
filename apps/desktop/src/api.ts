@@ -9,8 +9,10 @@ export type ErrorReport = { code: string; exit_code: number; message: string }
 export type EnvView = { name: string; role: Role; url: string; user: string | null; has_password: boolean; allow_clean: boolean }
 export type License = { org: string; seats: number; edition: string; expires: string; features: string[] }
 export type LicenseStatus = { license: License; grace_days_left: number | null; source: string }
+export type Filter = { action: 'include' | 'exclude'; object: string; pattern: string }
+export type ProjectSettings = { name: string; engine: string; migrations: string; schemas: string[]; history_table: string; filters: Filter[] }
 export type Project = {
-  root: string; name: string; engine: string; schemas: string[]; environments: EnvView[]
+  root: string; name: string; engine: string; schemas: string[]; migrations: string; history_table: string; filters: Filter[]; environments: EnvView[]
   license: LicenseStatus | null; license_error: string | null
 }
 export type Recent = { name: string; path: string; exists: boolean }
@@ -35,6 +37,8 @@ export type ScriptView = { kind: 'versioned' | 'repeatable' | 'undo' | 'baseline
 export type ConvertReport = { source: string; written: string; environments: string[]; migrations: string; schemas: string[]; flyway_table: string; not_converted: string[]; notes: string[] }
 export type HistoryImport = { environment: string; imported: number; skipped: string[]; edited: string[]; attention: string[] }
 export type GitStatus = { branch: string | null; upstream: string | null; ahead: number; behind: number; files: { path: string; change: string }[] }
+export type ModelChange = { path: string; object_type: string; kind: 'added' | 'changed' | 'removed'; before: string | null; after: string | null }
+export type CiOptions = { stages: string[]; branch: string; checks: boolean; install: string }
 export type RepairReport = { removed_failed: string[]; realigned: string[]; forgotten: string[] }
 
 export const inTauri = '__TAURI_INTERNALS__' in window
@@ -56,6 +60,11 @@ type Api = {
   migrationsInfo(path: string, env: string): Promise<MigrationInfo[]>
   migrate(path: string, env: string, outOfOrder: boolean, allowNonEmpty?: boolean): Promise<MigrateResult>
   saveReport(path: string, report: CheckReport): Promise<string | null>
+  modelStatus(path: string): Promise<ModelChange[]>
+  modelSave(path: string, changes: ModelChange[]): Promise<number>
+  projectSave(path: string, project: ProjectSettings): Promise<Project>
+  ciWorkflow(path: string, options: CiOptions): Promise<string>
+  ciWrite(path: string, yaml: string, overwrite: boolean): Promise<string>
   gitStatus(path: string): Promise<GitStatus>
   gitDiff(path: string, file: string): Promise<string>
   gitCommit(path: string, files: string[], message: string): Promise<string>
@@ -95,6 +104,11 @@ const real: Api = {
   envTestDraft: (env) => invoke('env_test_draft', { env }),
   migrationsInfo: (path, env) => invoke('migrations_info', { path, env }),
   migrate: (path, env, outOfOrder, allowNonEmpty = false) => invoke('migrate', { path, env, outOfOrder, allowNonEmpty }),
+  modelStatus: (path) => invoke('model_status', { path }),
+  modelSave: (path, changes) => invoke('model_save', { path, changes }),
+  projectSave: (path, project) => invoke('project_save', { path, project }),
+  ciWorkflow: (path, options) => invoke('ci_workflow', { path, options }),
+  ciWrite: (path, yaml, overwrite) => invoke('ci_write', { path, yaml, overwrite }),
   gitStatus: (path) => invoke('git_status', { path }),
   gitDiff: (path, file) => invoke('git_diff', { path, file }),
   gitCommit: (path, files, message) => invoke('git_commit', { path, files, message }),
@@ -135,7 +149,7 @@ const demoLicense: LicenseStatus = { license: { org: 'Demo Org', seats: 5, editi
 const fake = {
   licensed: new URLSearchParams(location.search).get('licensed') !== '0',
   project: {
-    root: 'C:/repos/shop-db', name: 'shop-db', engine: 'postgresql', schemas: ['public'], license: null, license_error: null,
+    root: 'C:/repos/shop-db', name: 'shop-db', engine: 'postgresql', schemas: ['public'], migrations: 'migrations', history_table: 'liftoff_schema_history', filters: [], license: null, license_error: null,
     environments: [
       { name: 'local', role: 'dev', url: 'postgres://me@localhost:5432/shop', user: null, has_password: true, allow_clean: false },
       { name: 'scratch', role: 'scratch', url: 'postgres://me@localhost:5432/shop_scratch', user: null, has_password: true, allow_clean: false },
@@ -153,6 +167,10 @@ const fake = {
     { path: 'notes/todo.md', change: 'untracked' },
   ],
   gitAhead: 0,
+  modelChanges: [
+    { path: 'public/tables/orders.sql', object_type: 'tables', kind: 'changed', before: 'CREATE TABLE public.orders (\n    id bigserial,\n    note text\n);\n', after: 'CREATE TABLE public.orders (\n    id bigserial,\n    note text,\n    paid_at timestamp with time zone\n);\n' },
+    { path: 'public/tables/customer.sql', object_type: 'tables', kind: 'added', before: null, after: 'CREATE TABLE public.customer (\n    id bigint NOT NULL\n);\n' },
+  ] as ModelChange[],
   gitRejectPush: new URLSearchParams(location.search).has('rejectpush'),
 }
 const fakeProject = (): Project => ({ ...fake.project, license: fake.licensed ? demoLicense : null })
@@ -208,6 +226,22 @@ const fakeApi: Api = {
     if (env === 'production') throw fail('LIFTOFF_CONNECT', "could not connect to 'production': timed out", 10)
     return fakeInfo(env)
   },
+  modelStatus: async () => {
+    if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'model' is part of LiftOff Pro.", 20)
+    await wait(300)
+    return fake.modelChanges
+  },
+  modelSave: async (_p, changes) => {
+    fake.modelChanges = fake.modelChanges.filter((c) => !changes.some((x) => x.path === c.path))
+    return changes.length
+  },
+  projectSave: async (_p, s) => {
+    if (!s.name.trim()) throw fail('LIFTOFF_CONFIG', 'a project needs a name', 2)
+    fake.project = { ...fake.project, ...s }
+    return fakeProject()
+  },
+  ciWorkflow: async (_p, o) => `# Written by LiftOff.\nname: Database migrations\non:\n  push:\n    branches: ['${o.branch}']\njobs:\n` + o.stages.map((s, i) => `  ${s}:\n    runs-on: ubuntu-latest\n${i ? `    needs: ${o.stages[i - 1]}\n` : ''}    steps:\n      - run: liftoff --environment '${s}' migrate\n`).join(''),
+  ciWrite: async (path) => `${path}/.github/workflows/liftoff.yml`,
   gitStatus: async () => {
     await wait()
     return { branch: 'main', upstream: 'origin/main', ahead: fake.gitAhead, behind: 0, files: fake.gitFiles }

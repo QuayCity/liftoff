@@ -20,6 +20,57 @@ pub struct Project {
     pub schemas: Vec<String>,
     #[serde(default = "d_table")]
     pub history_table: String,
+    /// comparison filters (S16), evaluated in order; the last matching rule wins, default include
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filters: Vec<Filter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Filter {
+    pub action: FilterAction,
+    /// table, view, function, type, sequence, trigger, extension, or any
+    #[serde(default = "d_any")]
+    pub object: String,
+    /// glob on the name (`audit_*`), or on `schema.name` when it contains a dot
+    pub pattern: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FilterAction {
+    Include,
+    Exclude,
+}
+
+fn d_any() -> String { "any".into() }
+
+/// `*` any run of characters, `?` one character; case-sensitive like Postgres names.
+pub fn glob(pattern: &str, text: &str) -> bool {
+    fn go(p: &[char], t: &[char]) -> bool {
+        match (p.first(), t.first()) {
+            (None, None) => true,
+            (Some('*'), _) => go(&p[1..], t) || (!t.is_empty() && go(p, &t[1..])),
+            (Some('?'), Some(_)) => go(&p[1..], &t[1..]),
+            (Some(a), Some(b)) if a == b => go(&p[1..], &t[1..]),
+            _ => false,
+        }
+    }
+    go(&pattern.chars().collect::<Vec<_>>(), &text.chars().collect::<Vec<_>>())
+}
+
+impl Project {
+    /// Whether an object takes part in comparisons.
+    pub fn compares(&self, object: &str, schema: &str, name: &str) -> bool {
+        let mut keep = true;
+        for f in &self.filters {
+            let kind_matches = f.object == "any" || f.object == object;
+            let target = if f.pattern.contains('.') { format!("{schema}.{name}") } else { name.to_string() };
+            if kind_matches && glob(&f.pattern, &target) {
+                keep = f.action == FilterAction::Include;
+            }
+        }
+        keep
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,7 +150,7 @@ impl Config {
     pub fn adhoc(root: &Path, migrations: &str) -> Config {
         Config {
             root: root.to_path_buf(),
-            project: Project { name: "adhoc".into(), engine: d_engine(), migrations: migrations.into(), schemas: d_schemas(), history_table: d_table() },
+            project: Project { name: "adhoc".into(), engine: d_engine(), migrations: migrations.into(), schemas: d_schemas(), history_table: d_table(), filters: vec![] },
             environments: BTreeMap::new(),
         }
     }
@@ -222,6 +273,21 @@ pub enum PasswordStore {
     UserFile,
 }
 
+/// Writes the `[project]` section of liftoff.toml (S15), keeping the environments and anything else in the file.
+pub fn save_project(root: &Path, project: &Project) -> Result<()> {
+    if project.name.trim().is_empty() || project.migrations.trim().is_empty() || project.schemas.is_empty() {
+        return config("a project needs a name, a migrations folder and at least one schema");
+    }
+    if project.migrations.contains("..") || Path::new(&project.migrations).is_absolute() {
+        return config("the migrations folder must be inside the project folder");
+    }
+    let path = root.join(PROJECT_FILE);
+    let mut table = read_table(&path)?;
+    table.insert("project".into(), toml::Value::try_from(project).or_else(|e| config(e.to_string()))?);
+    std::fs::write(&path, toml::to_string_pretty(&table).or_else(|e| config(e.to_string()))?)?;
+    Ok(())
+}
+
 /// Writes one environment into the project file (shared) or the user file (private).
 /// A password goes to the OS keychain when there is one, else to the git-ignored user file;
 /// it never goes to the shared project file.
@@ -338,6 +404,21 @@ fn interpolate(s: &str, get: impl Fn(&str) -> Option<String>) -> Result<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn globs_and_filters() {
+        assert!(glob("audit_*", "audit_log") && glob("a?c", "abc") && glob("*", "") && !glob("audit_*", "orders"));
+        let mut p = Project { name: "x".into(), engine: d_engine(), migrations: d_migrations(), schemas: d_schemas(), history_table: d_table(), filters: vec![] };
+        assert!(p.compares("table", "public", "audit_log"));
+        p.filters = vec![
+            Filter { action: FilterAction::Exclude, object: "any".into(), pattern: "audit_*".into() },
+            Filter { action: FilterAction::Include, object: "table".into(), pattern: "public.audit_keep".into() },
+        ];
+        assert!(!p.compares("table", "public", "audit_log"));
+        assert!(!p.compares("view", "public", "audit_keep"), "include is for tables only");
+        assert!(p.compares("table", "public", "audit_keep"), "the last matching rule wins");
+        assert!(p.compares("table", "public", "orders"));
+    }
 
     #[test]
     fn interpolates_and_overrides() {

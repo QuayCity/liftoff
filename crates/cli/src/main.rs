@@ -10,7 +10,7 @@ use liftoff_core::config::{self, Config};
 use liftoff_core::runner::{self, Level, MigrateOptions};
 use liftoff_core::checks::{self, CheckOptions};
 use liftoff_core::config::{Environment, Role};
-use liftoff_core::{diff, flyway, license, Error, Result};
+use liftoff_core::{ci, diff, flyway, license, model, Error, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -137,6 +137,35 @@ enum Command {
         /// Write a baseline script (B…) that empty databases start from, instead of a V script
         #[arg(long)]
         as_baseline_script: bool,
+    },
+    /// Bring the schema-model folder up to date with dev: one file per object (Pro)
+    Model {
+        /// Dev environment (default: the first with role "dev")
+        #[arg(long)]
+        source: Option<String>,
+        /// List what differs instead of writing
+        #[arg(long)]
+        status: bool,
+    },
+    /// Write a CI workflow that runs the migrations
+    Ci {
+        /// Environments to deploy to, in order (repeat the flag)
+        #[arg(long = "stage", required = true)]
+        stages: Vec<String>,
+        #[arg(long, default_value = "main")]
+        branch: String,
+        /// Leave out validate and the drift check
+        #[arg(long)]
+        no_checks: bool,
+        /// Command that installs liftoff on the runner
+        #[arg(long, default_value = ci::DEFAULT_INSTALL)]
+        install: String,
+        /// Write .github/workflows/liftoff.yml (otherwise print it)
+        #[arg(long)]
+        write: bool,
+        /// Replace an existing workflow file
+        #[arg(long)]
+        force: bool,
     },
     /// Create an empty scratch database next to the dev database and save it as an environment
     CreateScratch {
@@ -349,6 +378,26 @@ async fn run(cli: &Cli, adhoc: &Adhoc) -> Result<(Value, String)> {
             };
             let path = diff::add(&cfg, *repeatable, description, &sql)?;
             Ok((json!({ "written": path }), format!("Created {}", path.display())))
+        }
+        Command::Model { source, status } => {
+            let cfg = load(cli, adhoc)?;
+            license::require("model", cli.license.as_deref(), Some(root))?;
+            let changes = model::status(&cfg, source.as_deref()).await?;
+            let list = changes.iter().map(|c| format!("{:<8} {}", format!("{:?}", c.kind).to_lowercase(), c.path)).collect::<Vec<_>>().join("\n");
+            if *status {
+                return Ok((to(&changes)?, if list.is_empty() { "The schema model is up to date".into() } else { list }));
+            }
+            let n = model::save(&cfg, &changes)?;
+            Ok((json!({ "written": n }), if n == 0 { "The schema model is up to date".into() } else { format!("{list}\nUpdated {n} file(s) in {}", model::FOLDER) }))
+        }
+        Command::Ci { stages, branch, no_checks, install, write, force } => {
+            let cfg = load(cli, adhoc)?;
+            let yaml = ci::github_actions(&cfg, &ci::CiOptions { stages: stages.clone(), branch: branch.clone(), checks: !no_checks, install: install.clone() })?;
+            if *write {
+                let path = ci::write(&cfg, &yaml, *force)?;
+                return Ok((json!({ "written": path }), format!("Wrote {}", path.display())));
+            }
+            Ok((json!({ "yaml": yaml }), yaml))
         }
         Command::CreateScratch { from, name } => {
             let cfg = load(cli, adhoc)?;

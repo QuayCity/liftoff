@@ -2,7 +2,7 @@
 import { CheckCircle2, GitCompareArrows, Lock } from 'lucide-react'
 import { Tabs } from 'radix-ui'
 import { useEffect, useRef, useState } from 'react'
-import { api, errorText, inTauri, type Change, type Generated, type Project } from '../api'
+import { api, errorText, inTauri, type Change, type Generated, type ModelChange, type Project } from '../api'
 import { Button, Checkbox, Field, Input } from '../ui/controls'
 import { ChangeList, LogConsole, type LogLine } from '../ui/data'
 import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
@@ -16,6 +16,7 @@ export function Changes({ project, onSettings, onEnvironments, onProject }: { pr
   const [changes, setChanges] = useState<Change[] | null>(null)
   const [notCompared, setNotCompared] = useState<string[]>([])
   const [creatingScratch, setCreatingScratch] = useState(false)
+  const [against, setAgainst] = useState<'scripts' | 'model'>('scripts')
   const [comparing, setComparing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -64,6 +65,9 @@ export function Changes({ project, onSettings, onEnvironments, onProject }: { pr
         </InlineAlert>
       </div>
     )
+  }
+  if (against === 'model') {
+    return <ModelChanges project={project} devName={dev.name} onAgainst={setAgainst} />
   }
   if (!scratch) {
     return (
@@ -139,6 +143,7 @@ export function Changes({ project, onSettings, onEnvironments, onProject }: { pr
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-3 border-b border-border bg-surface px-6 py-3">
+        <AgainstToggle value="scripts" onChange={setAgainst} />
         <GitCompareArrows aria-hidden className="size-4 text-muted" />
         <p className="text-sm">
           Compare <strong>{dev.name}</strong> with what your migration scripts build
@@ -263,5 +268,94 @@ function CreateScratchDialog({ open, onOpenChange, project, devName, onCreated }
         {error && <InlineAlert tone="danger" title="Not created">{error}</InlineAlert>}
       </div>
     </Dialog>
+  )
+}
+
+function AgainstToggle({ value, onChange }: { value: 'scripts' | 'model'; onChange: (v: 'scripts' | 'model') => void }) {
+  const opt = (v: 'scripts' | 'model', label: string) => (
+    <button aria-pressed={value === v} onClick={() => onChange(v)}
+      className={value === v ? 'rounded-sm bg-surface px-2 py-1 text-sm shadow-card' : 'rounded-sm px-2 py-1 text-sm text-muted hover:text-fg'}>
+      {label}
+    </button>
+  )
+  return (
+    <div role="group" aria-label="Compare dev with" className="flex rounded-md bg-surface-sunken p-0.5">
+      {opt('scripts', 'Migration scripts')}
+      {opt('model', 'Schema model')}
+    </div>
+  )
+}
+
+/** Dev against the schema-model folder: one file per object, saved for git history (S05). */
+function ModelChanges({ project, devName, onAgainst }: { project: Project; devName: string; onAgainst: (v: 'scripts' | 'model') => void }) {
+  const toast = useToast()
+  const [changes, setChanges] = useState<ModelChange[] | null>(null)
+  const [busy, setBusy] = useState<'compare' | 'save' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [active, setActive] = useState<string | undefined>()
+
+  const compare = async () => {
+    setBusy('compare')
+    setError(null)
+    try {
+      const c = await api.modelStatus(project.root)
+      setChanges(c)
+      setSelected(new Set(c.map((x) => x.path)))
+      setActive(c[0]?.path)
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const save = async () => {
+    const chosen = (changes ?? []).filter((c) => selected.has(c.path))
+    setBusy('save')
+    try {
+      const n = await api.modelSave(project.root, chosen)
+      toast({ tone: 'success', title: `Saved ${n} file${n === 1 ? '' : 's'} to ${project.root}/schema-model` })
+      await compare()
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const current = changes?.find((c) => c.path === active)
+  const label = (t: string) => t.charAt(0).toUpperCase() + t.slice(1).replaceAll('-', ' ')
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-3 border-b border-border bg-surface px-6 py-3">
+        <AgainstToggle value="model" onChange={onAgainst} />
+        <p className="text-sm">Compare <strong>{devName}</strong> with the schema-model folder</p>
+        <span className="flex-1" />
+        <Button variant="primary" loading={busy === 'compare'} disabled={!!busy} onClick={compare}>{changes ? 'Compare again' : 'Compare'}</Button>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
+        {error && <InlineAlert tone="danger" title="Comparison failed">{error}</InlineAlert>}
+        {changes === null && !error && <Card><EmptyState icon={GitCompareArrows} text="The schema model keeps one file per object in git, so every table, view and function has its own history. Compare to see what dev has that the files do not." /></Card>}
+        {changes?.length === 0 && <Card><EmptyState icon={CheckCircle2} text={`The schema model matches ${devName}.`} /></Card>}
+        {changes && changes.length > 0 && (
+          <>
+            <div className="grid min-h-0 flex-1 grid-cols-[minmax(260px,1fr)_2fr] gap-4">
+              <Card className="overflow-auto">
+                <ChangeList changes={changes.map((c) => ({ id: c.path, type: label(c.object_type), name: c.path.split('/').slice(-1)[0].replace(/\.sql$/, ''), kind: c.kind }))}
+                  selected={selected} onSelectedChange={setSelected} activeId={active} onActivate={(c) => setActive(c.id)} />
+              </Card>
+              <div className="min-h-0 overflow-auto">
+                {current && <DiffView before={current.before} after={current.after} beforeLabel="In the model" afterLabel={`In ${devName}`} />}
+              </div>
+            </div>
+            <div className="flex items-center gap-3 border-t border-border pt-4">
+              <span className="text-sm text-muted">{selected.size} of {changes.length} selected</span>
+              <span className="flex-1" />
+              <Button variant="primary" disabled={selected.size === 0 || !!busy} loading={busy === 'save'} onClick={save}>Save to model</Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   )
 }

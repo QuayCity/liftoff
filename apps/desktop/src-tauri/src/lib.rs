@@ -33,6 +33,9 @@ struct ProjectView {
     name: String,
     engine: String,
     schemas: Vec<String>,
+    migrations: String,
+    history_table: String,
+    filters: Vec<config::Filter>,
     environments: Vec<EnvView>,
     license: Option<license::Status>,
     license_error: Option<String>,
@@ -60,6 +63,9 @@ fn view(cfg: &Config) -> ProjectView {
         name: cfg.project.name.clone(),
         engine: cfg.project.engine.clone(),
         schemas: cfg.project.schemas.clone(),
+        migrations: cfg.project.migrations.clone(),
+        history_table: cfg.project.history_table.clone(),
+        filters: cfg.project.filters.clone(),
         environments: cfg
             .environments
             .iter()
@@ -365,6 +371,38 @@ async fn git_pull(path: String) -> R<()> {
     liftoff_core::git::pull(Path::new(&path)).map_err(rep)
 }
 
+/* ---------- S05 schema model, S15/S16 settings, S17 CI ---------- */
+
+#[tauri::command]
+async fn model_status(path: String) -> R<Vec<liftoff_core::model::ModelChange>> {
+    let cfg = load(&path)?;
+    license::require("model", None, Some(&cfg.root)).map_err(rep)?;
+    liftoff_core::model::status(&cfg, None).await.map_err(rep)
+}
+
+#[tauri::command]
+fn model_save(path: String, changes: Vec<liftoff_core::model::ModelChange>) -> R<usize> {
+    let cfg = load(&path)?;
+    license::require("model", None, Some(&cfg.root)).map_err(rep)?;
+    liftoff_core::model::save(&cfg, &changes).map_err(rep)
+}
+
+#[tauri::command]
+fn project_save(path: String, project: config::Project) -> R<ProjectView> {
+    config::save_project(Path::new(&path), &project).map_err(rep)?;
+    Ok(view(&load(&path)?))
+}
+
+#[tauri::command]
+fn ci_workflow(path: String, options: liftoff_core::ci::CiOptions) -> R<String> {
+    liftoff_core::ci::github_actions(&load(&path)?, &options).map_err(rep)
+}
+
+#[tauri::command]
+fn ci_write(path: String, yaml: String, overwrite: bool) -> R<PathBuf> {
+    liftoff_core::ci::write(&load(&path)?, &yaml, overwrite).map_err(rep)
+}
+
 /* ---------- licence ---------- */
 
 #[tauri::command]
@@ -405,6 +443,11 @@ pub fn run() {
             scratch_create,
             report_save,
             git_status,
+            model_status,
+            model_save,
+            project_save,
+            ci_workflow,
+            ci_write,
             git_diff,
             git_commit,
             git_push,

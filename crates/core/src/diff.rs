@@ -444,7 +444,7 @@ fn normalize_serial(c: &mut Column) {
 
 /* ---------- DDL text ---------- */
 
-fn qk(k: &Key) -> String {
+pub(crate) fn qk(k: &Key) -> String {
     format!("{}.{}", q(&k.0), q(&k.1))
 }
 
@@ -482,7 +482,7 @@ fn add_constraint(t: &str, c: &Constraint) -> Step {
 }
 
 /// The whole table as one readable block: for the side-by-side view.
-fn table_ddl(k: &Key, tb: &Table) -> String {
+pub(crate) fn table_ddl(k: &Key, tb: &Table) -> String {
     let t = qk(k);
     let mut out = vec![create_table(&t, tb)];
     out.extend(tb.constraints.iter().map(|c| add_constraint(&t, c).sql));
@@ -490,7 +490,7 @@ fn table_ddl(k: &Key, tb: &Table) -> String {
     out.join("\n")
 }
 
-fn view_ddl(k: &Key, v: &View) -> String {
+pub(crate) fn view_ddl(k: &Key, v: &View) -> String {
     let mut s = format!("CREATE {}VIEW {} AS\n{};", if v.materialized { "MATERIALIZED " } else { "" }, qk(k), v.def);
     for d in v.indexes.values() {
         s.push_str(&format!("\n{d};"));
@@ -502,7 +502,7 @@ fn view_drop(k: &Key, v: &View) -> String {
     format!("DROP {}VIEW IF EXISTS {} CASCADE;", if v.materialized { "MATERIALIZED " } else { "" }, qk(k))
 }
 
-fn domain_ddl(k: &Key, d: &Domain) -> String {
+pub(crate) fn domain_ddl(k: &Key, d: &Domain) -> String {
     let mut s = format!("CREATE DOMAIN {} AS {}", qk(k), d.base);
     if let Some(def) = &d.default {
         s.push_str(&format!(" DEFAULT {def}"));
@@ -516,7 +516,7 @@ fn domain_ddl(k: &Key, d: &Domain) -> String {
     s + ";"
 }
 
-fn grant_sql(g: &Grant, revoke: bool) -> String {
+pub(crate) fn grant_sql(g: &Grant, revoke: bool) -> String {
     if revoke {
         format!("REVOKE {} ON {} FROM {};", g.privilege, g.object, g.grantee)
     } else {
@@ -524,7 +524,7 @@ fn grant_sql(g: &Grant, revoke: bool) -> String {
     }
 }
 
-fn comment_sql(object: &str, text: Option<&String>) -> String {
+pub(crate) fn comment_sql(object: &str, text: Option<&String>) -> String {
     match text {
         Some(t) => format!("COMMENT ON {object} IS {};", lit(t)),
         None => format!("COMMENT ON {object} IS NULL;"),
@@ -539,7 +539,7 @@ fn object_exists(m: &Model, object: &str) -> bool {
     object.strip_prefix("TABLE ").is_some_and(|rest| m.objects.contains(&format!("VIEW {rest}")) || m.objects.contains(&format!("MATERIALIZED VIEW {rest}")))
 }
 
-fn enum_ddl(k: &Key, labels: &[String]) -> String {
+pub(crate) fn enum_ddl(k: &Key, labels: &[String]) -> String {
     format!("CREATE TYPE {} AS ENUM ({});", qk(k), labels.iter().map(|l| lit(l)).collect::<Vec<_>>().join(", "))
 }
 
@@ -550,7 +550,7 @@ fn sequence_clauses(s: &Sequence) -> String {
     )
 }
 
-fn sequence_ddl(k: &Key, s: &Sequence) -> String {
+pub(crate) fn sequence_ddl(k: &Key, s: &Sequence) -> String {
     format!("CREATE SEQUENCE {} {} START WITH {};", qk(k), sequence_clauses(s), s.start)
 }
 
@@ -1036,7 +1036,45 @@ pub(crate) async fn rebuild_scratch(cfg: &Config, name: &str, env: &crate::confi
 }
 
 pub(crate) async fn model_of(cfg: &Config, c: &Client) -> Result<Model> {
-    introspect(c, &cfg.project.schemas, &cfg.project.history_table).await
+    let mut m = introspect(c, &cfg.project.schemas, &cfg.project.history_table).await?;
+    apply_filters(&mut m, &cfg.project);
+    Ok(m)
+}
+
+/// Removes what the project's comparison filters exclude, with the triggers, grants and
+/// comments that belong to it.
+pub fn apply_filters(m: &mut Model, p: &crate::config::Project) {
+    if p.filters.is_empty() {
+        return;
+    }
+    let mut gone: Vec<String> = Vec::new();
+    let mut drop_names = |kind: &[&str], k: &Key| {
+        for w in kind {
+            gone.push(format!("{w} {}", qk(k)));
+        }
+    };
+    m.tables.retain(|k, _| p.compares("table", &k.0, &k.1) || { drop_names(&["TABLE"], k); false });
+    m.views.retain(|k, _| p.compares("view", &k.0, &k.1) || { drop_names(&["TABLE", "VIEW", "MATERIALIZED VIEW"], k); false });
+    m.sequences.retain(|k, _| p.compares("sequence", &k.0, &k.1) || { drop_names(&["SEQUENCE"], k); false });
+    m.enums.retain(|k, _| p.compares("type", &k.0, &k.1) || { drop_names(&["TYPE"], k); false });
+    m.domains.retain(|k, _| p.compares("type", &k.0, &k.1) || { drop_names(&["DOMAIN"], k); false });
+    m.functions.retain(|k, f| {
+        p.compares("function", &k.0, &f.name) || {
+            gone.push(format!("{} {}.{}({})", if f.procedure { "PROCEDURE" } else { "FUNCTION" }, q(&k.0), q(&f.name), f.args));
+            false
+        }
+    });
+    m.extensions.retain(|name, schema| p.compares("extension", schema, name));
+    let tables = &m.tables;
+    let views = &m.views;
+    m.triggers.retain(|(s, t, name), _| {
+        let owner = (s.clone(), t.clone());
+        (tables.contains_key(&owner) || views.contains_key(&owner)) && p.compares("trigger", s, name)
+    });
+    let belongs = |object: &str| gone.iter().any(|g| object == g || object.starts_with(&format!("COLUMN {}.", g.split_once(' ').map(|x| x.1).unwrap_or(""))));
+    m.grants.retain(|g| !belongs(&g.object));
+    m.comments.retain(|o, _| !belongs(o));
+    m.objects.retain(|o| !belongs(o));
 }
 
 #[derive(Debug, Serialize)]

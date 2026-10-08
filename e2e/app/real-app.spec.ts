@@ -190,6 +190,19 @@ test('F07-N2 a database with tables but no history asks for a baseline instead o
   expect(psql('shop_test', "select type from liftoff_schema_history")).toBe('BASELINE')
 })
 
+test('F02-H1 save dev into the schema model: one file per object', async () => {
+  test.skip(!hasLicense, 'needs ~/.liftoff/dev-license.txt')
+  await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Changes' }).click()
+  await page.getByRole('group', { name: 'Compare dev with' }).getByRole('button', { name: 'Schema model' }).click()
+  await page.getByRole('button', { name: 'Compare' }).click()
+  await expect(page.getByRole('treeitem', { name: 'Added customers' })).toBeVisible({ timeout: 60_000 })
+  await page.getByRole('button', { name: 'Save to model' }).click()
+  await expect(page.getByText(/^Saved \d+ files? to .*schema-model$/)).toBeVisible()
+  const file = path.join(project, 'schema-model/public/tables/customers.sql')
+  expect(fs.readFileSync(file, 'utf8')).toContain('CREATE TABLE public.customers')
+  await expect(page.getByText('The schema model matches dev.')).toBeVisible()
+})
+
 test('F06-H1 commit the migration scripts with real git', async () => {
   const git = (...args: string[]) => execFileSync('git', args, { cwd: project, encoding: 'utf8' }).trim()
   git('init', '-b', 'main')

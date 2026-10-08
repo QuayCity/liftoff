@@ -6,7 +6,8 @@
 use liftoff_core::config::{self, Config, Environment, Role};
 use liftoff_core::runner::{self, Level, MigrateOptions, State};
 use liftoff_core::checks::{self, CheckOptions};
-use liftoff_core::{db, diff, flyway, Error};
+use liftoff_core::config::{Filter, FilterAction};
+use liftoff_core::{db, diff, flyway, model, Error};
 use std::path::{Path, PathBuf};
 
 fn quiet(_: Level, _: &str) {}
@@ -274,6 +275,31 @@ async fn full_slice() {
     assert_eq!(reloaded.env("scratch2").unwrap().role, Role::Scratch);
     assert!(diff::create_scratch(&solo, None, "scratch3").await.unwrap_err().to_string().contains("already exists"));
     admin.batch_execute("DROP DATABASE shop_dev_scratch").await.unwrap();
+
+    // 11. Comparison filters: an excluded table (and its grants and comments) is not compared.
+    let dv = db::connect("dev", cfg.env("dev").unwrap()).await.unwrap();
+    dv.batch_execute("create table audit_log (id int); comment on table audit_log is 'noise'; grant select on audit_log to liftoff_reader;").await.unwrap();
+    let mut filtered = cfg.clone();
+    filtered.project.filters = vec![Filter { action: FilterAction::Exclude, object: "table".into(), pattern: "audit_*".into() }];
+    let cmp = diff::dev_vs_migrations(&filtered, None, None, &quiet).await.unwrap();
+    assert!(cmp.changes.iter().all(|c| !c.name.contains("audit_log")), "{:#?}", cmp.changes.iter().map(|c| &c.id).collect::<Vec<_>>());
+    let unfiltered = diff::dev_vs_migrations(&cfg, None, None, &quiet).await.unwrap();
+    assert!(unfiltered.changes.iter().any(|c| c.id == "table:public.audit_log"));
+    dv.batch_execute("drop table audit_log").await.unwrap();
+
+    // 12. Schema model: save everything from dev, then only real changes show.
+    let first = model::status(&cfg, None).await.unwrap();
+    assert!(first.iter().any(|c| c.path == "public/tables/orders.sql") && first.iter().any(|c| c.path == "extensions/pgcrypto.sql"), "{:#?}", first.iter().map(|c| &c.path).collect::<Vec<_>>());
+    model::save(&cfg, &first).unwrap();
+    assert!(model::status(&cfg, None).await.unwrap().is_empty(), "nothing differs right after saving");
+    let orders = std::fs::read_to_string(dir.join("schema-model/public/tables/orders.sql")).unwrap();
+    assert!(orders.contains("CREATE TABLE public.orders") && orders.contains("GRANT SELECT ON TABLE public.orders TO liftoff_reader"), "{orders}");
+    dv.batch_execute("alter table orders add column shipped_at timestamptz").await.unwrap();
+    let next = model::status(&cfg, None).await.unwrap();
+    assert_eq!(next.iter().map(|c| (c.path.as_str(), c.kind)).collect::<Vec<_>>(), [("public/tables/orders.sql", diff::ChangeKind::Changed)]);
+    assert!(next[0].after.as_deref().unwrap().contains("shipped_at"));
+    assert!(model::save(&cfg, &[model::ModelChange { path: "../escape.sql".into(), object_type: "x".into(), kind: diff::ChangeKind::Added, before: None, after: Some("x".into()) }]).is_err());
+    dv.batch_execute("alter table orders drop column shipped_at").await.unwrap();
 
     // 7. Refuses to rebuild a non-scratch database.
     let err = diff::dev_vs_migrations(&cfg, Some("dev"), Some("test"), &quiet).await.unwrap_err();
