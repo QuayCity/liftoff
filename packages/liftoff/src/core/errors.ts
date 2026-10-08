@@ -40,7 +40,17 @@ export const configError = (msg: string) => new LiftoffError('LIFTOFF_CONFIG', 2
 export const connectError = (env: string, msg: string) => new LiftoffError('LIFTOFF_CONNECT', 10, `could not connect to '${env}': ${msg}`)
 export const validateError = (msg: string) => new LiftoffError('LIFTOFF_VALIDATE', 12, msg)
 export const licenseError = (msg: string) => new LiftoffError('LIFTOFF_LICENSE', 20, msg)
-export const dbError = (msg: string) => new LiftoffError('LIFTOFF_DB', 1, `database error: ${msg}`)
+/** A database refused a statement. `detail` is its own wording, e.g. `ERROR: relation "x" does not exist`. */
+export class DbError extends LiftoffError {
+  readonly detail: string
+  /** PostgreSQL SQLSTATE (`23505`) or SQL Server error number (`2714`), when there is one */
+  readonly dbCode: string | undefined
+  constructor(detail: string, dbCode?: string) {
+    super('LIFTOFF_DB', 1, `database error: ${detail}`)
+    this.detail = detail
+    this.dbCode = dbCode
+  }
+}
 
 export class MigrationError extends LiftoffError {
   readonly script: string
