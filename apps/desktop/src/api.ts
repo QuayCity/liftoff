@@ -31,6 +31,8 @@ export type Generated = { file_name: string; version: string; sql: string; undo:
 export type CheckReport = { environment: string; applied_up_to: string | null; drift: Change[] | null; changes: Change[] | null; dry_run_sql: string | null }
 export type LogEvent = { level: 'info' | 'warn'; message: string }
 export type ScriptView = { kind: 'versioned' | 'repeatable' | 'undo' | 'baseline'; version: string | null; description: string; file_name: string; sql: string }
+export type ConvertReport = { source: string; written: string; environments: string[]; migrations: string; schemas: string[]; flyway_table: string; not_converted: string[]; notes: string[] }
+export type HistoryImport = { environment: string; imported: number; skipped: string[]; edited: string[]; attention: string[] }
 export type RepairReport = { removed_failed: string[]; realigned: string[]; forgotten: string[] }
 
 export const inTauri = '__TAURI_INTERNALS__' in window
@@ -44,6 +46,8 @@ type Api = {
   pickFolder(): Promise<string | null>
   projectInit(path: string, name: string): Promise<Project>
   projectOpen(path: string): Promise<Project>
+  convertFlyway(path: string): Promise<{ report: ConvertReport; project: Project }>
+  historyImport(path: string, env: string, table: string, acceptEdited: boolean): Promise<HistoryImport>
   envSave(path: string, name: string, env: EnvInput, shared: boolean): Promise<Project>
   envTest(path: string, name: string): Promise<ServerInfo>
   envTestDraft(env: EnvInput): Promise<ServerInfo>
@@ -75,6 +79,8 @@ const real: Api = {
   },
   projectInit: (path, name) => invoke('project_init', { path, name }),
   projectOpen: (path) => invoke('project_open', { path }),
+  convertFlyway: (path) => invoke('project_convert_flyway', { path }),
+  historyImport: (path, env, table, acceptEdited) => invoke('history_import', { path, env, table, acceptEdited }),
   envSave: (path, name, env, shared) => invoke('env_save', { path, name, env, shared }),
   envTest: (path, name) => invoke('env_test', { path, name }),
   envTestDraft: (env) => invoke('env_test_draft', { env }),
@@ -133,14 +139,30 @@ const fakeInfo = (env: string): MigrationInfo[] =>
   })
 
 const fakeApi: Api = {
-  recentProjects: async () => [{ name: 'shop-db', path: 'C:/repos/shop-db', exists: true }, { name: 'billing', path: 'C:/old/billing', exists: false }],
+  recentProjects: async () => [
+    { name: 'shop-db', path: 'C:/repos/shop-db', exists: true },
+    { name: 'legacy-flyway', path: 'C:/repos/legacy-flyway', exists: true },
+    { name: 'billing', path: 'C:/old/billing', exists: false },
+  ],
   recentForget: async () => {},
   pickFolder: async () => 'C:/repos/new-project',
   projectInit: async (path, name) => ({ ...fakeProject(), root: path, name, environments: [] }),
   projectOpen: async (path) => {
     await wait()
     if (path.includes('old')) throw fail('LIFTOFF_CONFIG', `no liftoff.toml in ${path}; run \`liftoff init\` first`, 2)
+    if (path.includes('flyway')) throw fail('LIFTOFF_FLYWAY_PROJECT', 'This folder has a Flyway project. Convert its settings to open it in LiftOff.', 2)
     return fakeProject()
+  },
+  convertFlyway: async (path) => {
+    await wait()
+    const report: ConvertReport = { source: `${path}/flyway.toml`, written: `${path}/liftoff.toml`, environments: ['development', 'shadow', 'production'], migrations: 'migrations', schemas: ['public'], flyway_table: 'flyway_schema_history',
+      not_converted: ['placeholders.owner = app: placeholders are not supported; replace them in the scripts', 'callbacks = com.acme.Audit: callbacks are not supported; turn them into scripts'], notes: [] }
+    return { report, project: { ...fakeProject(), root: path, name: 'legacy-flyway' } }
+  },
+  historyImport: async (_p, env) => {
+    await wait(400)
+    emit('info', `Imported 4 history row(s) on ${env}; Flyway's table was left as it was`)
+    return { environment: env, imported: 4, skipped: ['rank 0: "public" (schema creation marker)'], edited: [], attention: [] }
   },
   envSave: async () => fakeProject(),
   envTest: async (_p, name) => {

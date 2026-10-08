@@ -40,6 +40,7 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
   const [captured, setCaptured] = useState<{ env: string; g: Generated } | null>(null)
   // Drift results from the Checks tab, shown on the board until the next check.
   const [drift, setDrift] = useState<Record<string, boolean>>({})
+  const [importFor, setImportFor] = useState<string | null>(null)
 
   const load = useCallback(async (name: string) => {
     setStatus((s) => ({ ...s, [name]: { ...s[name], loading: true } }))
@@ -108,6 +109,7 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
       return `Undid version ${r.version ?? ''} on ${name}`
     })
     if (id === 'baseline') return setBaselineFor(name)
+    if (id === 'import-flyway') return setImportFor(name)
     if (id === 'capture') return op(name, async () => {
       setCaptured({ env: name, g: await api.capture(project.root, name, 'existing schema') })
       return null
@@ -212,7 +214,9 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
                   { id: 'validate', label: 'Validate' },
                   { id: 'repair', label: 'Repair history' },
                   { id: 'undo', label: 'Undo latest', paid: true },
-                  ...(selStatus?.info?.length === 0 || selStatus?.info?.every((i) => !i.installed_on) ? [{ id: 'baseline', label: 'Baseline…' }] : []),
+                  ...(selStatus?.info?.length === 0 || selStatus?.info?.every((i) => !i.installed_on)
+                  ? [{ id: 'import-flyway', label: 'Import Flyway history…' }, { id: 'baseline', label: 'Baseline…' }]
+                  : []),
                   ...(sel.role === 'scratch' || sel.allow_clean ? [{ id: 'clean', label: 'Clean…', destructive: true }] : []),
                   { id: 'capture', label: 'Capture as script…', paid: true },
                 ]}
@@ -231,6 +235,14 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
       <ConnectionDialog key={dialog ? dialog.editing?.name ?? 'new' : 'closed'} open={!!dialog} onOpenChange={(o) => !o && setDialog(null)} project={project} editing={dialog?.editing} onSaved={onProject} />
       <CaptureDialog key={captured?.g.file_name ?? 'none'} captured={captured} project={project} onClose={() => setCaptured(null)}
         onDone={(msg, tone) => { setCaptured(null); toast({ tone, title: msg }); if (captured) load(captured.env) }} />
+      <ImportDialog key={importFor ?? 'none'} env={importFor} onClose={() => setImportFor(null)}
+        onConfirm={(name, table, acceptEdited) => {
+          setImportFor(null)
+          op(name, async () => {
+            const r = await api.historyImport(project.root, name, table, acceptEdited)
+            return `Imported ${r.imported} history row${r.imported === 1 ? '' : 's'} on ${name}${r.attention.length ? `; ${r.attention.length} need attention (see log)` : ''}`
+          })
+        }} />
       <BaselineDialog key={baselineFor ?? 'none'} env={baselineFor} onClose={() => setBaselineFor(null)}
         onConfirm={(name, version, description) => {
           setBaselineFor(null)
@@ -288,6 +300,22 @@ function CaptureDialog({ captured, project, onClose, onDone }: {
         <div className="max-h-[50vh] overflow-auto"><CodeBlock label="Captured schema" code={g.sql} /></div>
         <Checkbox checked={baselineIt} onChange={setBaselineIt} label={`Baseline ${env} at ${g.version}, so this script never runs there`} />
         {error && <InlineAlert tone="danger" title="Not saved">{error}</InlineAlert>}
+      </div>
+    </Dialog>
+  )
+}
+
+function ImportDialog({ env, onClose, onConfirm }: { env: string | null; onClose: () => void; onConfirm: (env: string, table: string, acceptEdited: boolean) => void }) {
+  const [table, setTable] = useState('flyway_schema_history')
+  const [acceptEdited, setAcceptEdited] = useState(false)
+  return (
+    <Dialog open={!!env} onOpenChange={(o) => !o && onClose()} size="sm" title={`Import Flyway history on ${env ?? ''}`}
+      description="Copies what Flyway already ran into LiftOff's history, once, so those scripts are not run again. Flyway's table is left as it is."
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!table.trim()} onClick={() => onConfirm(env!, table.trim(), acceptEdited)}>Import</Button></>}>
+      <div className="flex flex-col gap-3">
+        <Field label="Flyway history table">{(a) => <Input {...a} mono value={table} onChange={(e) => setTable(e.target.value)} />}</Field>
+        <Checkbox checked={acceptEdited} onChange={setAcceptEdited} label="Import even if scripts changed after they ran" />
+        <p className="text-xs font-normal text-muted">Without this, the import stops and lists every script whose file no longer matches what ran.</p>
       </div>
     </Dialog>
   )

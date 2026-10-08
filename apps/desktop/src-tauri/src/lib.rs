@@ -5,7 +5,7 @@ use liftoff_core::config::{self, Config, Environment, Role};
 use liftoff_core::error::ErrorReport;
 use liftoff_core::runner::{self, Level, MigrateOptions};
 use liftoff_core::checks::{self, CheckOptions};
-use liftoff_core::{db, diff, license, Error};
+use liftoff_core::{db, diff, flyway, license, Error};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager};
@@ -130,9 +130,34 @@ fn project_init(app: AppHandle, path: String, name: String) -> R<ProjectView> {
 
 #[tauri::command]
 fn project_open(app: AppHandle, path: String) -> R<ProjectView> {
+    let root = Path::new(&path);
+    if !root.join(config::PROJECT_FILE).exists() && !flyway::detect(root).is_empty() {
+        // The UI offers the conversion for this code.
+        return Err(ErrorReport { code: "LIFTOFF_FLYWAY_PROJECT", exit_code: 2, message: "This folder has a Flyway project. Convert its settings to open it in LiftOff.".into() });
+    }
     let cfg = load(&path)?;
     remember(&app, &cfg.project.name, &cfg.root);
     Ok(view(&cfg))
+}
+
+#[derive(Serialize)]
+struct Converted {
+    report: flyway::ConvertReport,
+    project: ProjectView,
+}
+
+#[tauri::command]
+fn project_convert_flyway(app: AppHandle, path: String) -> R<Converted> {
+    let root = Path::new(&path);
+    let name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "project".into());
+    let report = flyway::convert(root, &name).map_err(rep)?;
+    let project = project_open(app, path)?;
+    Ok(Converted { report, project })
+}
+
+#[tauri::command]
+async fn history_import(app: AppHandle, path: String, env: String, table: String, accept_edited: bool) -> R<flyway::HistoryImport> {
+    flyway::import_history(&load(&path)?, Some(&env), &table, accept_edited, &emitter(app)).await.map_err(rep)
 }
 
 #[derive(Deserialize)]
@@ -318,6 +343,8 @@ pub fn run() {
             recent_forget,
             project_init,
             project_open,
+            project_convert_flyway,
+            history_import,
             env_save,
             env_test,
             env_test_draft,

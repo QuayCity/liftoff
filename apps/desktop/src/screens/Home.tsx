@@ -1,26 +1,52 @@
 // S01 start page + S02 new project dialog.
 import { FolderOpen, FolderPlus, History } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { api, errorText, type Project, type Recent } from '../api'
+import { api, errorText, isErrorReport, type ConvertReport, type Project, type Recent } from '../api'
 import { Button, Field, Input, RadioGroup, Select } from '../ui/controls'
 import { Card, EmptyState, InlineAlert, Spinner } from '../ui/display'
 import { Dialog } from '../ui/overlays'
+
+function ConvertSummary({ r }: { r: ConvertReport }) {
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      <dl className="grid grid-cols-[9rem_1fr] gap-y-1">
+        <dt className="text-muted">From</dt><dd className="truncate font-mono" title={r.source}>{r.source}</dd>
+        <dt className="text-muted">Environments</dt><dd>{r.environments.length ? r.environments.join(', ') : 'none'}</dd>
+        <dt className="text-muted">Scripts folder</dt><dd className="font-mono">{r.migrations}</dd>
+        <dt className="text-muted">Schemas</dt><dd className="font-mono">{r.schemas.join(', ')}</dd>
+      </dl>
+      {r.notes.map((n) => <InlineAlert key={n} tone="info" title="Note">{n}</InlineAlert>)}
+      {r.not_converted.length > 0 && (
+        <InlineAlert tone="warning" title={`${r.not_converted.length} setting${r.not_converted.length === 1 ? '' : 's'} not carried over`}>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5">{r.not_converted.map((n) => <li key={n}>{n}</li>)}</ul>
+        </InlineAlert>
+      )}
+      <p className="text-muted">Next: on each environment, use Import Flyway history so scripts that already ran are not run again.</p>
+    </div>
+  )
+}
 
 export function Home({ onOpen }: { onOpen: (p: Project) => void }) {
   const [recent, setRecent] = useState<Recent[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [opening, setOpening] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  // A folder with flyway.toml / flyway.conf but no liftoff.toml: offer the conversion.
+  const [flywayFolder, setFlywayFolder] = useState<string | null>(null)
+  const [converting, setConverting] = useState(false)
+  const [converted, setConverted] = useState<{ report: ConvertReport; project: Project } | null>(null)
 
   useEffect(() => { api.recentProjects().then(setRecent, (e) => { setRecent([]); setError(errorText(e)) }) }, [])
 
   const open = async (path: string) => {
     setOpening(path)
     setError(null)
+    setFlywayFolder(null)
     try {
       onOpen(await api.projectOpen(path))
     } catch (e) {
-      setError(errorText(e))
+      if (isErrorReport(e) && e.code === 'LIFTOFF_FLYWAY_PROJECT') setFlywayFolder(path)
+      else setError(errorText(e))
     } finally {
       setOpening(null)
     }
@@ -61,6 +87,22 @@ export function Home({ onOpen }: { onOpen: (p: Project) => void }) {
       </div>
 
       {error && <InlineAlert tone="danger" title="Couldn't open the project">{error}</InlineAlert>}
+      {flywayFolder && (
+        <InlineAlert tone="info" title="This folder has a Flyway project"
+          action={<Button size="sm" variant="primary" loading={converting} onClick={async () => {
+            setConverting(true)
+            try {
+              setConverted(await api.convertFlyway(flywayFolder))
+              setFlywayFolder(null)
+            } catch (e) {
+              setError(errorText(e))
+            } finally {
+              setConverting(false)
+            }
+          }}>Convert settings…</Button>}>
+          LiftOff can read its settings and write a liftoff.toml next to them. The Flyway files stay as they are.
+        </InlineAlert>
+      )}
 
       <section aria-labelledby="recent-h" className="flex flex-col gap-2">
         <h2 id="recent-h" className="text-xs font-semibold tracking-wide text-muted uppercase">Recent</h2>
@@ -95,6 +137,11 @@ export function Home({ onOpen }: { onOpen: (p: Project) => void }) {
         </Card>
       </section>
 
+      <Dialog open={!!converted} onOpenChange={(o) => !o && setConverted(null)} size="lg" title="Flyway settings converted"
+        description={converted?.report.written}
+        footer={<Button variant="primary" onClick={() => converted && onOpen(converted.project)}>Open project</Button>}>
+        {converted && <ConvertSummary r={converted.report} />}
+      </Dialog>
       <NewProjectDialog open={creating} onOpenChange={setCreating} onCreated={onOpen} />
     </main>
   )
