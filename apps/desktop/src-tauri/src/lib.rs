@@ -36,6 +36,7 @@ struct ProjectView {
     migrations: String,
     history_table: String,
     filters: Vec<config::Filter>,
+    lock: config::LockMode,
     environments: Vec<EnvView>,
     license: Option<license::Status>,
     license_error: Option<String>,
@@ -66,6 +67,7 @@ fn view(cfg: &Config) -> ProjectView {
         migrations: cfg.project.migrations.clone(),
         history_table: cfg.project.history_table.clone(),
         filters: cfg.project.filters.clone(),
+        lock: cfg.project.lock,
         environments: cfg
             .environments
             .iter()
@@ -178,18 +180,19 @@ struct EnvInput {
 impl EnvInput {
     fn into_env(self) -> Environment {
         let blank = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
-        Environment { url: self.url.trim().to_string(), user: blank(self.user), password: blank(self.password), role: self.role, allow_clean: self.allow_clean }
+        Environment { url: self.url.trim().to_string(), user: blank(self.user), password: blank(self.password), role: self.role, allow_clean: self.allow_clean, placeholders: Default::default() }
     }
 }
 
 #[tauri::command]
 fn env_save(path: String, name: String, env: EnvInput, shared: bool) -> R<ProjectView> {
     let mut env = env.into_env();
-    if env.password.is_none() {
-        // Editing without retyping the password keeps the stored one.
-        if let Ok(cfg) = load(&path) && let Some(old) = cfg.environments.get(&name) {
+    if let Ok(cfg) = load(&path) && let Some(old) = cfg.environments.get(&name) {
+        // Editing without retyping the password keeps the stored one; placeholders are edited in liftoff.toml.
+        if env.password.is_none() {
             env.password = old.password.clone();
         }
+        env.placeholders = old.placeholders.clone();
     }
     config::save_environment(Path::new(&path), &name, &env, shared).map_err(rep)?;
     Ok(view(&load(&path)?))
@@ -329,6 +332,16 @@ async fn capture(path: String, env: String, description: String, as_baseline: bo
     diff::capture(&cfg, Some(&env), &description, as_baseline).await.map_err(rep)
 }
 
+/// Writes the B script and checks it builds the same schema; returns its file name.
+#[tauri::command]
+async fn squash(app: AppHandle, path: String, up_to: String, description: String) -> R<String> {
+    let cfg = load(&path)?;
+    license::require("generate", None, Some(&cfg.root)).map_err(rep)?;
+    let log = emitter(app);
+    let (g, _) = diff::squash(&cfg, Some(&up_to), &description, None, false, &log).await.map_err(rep)?;
+    Ok(g.file_name)
+}
+
 /// Writes the HTML report of a check to a file the user picked.
 #[tauri::command]
 fn report_save(path: String, report: checks::CheckReport, file: String) -> R<()> {
@@ -388,7 +401,9 @@ fn model_save(path: String, changes: Vec<liftoff_core::model::ModelChange>) -> R
 }
 
 #[tauri::command]
-fn project_save(path: String, project: config::Project) -> R<ProjectView> {
+fn project_save(path: String, mut project: config::Project) -> R<ProjectView> {
+    // Placeholders are edited in liftoff.toml, not here; keep them.
+    project.placeholders = load(&path)?.project.placeholders;
     config::save_project(Path::new(&path), &project).map_err(rep)?;
     Ok(view(&load(&path)?))
 }
@@ -440,6 +455,7 @@ pub fn run() {
             scripts_list,
             script_add,
             capture,
+            squash,
             scratch_create,
             report_save,
             git_status,
@@ -468,5 +484,27 @@ mod tests {
         assert_eq!(super::redact("postgres://me:s3cret@db:5432/x"), "postgres://me@db:5432/x");
         assert_eq!(super::redact("postgres://db/x"), "postgres://db/x");
         assert_eq!(super::redact("host=db dbname=x"), "host=db dbname=x");
+    }
+
+    #[test]
+    fn saving_settings_keeps_placeholders() {
+        use liftoff_core::config::{self, Config, LockMode};
+        let dir = std::env::temp_dir().join(format!("liftoff-desk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        config::init(&dir, "shop", "postgresql").unwrap();
+        let mut p = Config::load(&dir).unwrap().project;
+        p.placeholders.insert("app_user".into(), "svc".into());
+        config::save_project(&dir, &p).unwrap();
+        // What the Settings screen sends: no placeholders field, lock changed.
+        let sent: config::Project = serde_json::from_value(serde_json::json!({
+            "name": "shop", "engine": "postgresql", "migrations": "migrations", "schemas": ["public"],
+            "history_table": "liftoff_schema_history", "filters": [], "lock": "table"
+        }))
+        .unwrap();
+        super::project_save(dir.to_string_lossy().into(), sent).unwrap();
+        let p = Config::load(&dir).unwrap().project;
+        assert_eq!((p.lock, p.placeholders.get("app_user").map(String::as_str)), (LockMode::Table, Some("svc")));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

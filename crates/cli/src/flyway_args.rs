@@ -59,6 +59,7 @@ pub fn translate(args: Vec<String>) -> Result<(Vec<String>, Adhoc), String> {
             "outOfOrder" => {}
             "baselineVersion" => tail.extend(["--version".into(), v()?]),
             "baselineDescription" => tail.extend(["--description".into(), v()?]),
+            k if k.starts_with("placeholders.") => out.extend(["--placeholder".into(), format!("{}={}", &k["placeholders.".len()..], v()?)]),
             "drift" => tail.push("--drift".into()),
             "changes" => tail.push("--changes".into()),
             "dryrun" | "dryRun" => tail.push("--dry-run".into()),
@@ -87,6 +88,8 @@ mod tests {
         assert_eq!(adhoc.url.as_deref(), Some("jdbc:postgresql://db/shop"));
         assert_eq!(adhoc.schemas, Some(vec!["sales".to_string(), "public".to_string()]));
         assert_eq!(adhoc.locations.as_deref(), Some("sql"));
+        let (out, _) = translate(args("liftoff -placeholders.app_user=svc migrate")).unwrap();
+        assert_eq!(out, args("liftoff --placeholder app_user=svc migrate"));
     }
 
     #[test]
@@ -100,7 +103,7 @@ mod tests {
 
     #[test]
     fn unsupported_options_are_errors_not_ignored() {
-        assert!(translate(args("liftoff -placeholders.owner=x migrate")).unwrap_err().contains("does not support"));
+        assert!(translate(args("liftoff -callbacks=db/callbacks migrate")).unwrap_err().contains("does not support"));
         assert!(translate(args("liftoff -configFiles=a.conf migrate")).unwrap_err().contains("--from-flyway"));
         assert!(translate(args("liftoff -locations=classpath:db migrate")).is_err());
     }

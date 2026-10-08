@@ -10,9 +10,10 @@ export type EnvView = { name: string; role: Role; url: string; user: string | nu
 export type License = { org: string; seats: number; edition: string; expires: string; features: string[] }
 export type LicenseStatus = { license: License; grace_days_left: number | null; source: string }
 export type Filter = { action: 'include' | 'exclude'; object: string; pattern: string }
-export type ProjectSettings = { name: string; engine: string; migrations: string; schemas: string[]; history_table: string; filters: Filter[] }
+export type LockMode = 'advisory' | 'table'
+export type ProjectSettings = { name: string; engine: string; migrations: string; schemas: string[]; history_table: string; filters: Filter[]; lock: LockMode }
 export type Project = {
-  root: string; name: string; engine: string; schemas: string[]; migrations: string; history_table: string; filters: Filter[]; environments: EnvView[]
+  root: string; name: string; engine: string; schemas: string[]; migrations: string; history_table: string; filters: Filter[]; lock: LockMode; environments: EnvView[]
   license: LicenseStatus | null; license_error: string | null
 }
 export type Recent = { name: string; path: string; exists: boolean }
@@ -78,6 +79,7 @@ type Api = {
   scriptsList(path: string): Promise<ScriptView[]>
   scriptAdd(path: string, repeatable: boolean, description: string, sql: string): Promise<string>
   capture(path: string, env: string, description: string, asBaseline: boolean): Promise<Generated>
+  squash(path: string, upTo: string, description: string): Promise<string>
   scratchCreate(path: string): Promise<Project>
   changesDiff(path: string): Promise<Comparison>
   migrationGenerate(path: string, changes: Change[], description: string, withUndo: boolean): Promise<Generated>
@@ -128,6 +130,7 @@ const real: Api = {
   scriptsList: (path) => invoke('scripts_list', { path }),
   scriptAdd: (path, repeatable, description, sql) => invoke('script_add', { path, repeatable, description, sql }),
   capture: (path, env, description, asBaseline) => invoke('capture', { path, env, description, asBaseline }),
+  squash: (path, upTo, description) => invoke('squash', { path, upTo, description }),
   scratchCreate: (path) => invoke('scratch_create', { path }),
   changesDiff: (path) => invoke('changes_diff', { path }),
   migrationGenerate: (path, changes, description, withUndo) => invoke('migration_generate', { path, changes, description, withUndo }),
@@ -149,7 +152,7 @@ const demoLicense: LicenseStatus = { license: { org: 'Demo Org', seats: 5, editi
 const fake = {
   licensed: new URLSearchParams(location.search).get('licensed') !== '0',
   project: {
-    root: 'C:/repos/shop-db', name: 'shop-db', engine: 'postgresql', schemas: ['public'], migrations: 'migrations', history_table: 'liftoff_schema_history', filters: [], license: null, license_error: null,
+    root: 'C:/repos/shop-db', name: 'shop-db', engine: 'postgresql', schemas: ['public'], migrations: 'migrations', history_table: 'liftoff_schema_history', filters: [], lock: 'advisory' as LockMode, license: null, license_error: null,
     environments: [
       { name: 'local', role: 'dev', url: 'postgres://me@localhost:5432/shop', user: null, has_password: true, allow_clean: false },
       { name: 'scratch', role: 'scratch', url: 'postgres://me@localhost:5432/shop_scratch', user: null, has_password: true, allow_clean: false },
@@ -319,6 +322,12 @@ const fakeApi: Api = {
     if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'generate' is part of LiftOff Pro.", 20)
     await wait(500)
     return { file_name: `${asBaseline ? 'B' : 'V'}20261008.1200__${description.replaceAll(' ', '_')}.sql`, version: '20261008.1200', sql: `-- ${description}\n-- captured from ${env}\n\nCREATE TABLE public.orders (\n    id bigserial\n);\n`, undo: null }
+  },
+  squash: async (_p, upTo, description) => {
+    if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'generate' is part of LiftOff Pro.", 20)
+    emit('info', `Building 'scratch' from the versioned scripts up to ${upTo}`)
+    await wait(500)
+    return `B${upTo}__${description.replaceAll(' ', '_')}.sql`
   },
   changesDiff: async () => {
     if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'diff' is part of LiftOff Pro. Set LIFTOFF_LICENSE (CI) or activate a licence in the desktop app.", 20)

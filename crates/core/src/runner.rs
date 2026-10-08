@@ -202,6 +202,10 @@ pub struct MigrateOptions {
     pub dry_run: bool,
     /// run every script on a database that already has tables but no history (normally refused)
     pub allow_non_empty: bool,
+    /// also re-run repeatable scripts that have not changed
+    pub rerun_repeatables: bool,
+    /// run versioned scripts only (squash builds its baseline without the repeatables)
+    pub skip_repeatables: bool,
 }
 
 /// Validates, then applies pending versioned scripts in order, then new or changed repeatables.
@@ -224,10 +228,10 @@ pub async fn migrate(cfg: &Config, env_name: Option<&str>, opts: MigrateOptions,
         result.execution_time_ms = started.elapsed().as_millis();
         return Ok(result);
     }
-    db::lock(&c, schema, table, || log(Level::Info, "Another run holds the lock on this database; waiting")).await?;
+    let lock = db::lock(&c, &name, env, schema, table, cfg.project.lock, || log(Level::Info, "Another run holds the lock on this database; waiting")).await?;
     let result = migrate_locked(&c, cfg, &name, &scripts, &opts, target.as_ref(), log).await;
-    // Unlock even on failure; a dropped connection would release it too.
-    let _ = db::unlock(&c, schema, table).await;
+    // Release even on failure (a dropped connection or an expired lease would free it too).
+    lock.release(&c).await;
     let mut result = result?;
     result.execution_time_ms = started.elapsed().as_millis();
     Ok(result)
@@ -240,7 +244,9 @@ fn plan<'a>(infos: &'a [MigrationInfo], opts: &MigrateOptions, target: Option<&V
         .filter(|i| match (i.kind, i.state) {
             (Kind::Versioned, State::Pending) => true,
             (Kind::Versioned, State::Ignored) => opts.out_of_order,
+            (Kind::Repeatable, _) if opts.skip_repeatables => false,
             (Kind::Repeatable, State::Pending | State::Outdated) => true,
+            (Kind::Repeatable, State::Applied) => opts.rerun_repeatables,
             _ => false,
         })
         .filter(|i| match (target, i.version.as_deref().and_then(Version::parse)) {
@@ -259,17 +265,18 @@ fn dry_run(cfg: &Config, name: &str, scripts: &[Script], rows: &[HistoryRow], op
     if rows.is_empty()
         && let Some(b) = baseline_script(scripts, target)
     {
-        sql.push_str(&format!("\n-- {} (empty database: built from the baseline script)\nBEGIN;\n{}\nCOMMIT;\n", b.file_name, b.sql.trim_end()));
+        sql.push_str(&format!("\n-- {} (empty database: built from the baseline script)\nBEGIN;\n{}\nCOMMIT;\n", b.file_name, sql_for(cfg, name, b)?.trim_end()));
         result.applied.push(Applied { script: b.file_name.clone(), version: b.version.as_ref().map(|v| v.text.clone()), execution_time_ms: 0, transactional: true });
         // The V scripts it covers would then be below the baseline.
         let covered = b.version.clone();
         let infos: Vec<MigrationInfo> = infos.into_iter().filter(|i| i.kind != Kind::Versioned || i.version.as_deref().and_then(Version::parse) > covered).collect();
-        return finish_dry_run(cfg, scripts, &infos, opts, target, sql, result);
+        return finish_dry_run(cfg, name, scripts, &infos, opts, target, sql, result);
     }
-    finish_dry_run(cfg, scripts, &infos, opts, target, sql, result)
+    finish_dry_run(cfg, name, scripts, &infos, opts, target, sql, result)
 }
 
-fn finish_dry_run(cfg: &Config, scripts: &[Script], infos: &[MigrationInfo], opts: &MigrateOptions, target: Option<&Version>, mut sql: String, mut result: MigrateResult) -> Result<MigrateResult> {
+#[allow(clippy::too_many_arguments)]
+fn finish_dry_run(cfg: &Config, name: &str, scripts: &[Script], infos: &[MigrationInfo], opts: &MigrateOptions, target: Option<&Version>, mut sql: String, mut result: MigrateResult) -> Result<MigrateResult> {
     let (schema, table) = (db::quote_ident(cfg.history_schema()), db::quote_ident(&cfg.project.history_table));
     for i in plan(infos, opts, target) {
         let s = scripts.iter().find(|s| s.file_name == i.script).unwrap();
@@ -282,10 +289,11 @@ fn finish_dry_run(cfg: &Config, scripts: &[Script], infos: &[MigrationInfo], opt
             s.checksum
         );
         sql.push_str(&format!("\n-- {}{}\n", s.file_name, if transactional { "" } else { " (runs outside a transaction)" }));
+        let body = sql_for(cfg, name, s)?;
         if transactional {
-            sql.push_str(&format!("BEGIN;\n{}\n{record}\nCOMMIT;\n", s.sql.trim_end()));
+            sql.push_str(&format!("BEGIN;\n{}\n{record}\nCOMMIT;\n", body.trim_end()));
         } else {
-            sql.push_str(&format!("{}\n{record}\n", s.sql.trim_end()));
+            sql.push_str(&format!("{}\n{record}\n", body.trim_end()));
         }
         result.applied.push(Applied { script: s.file_name.clone(), version: s.version.as_ref().map(|v| v.text.clone()), execution_time_ms: 0, transactional });
     }
@@ -304,15 +312,19 @@ async fn migrate_locked(c: &tokio_postgres::Client, cfg: &Config, name: &str, sc
 
     // Scripts that create what already exists fail half-way; ask for a baseline instead.
     if rows.is_empty() && !opts.allow_non_empty && baseline_script(scripts, target).is_none() {
-        let objects: i64 = c
-            .query_one(
-                "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
-                 where n.nspname = any($1) and c.relkind in ('r', 'p', 'v', 'm', 'S') and c.relname <> $2
-                   and not exists (select 1 from pg_depend d where d.objid = c.oid and d.deptype in ('a', 'i', 'e'))",
-                &[&cfg.project.schemas, &table],
-            )
-            .await?
-            .get(0);
+        let objects: i64 = db::row(
+            c,
+            "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+             where n.nspname = any($1) and c.relkind in ('r', 'p', 'v', 'm', 'S') and c.relname <> $2 and c.relname <> $3
+               and not exists (select 1 from pg_depend d where d.objid = c.oid and d.deptype in ('a', 'i', 'e'))",
+            &[
+                (&cfg.project.schemas, tokio_postgres::types::Type::TEXT_ARRAY),
+                (&table, tokio_postgres::types::Type::TEXT),
+                (&format!("{table}_lock"), tokio_postgres::types::Type::TEXT),
+            ],
+        )
+        .await?
+        .get(0);
         if objects > 0 {
             return Err(Error::NotBaselined(name.to_string()));
         }
@@ -324,7 +336,8 @@ async fn migrate_locked(c: &tokio_postgres::Client, cfg: &Config, name: &str, sc
     {
         log(Level::Info, &format!("Empty database: building it from {}", b.file_name));
         let t = Instant::now();
-        if let Err(e) = run_script(c, b, !migration::needs_no_transaction(&b.sql), schema, table, "SQL_BASELINE").await {
+        let sql = sql_for(cfg, name, b)?;
+        if let Err(e) = run_script(c, b, &sql, !migration::needs_no_transaction(&b.sql), schema, table, "SQL_BASELINE").await {
             let msg = match &e {
                 Error::Db(db) => db_message(db),
                 other => other.to_string(),
@@ -352,7 +365,8 @@ async fn migrate_locked(c: &tokio_postgres::Client, cfg: &Config, name: &str, sc
         }
         log(Level::Info, &format!("Running {}", s.file_name));
         let t = Instant::now();
-        let outcome = run_script(c, s, transactional, schema, table, "SQL").await;
+        let sql = sql_for(cfg, name, s)?;
+        let outcome = run_script(c, s, &sql, transactional, schema, table, "SQL").await;
         let ms = t.elapsed().as_millis() as i32;
         if let Err(e) = outcome {
             let msg = match &e {
@@ -401,7 +415,8 @@ pub async fn undo(cfg: &Config, env_name: Option<&str>, log: Log<'_>) -> Result<
         let transactional = !migration::needs_no_transaction(&u.sql);
         log(Level::Info, &format!("Undoing {} with {}", latest.script, u.file_name));
         let t = Instant::now();
-        if let Err(e) = run_script(&s.c, u, transactional, &s.schema, &s.table, "UNDO_SQL").await {
+        let sql = sql_for(cfg, &name, u)?;
+        if let Err(e) = run_script(&s.c, u, &sql, transactional, &s.schema, &s.table, "UNDO_SQL").await {
             let msg = match &e {
                 Error::Db(db) => db_message(db),
                 other => other.to_string(),
@@ -436,13 +451,18 @@ pub fn validate(infos: &[MigrationInfo], opts: &MigrateOptions) -> Result<()> {
     if problems.is_empty() { Ok(()) } else { Err(Error::Validate(problems.join("\n"))) }
 }
 
-async fn run_script(c: &tokio_postgres::Client, s: &Script, transactional: bool, schema: &str, table: &str, kind: &str) -> Result<()> {
+/// The script's SQL with this environment's placeholder values.
+fn sql_for(cfg: &Config, env: &str, s: &Script) -> Result<String> {
+    migration::apply_placeholders(&s.sql, &cfg.placeholders(env), cfg.uses_placeholders(), &s.file_name)
+}
+
+async fn run_script(c: &tokio_postgres::Client, s: &Script, sql: &str, transactional: bool, schema: &str, table: &str, kind: &str) -> Result<()> {
     if transactional {
         // One transaction for script + history row: both land or neither does.
         c.batch_execute("BEGIN").await?;
         let t = Instant::now();
         let run = async {
-            c.batch_execute(&s.sql).await?;
+            c.batch_execute(sql).await?;
             record(c, s, t.elapsed().as_millis() as i32, true, schema, table, kind).await
         }
         .await;
@@ -455,7 +475,7 @@ async fn run_script(c: &tokio_postgres::Client, s: &Script, transactional: bool,
         }
     } else {
         let t = Instant::now();
-        for stmt in migration::split_statements(&s.sql) {
+        for stmt in migration::split_statements(sql) {
             c.batch_execute(&stmt).await?;
         }
         record(c, s, t.elapsed().as_millis() as i32, true, schema, table, kind).await
@@ -490,6 +510,7 @@ struct Session {
     table: String,
     scripts: Vec<Script>,
     rows: Vec<HistoryRow>,
+    lock: Option<db::RunLock>,
 }
 
 impl Session {
@@ -497,8 +518,8 @@ impl Session {
         let scripts = migration::scan(&cfg.migrations_dir())?;
         let c = db::connect(name, env).await?;
         let (schema, table) = (cfg.history_schema().to_string(), cfg.project.history_table.clone());
-        db::lock(&c, &schema, &table, || log(Level::Info, "Another run holds the lock on this database; waiting")).await?;
-        let mut s = Session { c, schema, table, scripts, rows: vec![] };
+        let lock = db::lock(&c, name, env, &schema, &table, cfg.project.lock, || log(Level::Info, "Another run holds the lock on this database; waiting")).await?;
+        let mut s = Session { c, schema, table, scripts, rows: vec![], lock: Some(lock) };
         if let Err(e) = s.refresh(true).await {
             s.close().await;
             return Err(e);
@@ -514,8 +535,10 @@ impl Session {
         Ok(())
     }
 
-    async fn close(&self) {
-        let _ = db::unlock(&self.c, &self.schema, &self.table).await;
+    async fn close(mut self) {
+        if let Some(l) = self.lock.take() {
+            l.release(&self.c).await;
+        }
     }
 }
 
@@ -569,7 +592,7 @@ pub async fn repair(cfg: &Config, env_name: Option<&str>, log: Log<'_>) -> Resul
 async fn repair_locked(s: &mut Session, log: Log<'_>) -> Result<RepairReport> {
     let mut report = RepairReport::default();
     let t = format!("{}.{}", db::quote_ident(&s.schema), db::quote_ident(&s.table));
-    for r in s.c.query(&format!("delete from {t} where not success returning script"), &[]).await? {
+    for r in db::rows(&s.c, &format!("delete from {t} where not success returning script"), &[]).await? {
         report.removed_failed.push(r.get(0));
     }
     s.refresh(false).await?;
@@ -584,8 +607,12 @@ async fn repair_locked(s: &mut Session, log: Log<'_>) -> Result<RepairReport> {
                 .find(|r| r.success && r.kind == "SQL" && r.version.as_deref().and_then(Version::parse) == v)
                 .map(|r| r.installed_rank);
             if let Some(rank) = rank {
-                s.c.execute(&format!("update {t} set checksum = $1, description = $2 where installed_rank = $3"), &[&file.checksum, &file.description, &rank])
-                    .await?;
+                db::exec(
+                    &s.c,
+                    &format!("update {t} set checksum = $1, description = $2 where installed_rank = $3"),
+                    &[(&file.checksum, tokio_postgres::types::Type::INT4), (&file.description, tokio_postgres::types::Type::VARCHAR), (&rank, tokio_postgres::types::Type::INT4)],
+                )
+                .await?;
                 report.realigned.push(i.script.clone());
             }
         }
@@ -622,9 +649,9 @@ pub async fn clean(cfg: &Config, env_name: Option<&str>, log: Log<'_>) -> Result
     }
     let c = db::connect(&name, env).await?;
     let (schema, table) = (cfg.history_schema(), cfg.project.history_table.as_str());
-    db::lock(&c, schema, table, || log(Level::Info, "Another run holds the lock on this database; waiting")).await?;
+    let lock = db::lock(&c, &name, env, schema, table, cfg.project.lock, || log(Level::Info, "Another run holds the lock on this database; waiting")).await?;
     let result = reset_schemas(&c, &cfg.project.schemas).await;
-    let _ = db::unlock(&c, schema, table).await;
+    lock.release(&c).await;
     result?;
     log(Level::Info, &format!("Cleaned {name}: {}", cfg.project.schemas.join(", ")));
     Ok(cfg.project.schemas.clone())

@@ -178,15 +178,24 @@ pub struct Change {
 
 const NOT_EXTENSION: &str = "not exists (select 1 from pg_depend e where e.objid = {oid} and e.deptype = 'e')";
 
+/// Reads the schema in one read-only transaction: a consistent snapshot, and `SET LOCAL` keeps the
+/// search_path change from leaking to anyone else on a pooled connection.
 pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> Result<Model> {
-    // Fully qualified names in every def, whatever the session's normal search_path is.
-    c.batch_execute("SET search_path TO pg_catalog").await?;
+    c.batch_execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SET LOCAL search_path TO pg_catalog").await?;
+    let result = introspect_in_transaction(c, schemas, exclude_table).await;
+    let _ = c.batch_execute(if result.is_ok() { "COMMIT" } else { "ROLLBACK" }).await;
+    result
+}
+
+async fn introspect_in_transaction(c: &Client, schemas: &[String], exclude_table: &str) -> Result<Model> {
+    use tokio_postgres::types::Type;
     let mut m = Model::default();
-    let p: [&(dyn tokio_postgres::types::ToSql + Sync); 2] = [&schemas, &exclude_table];
-    let p1: [&(dyn tokio_postgres::types::ToSql + Sync); 1] = [&schemas];
+    let schemas = schemas.to_vec();
+    let p: [db::P; 2] = [(&schemas, Type::TEXT_ARRAY), (&exclude_table, Type::TEXT)];
+    let p1: [db::P; 1] = [(&schemas, Type::TEXT_ARRAY)];
     let not_ext = |oid: &str| NOT_EXTENSION.replace("{oid}", oid);
 
-    let rows = c.query(&format!(
+    let rows = c.query_typed(&format!(
         "select n.nspname::text, c.relname::text, a.attname::text, format_type(a.atttypid, a.atttypmod),
                 a.attnotnull, pg_get_expr(d.adbin, d.adrelid), a.attidentity::text,
                 case when c.relkind = 'p' then pg_get_partkeydef(c.oid) end,
@@ -222,7 +231,7 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
         t.columns.push(col);
     }
 
-    let rows = c.query(
+    let rows = c.query_typed(
         "select n.nspname::text, c.relname::text, con.conname::text, pg_get_constraintdef(con.oid, true), con.contype = 'f'
          from pg_constraint con
          join pg_class c on c.oid = con.conrelid
@@ -236,7 +245,7 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
         }
     }
 
-    let rows = c.query(
+    let rows = c.query_typed(
         "select n.nspname::text, t.relname::text, i.relname::text, pg_get_indexdef(x.indexrelid)
          from pg_index x
          join pg_class i on i.oid = x.indexrelid
@@ -258,7 +267,7 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
         }
     }
 
-    let rows = c.query(&format!(
+    let rows = c.query_typed(&format!(
         "select n.nspname::text, c.relname::text, c.oid::oid, pg_get_viewdef(c.oid, true), c.relkind = 'm'
          from pg_class c join pg_namespace n on n.oid = c.relnamespace
          where c.relkind in ('v', 'm') and n.nspname = any($1) and {}", not_ext("c.oid")), &p1).await?;
@@ -272,7 +281,7 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
         }
     }
 
-    let rows = c.query(
+    let rows = c.query_typed(
         "select distinct vn.nspname::text, v.relname::text, sn.nspname::text, s.relname::text
          from pg_depend d
          join pg_rewrite r on r.oid = d.objid
@@ -286,7 +295,7 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
         m.view_deps.push(((r.get(0), r.get(1)), (r.get(2), r.get(3))));
     }
 
-    let rows = c.query(&format!(
+    let rows = c.query_typed(&format!(
         "select n.nspname::text, p.proname::text, pg_get_function_identity_arguments(p.oid), p.prokind = 'p', pg_get_functiondef(p.oid)
          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
          where p.prokind in ('f', 'p') and n.nspname = any($1) and {}", not_ext("p.oid")), &p1).await?;
@@ -296,7 +305,7 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
         m.functions.insert((r.get(0), format!("{name}({args})")), Function { name, args, procedure: r.get(3), def });
     }
 
-    let rows = c.query(&format!(
+    let rows = c.query_typed(&format!(
         "select n.nspname::text, t.typname::text, array_agg(e.enumlabel::text order by e.enumsortorder)
          from pg_type t join pg_enum e on e.enumtypid = t.oid join pg_namespace n on n.oid = t.typnamespace
          where n.nspname = any($1) and {}
@@ -306,7 +315,7 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
     }
 
     // Standalone sequences only: serial (deptype a) and identity (i) sequences come with their column.
-    let rows = c.query(&format!(
+    let rows = c.query_typed(&format!(
         "select n.nspname::text, c.relname::text, format_type(s.seqtypid, null), s.seqstart, s.seqincrement, s.seqmin, s.seqmax, s.seqcache, s.seqcycle
          from pg_sequence s join pg_class c on c.oid = s.seqrelid join pg_namespace n on n.oid = c.relnamespace
          where n.nspname = any($1) and {}
@@ -317,19 +326,19 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
         });
     }
 
-    for r in c.query("select e.extname::text, n.nspname::text from pg_extension e join pg_namespace n on n.oid = e.extnamespace
+    for r in c.query_typed("select e.extname::text, n.nspname::text from pg_extension e join pg_namespace n on n.oid = e.extnamespace
                       where e.extname <> 'plpgsql' and n.nspname = any($1)", &p1).await? {
         m.extensions.insert(r.get(0), r.get(1));
     }
 
-    let rows = c.query(&format!(
+    let rows = c.query_typed(&format!(
         "select n.nspname::text, t.typname::text, format_type(t.typbasetype, t.typtypmod), t.typdefault, t.typnotnull
          from pg_type t join pg_namespace n on n.oid = t.typnamespace
          where t.typtype = 'd' and n.nspname = any($1) and {}", not_ext("t.oid")), &p1).await?;
     for r in rows {
         m.domains.insert((r.get(0), r.get(1)), Domain { base: r.get(2), default: r.get(3), not_null: r.get(4), checks: BTreeMap::new() });
     }
-    for r in c.query(
+    for r in c.query_typed(
         "select n.nspname::text, t.typname::text, con.conname::text, pg_get_constraintdef(con.oid, true)
          from pg_constraint con join pg_type t on t.oid = con.contypid join pg_namespace n on n.oid = t.typnamespace
          where con.contype = 'c' and n.nspname = any($1)", &p1).await? {
@@ -339,7 +348,7 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
     }
 
     // Triggers a partition inherits from its parent are created with the parent's.
-    for r in c.query(
+    for r in c.query_typed(
         "select n.nspname::text, c.relname::text, t.tgname::text, pg_get_triggerdef(t.oid, true)
          from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
          where not t.tgisinternal and t.tgparentid = 0 and n.nspname = any($1) and c.relname <> $2", &p).await? {
@@ -347,7 +356,7 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
     }
 
     // Grants: owners' own privileges are implied, so they are left out.
-    let rows = c.query(&format!(
+    let rows = c.query_typed(&format!(
         "select case c.relkind when 'S' then 'SEQUENCE ' else 'TABLE ' end || quote_ident(n.nspname) || '.' || quote_ident(c.relname),
                 case when a.grantee = 0 then 'PUBLIC' else a.grantee::regrole::text end, a.privilege_type::text, a.is_grantable
          from pg_class c join pg_namespace n on n.oid = c.relnamespace, aclexplode(c.relacl) a
@@ -364,7 +373,7 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
     }
 
     // Every object that can carry a comment, named the way COMMENT ON names it, with its comment.
-    let rows = c.query(&format!(
+    let rows = c.query_typed(&format!(
         "select case c.relkind when 'v' then 'VIEW ' when 'm' then 'MATERIALIZED VIEW ' when 'S' then 'SEQUENCE ' else 'TABLE ' end
                   || quote_ident(n.nspname) || '.' || quote_ident(c.relname), obj_description(c.oid, 'pg_class')
          from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -391,7 +400,7 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
         m.objects.insert(object);
     }
 
-    let rows = c.query(&format!(
+    let rows = c.query_typed(&format!(
         "select 'row-level security policies', count(*) from pg_policy p join pg_class c on c.oid = p.polrelid
            join pg_namespace n on n.oid = c.relnamespace where n.nspname = any($1)
          union all select 'tables with row-level security on', count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -1000,9 +1009,9 @@ pub async fn create_scratch(cfg: &Config, dev: Option<&str>, env_name: &str) -> 
         return config(format!("an environment named '{env_name}' already exists"));
     }
     let c = db::connect(&dev_name, dev_env).await?;
-    let dev_db: String = c.query_one("select current_database()::text", &[]).await?.get(0);
+    let dev_db: String = db::row(&c, "select current_database()::text", &[]).await?.get(0);
     let database = format!("{dev_db}_scratch");
-    let exists: bool = c.query_one("select exists (select 1 from pg_database where datname = $1)", &[&database]).await?.get(0);
+    let exists: bool = db::row(&c, "select exists (select 1 from pg_database where datname = $1)", &[(&database, tokio_postgres::types::Type::TEXT)]).await?.get(0);
     if exists {
         return config(format!(
             "a database named {database} already exists on {dev_name}'s server; if it may be erased, add it as the scratch environment yourself"
@@ -1020,6 +1029,7 @@ pub async fn create_scratch(cfg: &Config, dev: Option<&str>, env_name: &str) -> 
         password: dev_env.password.clone(),
         role: Role::Scratch,
         allow_clean: true,
+        placeholders: dev_env.placeholders.clone(),
     };
     crate::config::save_environment(&cfg.root, env_name, &env, false)?;
     Ok(ScratchCreated { environment: env_name.to_string(), database })
@@ -1215,6 +1225,60 @@ pub async fn capture(cfg: &Config, env_name: Option<&str>, description: &str, as
 }
 
 /// Writes a generated script into the migrations folder; never overwrites.
+/// Squash: one B script with the schema the V scripts build up to `up_to` (all of them when None).
+/// Empty databases start from it; databases with history keep running the V scripts. Before it is
+/// kept, scratch built the old way and scratch built from the new B script must match.
+pub async fn squash(cfg: &Config, up_to: Option<&str>, description: &str, scratch: Option<&str>, dry_run: bool, log: Log<'_>) -> Result<(Generated, Option<std::path::PathBuf>)> {
+    let slug = check_description(description)?.replace([' ', '-'], "_");
+    let (name, env) = scratch_env(cfg, scratch)?;
+    if cfg.uses_placeholders() {
+        log(Level::Warn, &format!("placeholders are written into the script with the values of '{name}'; check them before committing"));
+    }
+    log(Level::Info, &format!("Building '{name}' from the versioned scripts{}", up_to.map(|v| format!(" up to {v}")).unwrap_or_default()));
+    let s = db::connect(&name, env).await?;
+    runner::reset_schemas(&s, &cfg.project.schemas).await?;
+    let opts = MigrateOptions { out_of_order: true, target: up_to.map(Into::into), allow_non_empty: true, skip_repeatables: true, ..Default::default() };
+    let applied = runner::migrate(cfg, Some(&name), opts, log).await?;
+    let version = runner::info(cfg, Some(&name))
+        .await?
+        .into_iter()
+        .filter(|i| matches!(i.state, runner::State::Applied | runner::State::Baseline))
+        .filter_map(|i| i.version)
+        .max_by_key(|v| migration::Version::parse(v))
+        .ok_or_else(|| crate::Error::Config("there are no versioned scripts to squash".into()))?;
+    let changes = compare(&model_of(cfg, &s).await?, &Model::default());
+    let mut g = generate(cfg, &changes, description, false)?;
+    g.file_name = format!("B{version}__{slug}.sql");
+    g.version = version.clone();
+    g.sql = format!(
+        "-- Squashed from the versioned scripts up to {version} ({} script(s) applied to build it).
+         -- Empty databases start here; databases that already have history keep running the V scripts.
+{}",
+        applied.applied.len(),
+        g.sql
+    );
+    if dry_run {
+        return Ok((g, None));
+    }
+    let before = model_of(cfg, &rebuild_scratch(cfg, &name, env, None, log).await?).await?;
+    let path = save(cfg, &g.file_name, &g.sql)?;
+    log(Level::Info, &format!("Checking: rebuilding '{name}' from {}", g.file_name));
+    let check = async { Ok::<_, crate::Error>(diff(&before, &model_of(cfg, &rebuild_scratch(cfg, &name, env, None, log).await?).await?)) }.await;
+    match check {
+        Ok(d) if d.is_empty() => Ok((g, Some(path))),
+        other => {
+            let _ = std::fs::remove_file(&path);
+            match other {
+                Ok(d) => config(format!(
+                    "the squashed script does not build the same schema ({}); it was not kept",
+                    d.iter().map(|c| c.id.as_str()).collect::<Vec<_>>().join(", ")
+                )),
+                Err(e) => Err(e),
+            }
+        }
+    }
+}
+
 pub fn save(cfg: &Config, file_name: &str, sql: &str) -> Result<std::path::PathBuf> {
     if migration::parse_name(file_name).is_none() || file_name.contains(['/', '\\']) {
         return config(format!("'{file_name}' is not a valid migration file name"));

@@ -1,15 +1,15 @@
 // Settings: project (S15), comparison filters (S16), licence (S19).
 import { Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { api, errorText, type Filter, type Project } from '../api'
+import { api, errorText, type Filter, type LockMode, type Project } from '../api'
 import { Button, Field, IconButton, Input, Select, Textarea } from '../ui/controls'
 import { Card, InlineAlert } from '../ui/display'
 import { useToast } from '../ui/overlays'
 
 const objectTypes = ['any', 'table', 'view', 'function', 'type', 'sequence', 'trigger', 'extension'] as const
 
-type Form = { name: string; migrations: string; schemas: string; filters: Filter[] }
-const formOf = (p: Project): Form => ({ name: p.name, migrations: p.migrations, schemas: p.schemas.join(', '), filters: p.filters })
+type Form = { name: string; migrations: string; schemas: string; filters: Filter[]; lock: LockMode }
+const formOf = (p: Project): Form => ({ name: p.name, migrations: p.migrations, schemas: p.schemas.join(', '), filters: p.filters, lock: p.lock })
 
 export function Settings({ project, onProject, onDirty }: { project: Project; onProject: (p: Project) => void; onDirty: (dirty: boolean) => void }) {
   const toast = useToast()
@@ -33,7 +33,7 @@ export function Settings({ project, onProject, onDirty }: { project: Project; on
     try {
       const p = await api.projectSave(project.root, {
         name: form.name.trim(), engine: project.engine, migrations: form.migrations.trim(), schemas,
-        history_table: project.history_table, filters: form.filters.map((f) => ({ ...f, pattern: f.pattern.trim() })),
+        history_table: project.history_table, filters: form.filters.map((f) => ({ ...f, pattern: f.pattern.trim() })), lock: form.lock,
       })
       onProject(p)
       setForm(formOf(p))
@@ -61,6 +61,14 @@ export function Settings({ project, onProject, onDirty }: { project: Project; on
               {(a) => <Input {...a} mono value={form.schemas} onChange={(e) => setForm({ ...form, schemas: e.target.value })} />}
             </Field>
             <Field label="History table" help="Fixed once databases have history.">{(a) => <Input {...a} mono readOnly value={project.history_table} />}</Field>
+            <Field label="Run lock" help="Through PgBouncer in transaction mode, RDS Proxy or Aurora Limitless, use the lock table. Every machine that runs migrations must use the same setting.">
+              {(a) => (
+                <Select {...a} value={form.lock} onChange={(e) => setForm({ ...form, lock: e.target.value as LockMode })}>
+                  <option value="advisory">Advisory lock (direct connections)</option>
+                  <option value="table">Lock table (connection poolers)</option>
+                </Select>
+              )}
+            </Field>
           </div>
         </Card>
       </section>

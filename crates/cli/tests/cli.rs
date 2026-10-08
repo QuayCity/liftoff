@@ -32,7 +32,7 @@ fn json(r: &Run) -> serde_json::Value {
 fn reset(base: &str, db: &str) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        let env = liftoff_core::config::Environment { url: format!("{base}/{db}"), user: None, password: None, role: liftoff_core::config::Role::Test, allow_clean: false };
+        let env = liftoff_core::config::Environment { url: format!("{base}/{db}"), user: None, password: None, role: liftoff_core::config::Role::Test, allow_clean: false, placeholders: Default::default() };
         let c = liftoff_core::db::connect(db, &env).await.unwrap();
         c.batch_execute("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;").await.unwrap();
     });
@@ -89,8 +89,9 @@ fn ci_contract() {
     assert_eq!(liftoff(&dir, &["-e", "test", "clean"], None).code, 2);
 
     // F11-N1 / F12-N1: unsupported Flyway options are errors, and so is writing to Flyway's table.
-    let r = liftoff(&dir, &["-placeholders.owner=x", "-e", "test", "migrate"], None);
-    assert!(r.code == 2 && r.stderr.contains("placeholders.owner"), "{}", r.stderr);
+    assert_eq!(liftoff(&dir, &["-placeholders.owner=x", "-e", "test", "migrate"], None).code, 0, "Flyway placeholders are accepted");
+    let r = liftoff(&dir, &["-callbacks=db/callbacks", "-e", "test", "migrate"], None);
+    assert!(r.code == 2 && r.stderr.contains("-callbacks"), "{}", r.stderr);
     let r = liftoff(&dir, &["-table=flyway_schema_history", "-e", "test", "info"], None);
     assert!(r.code == 2 && r.stderr.contains("import-flyway-history"), "{}", r.stderr);
 
@@ -107,7 +108,7 @@ fn ci_contract() {
         Some(l) => {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                let env = liftoff_core::config::Environment { url: format!("{base}/shop_test"), user: None, password: None, role: liftoff_core::config::Role::Test, allow_clean: false };
+                let env = liftoff_core::config::Environment { url: format!("{base}/shop_test"), user: None, password: None, role: liftoff_core::config::Role::Test, allow_clean: false, placeholders: Default::default() };
                 liftoff_core::db::connect("t", &env).await.unwrap().batch_execute("alter table orders add column hotfix int").await.unwrap();
             });
             let report = dir.join("checks.html");
@@ -126,7 +127,7 @@ fn ci_contract() {
     reset(&base, "shop_test");
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        let env = liftoff_core::config::Environment { url: format!("{base}/shop_test"), user: None, password: None, role: liftoff_core::config::Role::Test, allow_clean: false };
+        let env = liftoff_core::config::Environment { url: format!("{base}/shop_test"), user: None, password: None, role: liftoff_core::config::Role::Test, allow_clean: false, placeholders: Default::default() };
         liftoff_core::db::connect("t", &env).await.unwrap().batch_execute("create table legacy (id int)").await.unwrap();
     });
     let r = liftoff(&dir, &["-e", "test", "migrate", "--output-type", "json"], None);

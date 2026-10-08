@@ -23,6 +23,29 @@ pub struct Project {
     /// comparison filters (S16), evaluated in order; the last matching rule wins, default include
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filters: Vec<Filter>,
+    /// how concurrent runs on one database are kept apart
+    #[serde(default, skip_serializing_if = "LockMode::is_default")]
+    pub lock: LockMode,
+    /// `${name}` values for every environment; an environment's own placeholders win
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub placeholders: BTreeMap<String, String>,
+}
+
+/// `advisory` (default): a Postgres session advisory lock.
+/// `table`: a lease row next to the history table, for connection poolers (PgBouncer transaction
+/// pooling, RDS Proxy) and databases without session advisory locks (Aurora Limitless).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LockMode {
+    #[default]
+    Advisory,
+    Table,
+}
+
+impl LockMode {
+    fn is_default(&self) -> bool {
+        *self == LockMode::Advisory
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,6 +118,9 @@ pub struct Environment {
     /// `clean` and scratch rebuilds are refused unless this is true (scratch envs imply it).
     #[serde(default)]
     pub allow_clean: bool,
+    /// `${name}` values for this environment (secrets: use `${env.VAR}` as the value)
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub placeholders: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -150,7 +176,7 @@ impl Config {
     pub fn adhoc(root: &Path, migrations: &str) -> Config {
         Config {
             root: root.to_path_buf(),
-            project: Project { name: "adhoc".into(), engine: d_engine(), migrations: migrations.into(), schemas: d_schemas(), history_table: d_table(), filters: vec![] },
+            project: Project { name: "adhoc".into(), engine: d_engine(), migrations: migrations.into(), schemas: d_schemas(), history_table: d_table(), filters: vec![], lock: LockMode::Advisory, placeholders: BTreeMap::new() },
             environments: BTreeMap::new(),
         }
     }
@@ -160,6 +186,33 @@ impl Config {
             Some(e) => Ok(e),
             None => config(format!("no environment '{name}'; configured: {}", self.env_names())),
         }
+    }
+
+    /// Placeholder values for one environment: built-ins, then the project's, then the environment's.
+    pub fn placeholders(&self, env_name: &str) -> BTreeMap<String, String> {
+        let mut m = BTreeMap::new();
+        let schema = self.history_schema().to_string();
+        for (k, v) in [
+            ("liftoff:environment", env_name),
+            ("liftoff:schema", &schema),
+            ("liftoff:table", &self.project.history_table),
+            // Flyway's built-in names, so imported scripts run unchanged.
+            ("flyway:environment", env_name),
+            ("flyway:defaultSchema", &schema),
+            ("flyway:table", &self.project.history_table),
+        ] {
+            m.insert(k.to_string(), v.to_string());
+        }
+        let own = self.environments.get(env_name).map(|e| e.placeholders.clone()).unwrap_or_default();
+        for (k, v) in self.project.placeholders.iter().chain(own.iter()) {
+            m.insert(k.clone(), interpolate(v, |x| std::env::var(x).ok()).unwrap_or_else(|_| v.clone()));
+        }
+        m
+    }
+
+    /// Whether this project uses placeholders at all (then a missing value is an error).
+    pub fn uses_placeholders(&self) -> bool {
+        !self.project.placeholders.is_empty() || self.environments.values().any(|e| !e.placeholders.is_empty())
     }
 
     /// The named environment, or the only one when there is exactly one.
@@ -408,7 +461,7 @@ mod tests {
     #[test]
     fn globs_and_filters() {
         assert!(glob("audit_*", "audit_log") && glob("a?c", "abc") && glob("*", "") && !glob("audit_*", "orders"));
-        let mut p = Project { name: "x".into(), engine: d_engine(), migrations: d_migrations(), schemas: d_schemas(), history_table: d_table(), filters: vec![] };
+        let mut p = Project { name: "x".into(), engine: d_engine(), migrations: d_migrations(), schemas: d_schemas(), history_table: d_table(), filters: vec![], lock: LockMode::Advisory, placeholders: BTreeMap::new() };
         assert!(p.compares("table", "public", "audit_log"));
         p.filters = vec![
             Filter { action: FilterAction::Exclude, object: "any".into(), pattern: "audit_*".into() },
@@ -426,7 +479,7 @@ mod tests {
         assert_eq!(interpolate("a${env.PW}b", get).unwrap(), "as3cretb");
         assert!(interpolate("${env.MISSING}", |_| None).is_err());
 
-        let mut env = Environment { url: "x".into(), user: None, password: None, role: Role::Dev, allow_clean: false };
+        let mut env = Environment { url: "x".into(), user: None, password: None, role: Role::Dev, allow_clean: false, placeholders: BTreeMap::new() };
         apply_env_vars("my-db", &mut env, |k| (k == "LIFTOFF_ENV_MY_DB_URL").then(|| "y".to_string()));
         assert_eq!(env.url, "y");
     }
@@ -438,7 +491,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         init(&dir, "kc", "postgresql").unwrap();
-        let env = Environment { url: "postgres://h/db".into(), user: None, password: Some("kc-secret".into()), role: Role::Dev, allow_clean: false };
+        let env = Environment { url: "postgres://h/db".into(), user: None, password: Some("kc-secret".into()), role: Role::Dev, allow_clean: false, placeholders: BTreeMap::new() };
         assert_eq!(save_environment_with(&dir, "dev", &env, false, true).unwrap(), PasswordStore::Keychain);
         let user = std::fs::read_to_string(dir.join(USER_FILE)).unwrap();
         assert!(!user.contains("kc-secret"), "password must not touch disk: {user}");
@@ -454,7 +507,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         init(&dir, "shop", "postgresql").unwrap();
         assert!(init(&dir, "shop", "postgresql").is_err(), "second init must refuse");
-        let env = Environment { url: "postgres://h/db".into(), user: Some("u".into()), password: Some("pw".into()), role: Role::Test, allow_clean: false };
+        let env = Environment { url: "postgres://h/db".into(), user: Some("u".into()), password: Some("pw".into()), role: Role::Test, allow_clean: false, placeholders: BTreeMap::new() };
         assert_eq!(save_environment_with(&dir, "staging", &env, true, false).unwrap(), PasswordStore::UserFile);
         let shared = std::fs::read_to_string(dir.join(PROJECT_FILE)).unwrap();
         assert!(!shared.contains("pw"), "password leaked into the shared file");

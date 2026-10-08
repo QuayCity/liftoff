@@ -158,6 +158,43 @@ fn bump(text: &str) -> String {
     format!("{head}{n:0width$}", width = last.len())
 }
 
+/// Replaces `${name}` with its value. When the project uses placeholders, a `${name}` without a
+/// value is an error naming it; projects without placeholders run their scripts untouched.
+pub fn apply_placeholders(sql: &str, values: &std::collections::BTreeMap<String, String>, strict: bool, script: &str) -> Result<String> {
+    let mut out = String::with_capacity(sql.len());
+    let mut rest = sql;
+    let mut missing = Vec::new();
+    while let Some(i) = rest.find("${") {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 2..];
+        let end = after.find('}');
+        let name = end.map(|e| &after[..e]).filter(|n| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | ':' | '-')));
+        match (name, end) {
+            (Some(n), Some(e)) => {
+                match values.get(n) {
+                    Some(v) => out.push_str(v),
+                    None => {
+                        if strict && !missing.contains(&n) {
+                            missing.push(n);
+                        }
+                        out.push_str(&rest[i..i + 2 + e + 1]);
+                    }
+                }
+                rest = &after[e + 1..];
+            }
+            _ => {
+                out.push_str("${");
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    if !missing.is_empty() {
+        return config(format!("{script} uses placeholders with no value: {}", missing.join(", ")));
+    }
+    Ok(out)
+}
+
 /// Postgres statements that cannot run inside a transaction block.
 /// ponytail: keyword scan, so a match inside a comment or string also counts (safe direction: runs without a transaction).
 pub fn needs_no_transaction(sql: &str) -> bool {
@@ -259,6 +296,16 @@ mod tests {
         assert_eq!(next_version(&[mk("20261001.0900")], now), "20261008.1104");
         // Same minute as the latest timestamp: bump instead of colliding.
         assert_eq!(next_version(&[mk("20261008.1104")], now), "20261008.1105");
+    }
+
+    #[test]
+    fn placeholders() {
+        let mut v = std::collections::BTreeMap::new();
+        v.insert("app_user".to_string(), "svc_shop".to_string());
+        let sql = "grant select on orders to ${app_user}; select '${not a name}', $$x$$;";
+        assert_eq!(apply_placeholders(sql, &v, true, "V1").unwrap(), "grant select on orders to svc_shop; select '${not a name}', $$x$$;");
+        assert!(apply_placeholders("${who}", &v, true, "V1").unwrap_err().to_string().contains("V1 uses placeholders with no value: who"));
+        assert_eq!(apply_placeholders("${who}", &v, false, "V1").unwrap(), "${who}", "projects without placeholders are untouched");
     }
 
     #[test]

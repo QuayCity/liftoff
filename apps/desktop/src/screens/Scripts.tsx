@@ -1,8 +1,8 @@
 // Scripts workspace: the migrations folder, plus S09 "new script".
-import { FileCode2, Plus, RefreshCw } from 'lucide-react'
+import { FileCode2, Layers, Plus, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { api, errorText, type Project, type ScriptView } from '../api'
-import { Button, Field, IconButton, Input, RadioGroup, Textarea } from '../ui/controls'
+import { Button, Field, IconButton, Input, RadioGroup, Select, Textarea } from '../ui/controls'
 import { DataTable } from '../ui/data'
 import { Badge, Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
 import { Dialog, useToast } from '../ui/overlays'
@@ -15,6 +15,7 @@ export function Scripts({ project }: { project: Project }) {
   const [error, setError] = useState<string | null>(null)
   const [active, setActive] = useState<string | undefined>()
   const [adding, setAdding] = useState(false)
+  const [squashing, setSquashing] = useState(false)
 
   const load = useCallback(async (select?: string) => {
     setError(null)
@@ -39,6 +40,7 @@ export function Scripts({ project }: { project: Project }) {
         <span className="font-mono text-xs font-normal text-muted">{project.root}/migrations</span>
         <span className="flex-1" />
         <IconButton label="Reload from disk" icon={RefreshCw} onClick={() => load()} />
+        <Button icon={Layers} onClick={() => setSquashing(true)} disabled={!scripts?.some((s) => s.kind === 'versioned')}>Squash…</Button>
         <Button variant="primary" icon={Plus} onClick={() => setAdding(true)}>New script</Button>
       </header>
       {error && <InlineAlert tone="danger" title="Couldn't read the migrations folder">{error}</InlineAlert>}
@@ -77,7 +79,55 @@ export function Scripts({ project }: { project: Project }) {
           toast({ tone: 'success', title: `Created ${name}` })
           load(name)
         }} />
+      <SquashDialog key={squashing ? 'squash-open' : 'squash-closed'} open={squashing} onOpenChange={setSquashing} project={project}
+        versions={(scripts ?? []).filter((s) => s.kind === 'versioned' && s.version).map((s) => s.version!)}
+        onDone={(name) => {
+          toast({ tone: 'success', title: `Wrote ${name}` })
+          load(name)
+        }} />
     </div>
+  )
+}
+
+function SquashDialog({ open, onOpenChange, project, versions, onDone }: {
+  open: boolean; onOpenChange: (o: boolean) => void; project: Project; versions: string[]; onDone: (name: string) => void
+}) {
+  const [upTo, setUpTo] = useState(versions[versions.length - 1] ?? '')
+  const [description, setDescription] = useState('squashed')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const valid = /^[\p{L}\p{N} _-]{1,120}$/u.test(description.trim())
+
+  const run = async () => {
+    if (!valid || !upTo) return
+    setBusy(true)
+    setError(null)
+    try {
+      onDone(await api.squash(project.root, upTo, description.trim()))
+      onOpenChange(false)
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange} title="Squash scripts" size="md" submitting={busy}
+      description="Writes one baseline script with the schema the versioned scripts build. New, empty databases start from it; databases that already have history keep running the scripts."
+      footer={<><Button onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button><Button variant="primary" loading={busy} onClick={run} disabled={!valid}>Squash</Button></>}>
+      <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); run() }}>
+        <Field label="Up to version" help="Scripts after it stay as they are.">
+          {(a) => <Select {...a} value={upTo} onChange={(e) => setUpTo(e.target.value)}>{versions.map((v) => <option key={v} value={v}>{v}</option>)}</Select>}
+        </Field>
+        <Field label="Description" error={valid ? undefined : 'Up to 120 letters, digits, spaces, - or _.'}>
+          {(a) => <Input {...a} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={120} />}
+        </Field>
+        <p className="text-xs font-normal text-muted">Built in the scratch database, then checked by building it a second time from the new script. Nothing is kept if the two differ.</p>
+        {error && <InlineAlert tone="danger" title="Not squashed">{error}</InlineAlert>}
+        <button type="submit" hidden />
+      </form>
+    </Dialog>
   )
 }
 

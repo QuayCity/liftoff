@@ -81,7 +81,10 @@ fn parse_toml(text: &str) -> Result<Parsed> {
     let mut p = Parsed::default();
     if let Some(envs) = t.get("environments").and_then(|e| e.as_table()) {
         for (name, e) in envs {
-            let fields = e.as_table().map(|e| e.iter().map(|(k, v)| (k.clone(), as_text(v))).collect()).unwrap_or_default();
+            let mut fields = BTreeMap::new();
+            if let Some(e) = e.as_table() {
+                flatten("", e, &mut fields, &as_text);
+            }
             p.envs.push((name.clone(), fields));
         }
     }
@@ -184,6 +187,9 @@ fn convert_with(root: &Path, name: &str, use_keychain: bool) -> Result<ConvertRe
     r.schemas = schemas.clone();
     let clean_allowed = p.settings.remove("cleanDisabled").is_some_and(|v| v.eq_ignore_ascii_case("false"));
     p.settings.remove("environment");
+    let placeholders: BTreeMap<String, String> =
+        p.settings.iter().filter_map(|(k, v)| k.strip_prefix("placeholders.").map(|n| (n.to_string(), interpolate_flyway(v)))).collect();
+    p.settings.retain(|k, _| !k.starts_with("placeholders."));
 
     // Settings we understand but do not need, and ones we cannot carry over.
     for (k, v) in &p.settings {
@@ -191,7 +197,7 @@ fn convert_with(root: &Path, name: &str, use_keychain: bool) -> Result<ConvertRe
             // Desktop-app and comparison settings, and project ids: nothing to carry over.
             k if k.starts_with("flywayDesktop.") || k.starts_with("redgateCompare.") => continue,
             "id" | "name" | "databaseType" => continue,
-            k if k.starts_with("placeholders.") || k.starts_with("placeholder") => "placeholders are not supported; replace them in the scripts",
+            k if k.starts_with("placeholder") => "LiftOff always replaces `${name}` placeholders, with Flyway's default `${` `}` markers",
             k if k.starts_with("callbacks") => "callbacks are not supported; turn them into scripts",
             k if k.starts_with("javaMigrations") || k.starts_with("resolvers") => "Java migrations and resolvers need a JVM; they are not supported",
             "sqlMigrationPrefix" | "repeatableSqlMigrationPrefix" | "undoSqlMigrationPrefix" | "sqlMigrationSeparator" | "sqlMigrationSuffixes" => {
@@ -205,6 +211,11 @@ fn convert_with(root: &Path, name: &str, use_keychain: bool) -> Result<ConvertRe
     }
 
     config::init_with(root, name, &r.migrations, &schemas)?;
+    if !placeholders.is_empty() {
+        let mut project = config::Config::load(root)?.project;
+        project.placeholders = placeholders;
+        config::save_project(root, &project)?;
+    }
     if r.flyway_table != DEFAULT_TABLE {
         r.notes.push(format!("Flyway's history table is {}; pass it to the history import", r.flyway_table));
     }
@@ -225,10 +236,11 @@ fn convert_with(root: &Path, name: &str, use_keychain: bool) -> Result<ConvertRe
             password: fields.get("password").map(|p| interpolate_flyway(p)),
             role,
             allow_clean: clean_allowed && role != Role::Prod,
+            placeholders: fields.iter().filter_map(|(k, v)| k.strip_prefix("placeholders.").map(|n| (n.to_string(), interpolate_flyway(v)))).collect(),
         };
         let name = if env_name == "default" { "default".to_string() } else { env_name.replace(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'), "_") };
         config::save_environment_with(root, &name, &env, true, use_keychain && std::env::var_os("LIFTOFF_NO_KEYRING").is_none())?;
-        for k in fields.keys().filter(|k| !["url", "user", "password", "schemas"].contains(&k.as_str())) {
+        for k in fields.keys().filter(|k| !["url", "user", "password", "schemas"].contains(&k.as_str()) && !k.starts_with("placeholders.")) {
             r.not_converted.push(format!("environments.{env_name}.{k}: not used by LiftOff"));
         }
         r.environments.push(name);
@@ -284,7 +296,7 @@ pub async fn import_history(cfg: &config::Config, env_name: Option<&str>, from_t
         return cfg_err("the Flyway table and LiftOff's history table must have different names");
     }
     let c = db::connect(&name, env).await?;
-    db::lock(&c, &schema, &table, || log(Level::Info, "Another run holds the lock on this database; waiting")).await?;
+    let lock = db::lock(&c, &name, env, &schema, &table, cfg.project.lock, || log(Level::Info, "Another run holds the lock on this database; waiting")).await?;
     let result = async {
         if !db::history_exists(&c, &schema, from_table).await? {
             return cfg_err(format!("{name} has no {schema}.{from_table}"));
@@ -343,12 +355,25 @@ pub async fn import_history(cfg: &config::Config, env_name: Option<&str>, from_t
         c.batch_execute("BEGIN").await?;
         let copy = async {
             for r in &out {
-                c.execute(
+                use tokio_postgres::types::Type;
+                db::exec(
+                    &c,
                     &format!(
                         "insert into {t} (installed_rank, version, description, type, script, checksum, installed_by, installed_on, execution_time, success)
-                         values ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')::timestamp, $9, $10)"
+                         values ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') at time zone 'UTC', $9, $10)"
                     ),
-                    &[&r.installed_rank, &r.version, &r.description, &r.kind, &r.script, &r.checksum, &r.installed_by, &r.installed_on, &r.execution_time, &r.success],
+                    &[
+                        (&r.installed_rank, Type::INT4),
+                        (&r.version, Type::VARCHAR),
+                        (&r.description, Type::VARCHAR),
+                        (&r.kind, Type::VARCHAR),
+                        (&r.script, Type::VARCHAR),
+                        (&r.checksum, Type::INT4),
+                        (&r.installed_by, Type::VARCHAR),
+                        (&r.installed_on, Type::TEXT),
+                        (&r.execution_time, Type::INT4),
+                        (&r.success, Type::BOOL),
+                    ],
                 )
                 .await?;
             }
@@ -367,7 +392,7 @@ pub async fn import_history(cfg: &config::Config, env_name: Option<&str>, from_t
         Ok(report)
     }
     .await;
-    let _ = db::unlock(&c, &schema, &table).await;
+    lock.release(&c).await;
     result
 }
 
@@ -402,7 +427,8 @@ mod tests {
         let r = convert_with(&dir, "shop", false).unwrap();
         assert_eq!((r.migrations.as_str(), r.schemas.clone(), r.flyway_table.as_str()), ("db/migration", vec!["sales".to_string(), "public".to_string()], "schema_version"));
         assert_eq!(r.environments, ["default"]);
-        assert!(r.not_converted.iter().any(|n| n.starts_with("placeholders.owner")), "{:#?}", r.not_converted);
+        assert!(!r.not_converted.iter().any(|n| n.contains("placeholders")), "{:#?}", r.not_converted);
+        assert_eq!(config::Config::load(&dir).unwrap().project.placeholders.get("owner").map(String::as_str), Some("app"));
         assert!(r.not_converted.iter().any(|n| n.contains("classpath:db/extra")), "{:#?}", r.not_converted);
         let shared = std::fs::read_to_string(dir.join(config::PROJECT_FILE)).unwrap();
         assert!(shared.contains("postgres://localhost:5432/shop") && !shared.contains("DB_PW"), "{shared}");

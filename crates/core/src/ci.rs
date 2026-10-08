@@ -104,10 +104,10 @@ mod tests {
     use crate::config::{Environment, Project};
 
     fn cfg() -> Config {
-        let env = |role| Environment { url: "postgres://h/db".into(), user: None, password: None, role, allow_clean: false };
+        let env = |role| Environment { url: "postgres://h/db".into(), user: None, password: None, role, allow_clean: false, placeholders: Default::default() };
         Config {
             root: std::env::temp_dir(),
-            project: Project { name: "shop".into(), engine: "postgresql".into(), migrations: "migrations".into(), schemas: vec!["public".into()], history_table: "h".into(), filters: vec![] },
+            project: Project { name: "shop".into(), engine: "postgresql".into(), migrations: "migrations".into(), schemas: vec!["public".into()], history_table: "h".into(), filters: vec![], lock: Default::default(), placeholders: Default::default() },
             environments: [("dev".to_string(), env(Role::Dev)), ("staging".to_string(), env(Role::Test)), ("prod-eu".to_string(), env(Role::Prod))].into_iter().collect(),
         }
     }

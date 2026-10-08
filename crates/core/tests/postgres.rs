@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 fn quiet(_: Level, _: &str) {}
 
 fn env(base: &str, db: &str, role: Role) -> Environment {
-    Environment { url: format!("{base}/{db}"), user: None, password: None, role, allow_clean: false }
+    Environment { url: format!("{base}/{db}"), user: None, password: None, role, allow_clean: false, placeholders: Default::default() }
 }
 
 async fn reset(cfg: &Config, name: &str) {

@@ -29,6 +29,9 @@ struct Cli {
     /// Licence string; prefer the LIFTOFF_LICENSE variable in CI
     #[arg(long, global = true, hide_env_values = true)]
     license: Option<String>,
+    /// Value for a `${NAME}` placeholder in the scripts, for this run (wins over liftoff.toml); repeatable
+    #[arg(long = "placeholder", global = true, value_name = "NAME=VALUE", value_parser = parse_placeholder)]
+    placeholders: Vec<(String, String)>,
     #[command(subcommand)]
     command: Command,
 }
@@ -79,6 +82,9 @@ enum Command {
         /// Run every script on a database that has tables but no history (normally refused)
         #[arg(long)]
         allow_non_empty: bool,
+        /// Also re-run repeatable scripts that have not changed
+        #[arg(long)]
+        rerun_repeatables: bool,
     },
     /// Undo the latest applied migration with its U script (Pro)
     Undo,
@@ -137,6 +143,20 @@ enum Command {
         /// Write a baseline script (B…) that empty databases start from, instead of a V script
         #[arg(long)]
         as_baseline_script: bool,
+    },
+    /// Squash the versioned scripts into one baseline script (B…) that empty databases start from (Pro)
+    Squash {
+        /// Last version to include (default: all of them)
+        #[arg(long)]
+        up_to: Option<String>,
+        #[arg(long, default_value = "squashed")]
+        description: String,
+        /// Scratch environment to build in (default: the first with role "scratch")
+        #[arg(long)]
+        scratch: Option<String>,
+        /// Print the script instead of writing it
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Bring the schema-model folder up to date with dev: one file per object (Pro)
     Model {
@@ -285,12 +305,12 @@ async fn run(cli: &Cli, adhoc: &Adhoc) -> Result<(Value, String)> {
             let infos = runner::info(&cfg, env).await?;
             Ok((to(&infos)?, info_table(&infos)))
         }
-        Command::Migrate { out_of_order, target, dry_run, allow_non_empty } => {
+        Command::Migrate { out_of_order, target, dry_run, allow_non_empty, rerun_repeatables } => {
             let cfg = load(cli, adhoc)?;
             if *dry_run {
                 license::require("dry-run", cli.license.as_deref(), Some(root))?;
             }
-            let opts = MigrateOptions { out_of_order: *out_of_order, target: target.clone(), dry_run: *dry_run, allow_non_empty: *allow_non_empty };
+            let opts = MigrateOptions { out_of_order: *out_of_order, target: target.clone(), dry_run: *dry_run, allow_non_empty: *allow_non_empty, rerun_repeatables: *rerun_repeatables, skip_repeatables: false };
             let r = runner::migrate(&cfg, env, opts, &log).await?;
             let text = match &r.dry_run_sql {
                 Some(sql) => sql.clone(),
@@ -404,6 +424,19 @@ async fn run(cli: &Cli, adhoc: &Adhoc) -> Result<(Value, String)> {
             let r = diff::create_scratch(&cfg, from.as_deref(), name).await?;
             Ok((to(&r)?, format!("Created database {} and saved it as environment '{}' (role scratch, private)", r.database, r.environment)))
         }
+        Command::Squash { up_to, description, scratch, dry_run } => {
+            let cfg = load(cli, adhoc)?;
+            license::require("generate", cli.license.as_deref(), Some(root))?;
+            let (g, path) = diff::squash(&cfg, up_to.as_deref(), description, scratch.as_deref(), *dry_run, &log).await?;
+            match path {
+                None => Ok((to(&g)?, g.sql.clone())),
+                Some(p) => Ok((
+                    json!({ "written": p, "version": g.version }),
+                    format!("Wrote {} and checked it builds the same schema.
+Databases with history are not affected; empty ones now start from it.", p.display()),
+                )),
+            }
+        }
         Command::Capture { description, dry_run, as_baseline_script } => {
             let cfg = load(cli, adhoc)?;
             license::require("generate", cli.license.as_deref(), Some(root))?;
@@ -497,6 +530,10 @@ fn to<T: serde::Serialize>(v: &T) -> Result<Value> {
 
 /// liftoff.toml with Flyway-style command-line overrides applied. With `-url` and no liftoff.toml,
 /// a project is made up on the spot, the way the Flyway CLI works without a config file.
+fn parse_placeholder(s: &str) -> std::result::Result<(String, String), String> {
+    s.split_once('=').filter(|(k, _)| !k.is_empty()).map(|(k, v)| (k.to_string(), v.to_string())).ok_or_else(|| format!("{s}: use NAME=VALUE"))
+}
+
 fn load(cli: &Cli, adhoc: &Adhoc) -> Result<Config> {
     let root = &cli.project_dir;
     let mut cfg = if adhoc.url.is_some() && !root.join(config::PROJECT_FILE).exists() {
@@ -536,9 +573,13 @@ fn load(cli: &Cli, adhoc: &Adhoc) -> Result<Config> {
             user: adhoc.user.clone().or_else(|| old.as_ref().and_then(|o| o.user.clone())),
             password: adhoc.password.clone().or_else(|| old.as_ref().and_then(|o| o.password.clone())),
             role: old.as_ref().map(|o| o.role).unwrap_or(Role::Test),
-            allow_clean: adhoc.allow_clean || old.is_some_and(|o| o.allow_clean),
+            allow_clean: adhoc.allow_clean || old.as_ref().is_some_and(|o| o.allow_clean),
+            placeholders: old.map(|o| o.placeholders).unwrap_or_default(),
         };
         cfg.environments.insert(name, env);
+    }
+    for e in cfg.environments.values_mut() {
+        e.placeholders.extend(cli.placeholders.iter().cloned());
     }
     Ok(cfg)
 }
