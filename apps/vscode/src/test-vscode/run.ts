@@ -46,6 +46,9 @@ role = "scratch"
     launchArgs: [workspace, '--disable-extensions', '--skip-welcome', '--skip-release-notes'],
     extensionTestsEnv: { LIFTOFF_WORKSPACE: workspace },
   })
+  // VS Code can exit 0 without running the suite at all (e.g. a broken download), so the suite
+  // leaves a file behind when it gets to the end.
+  if (!fs.existsSync(path.join(workspace, '.suite-passed'))) throw new Error('VS Code exited without running the suite to the end')
   fs.rmSync(workspace, { recursive: true, force: true })
 }
 

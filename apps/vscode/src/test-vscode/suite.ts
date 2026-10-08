@@ -73,5 +73,6 @@ export async function run(): Promise<void> {
   fs.rmSync(bad.fsPath)
   assert.equal(await vscode.commands.executeCommand('liftoff.model.check'), true)
   assert.equal(vscode.languages.getDiagnostics(bad).length, 0)
+  fs.writeFileSync(path.join(workspace, '.suite-passed'), '')
   console.log('liftoff suite: all checks passed')
 }
