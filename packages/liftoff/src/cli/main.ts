@@ -13,7 +13,6 @@ import { engineOf, isSqlServerUrl, open } from '../core/db.ts'
 import * as diff from '../core/diff.ts'
 import { asLiftoffError, configError, driftError, LiftoffError, modelAheadError } from '../core/errors.ts'
 import * as flyway from '../core/flyway.ts'
-import * as license from '../core/license.ts'
 import * as model from '../core/model.ts'
 import * as runner from '../core/runner.ts'
 import { createSample } from '../core/sample.ts'
@@ -29,7 +28,6 @@ type Ctx = {
   /** the environment named on the command line (or "default" with -url) */
   env: string | undefined
   json: boolean
-  license: string | undefined
   placeholders: [string, string][]
   adhoc: Adhoc
 }
@@ -49,7 +47,6 @@ const GLOBAL: Record<string, OptionSpec> = {
   'project-dir': { type: 'string', short: 'C', default: '.', help: 'Project folder (holds liftoff.toml)', value: 'DIR' },
   environment: { type: 'string', short: 'e', help: 'Environment from liftoff.toml to work on', value: 'NAME' },
   'output-type': { type: 'string', default: 'text', help: 'text or json', value: 'TYPE' },
-  license: { type: 'string', help: 'Licence string; prefer the LIFTOFF_LICENSE variable in CI', value: 'TEXT' },
   placeholder: { type: 'string', multiple: true, help: 'Value for a ${NAME} placeholder in the scripts, for this run (wins over liftoff.toml); repeatable', value: 'NAME=VALUE' },
   help: { type: 'boolean', short: 'h', help: 'Show help' },
   version: { type: 'boolean', short: 'V', help: 'Show the version' },
@@ -59,9 +56,6 @@ const log: runner.Log = (level, msg) => process.stderr.write(level === 'warn' ? 
 
 const str = (v: Values, k: string) => v[k] as string | undefined
 const flag = (v: Values, k: string) => v[k] === true
-
-/** Pro features: checked offline against the licence (license.ts). */
-const requireLicense = (ctx: Ctx, feature: string) => license.require(feature, ctx.license, ctx.root)
 
 const kindOf = (c: { kind: string }) => c.kind.padEnd(8)
 
@@ -207,13 +201,12 @@ const COMMANDS: Record<string, Command> = {
     options: {
       'out-of-order': { type: 'boolean', help: 'Also run scripts older than the latest applied version' },
       target: { type: 'string', help: 'Stop after this version' },
-      'dry-run': { type: 'boolean', help: 'Print the SQL that would run instead of running it (Pro)' },
+      'dry-run': { type: 'boolean', help: 'Print the SQL that would run instead of running it' },
       'allow-non-empty': { type: 'boolean', help: 'Run every script on a database that has tables but no history (normally refused)' },
       'rerun-repeatables': { type: 'boolean', help: 'Also re-run repeatable scripts that have not changed' },
     },
     async run(ctx, v) {
       const cfg = load(ctx)
-      if (flag(v, 'dry-run')) requireLicense(ctx, 'dry-run')
       const r = await runner.migrate(
         cfg,
         ctx.env,
@@ -224,15 +217,14 @@ const COMMANDS: Record<string, Command> = {
     },
   },
   undo: {
-    help: 'Undo the latest applied migration with its U script (Pro)',
+    help: 'Undo the latest applied migration with its U script',
     async run(ctx) {
       const cfg = load(ctx)
-      requireLicense(ctx, 'undo')
       return [await runner.undo(cfg, ctx.env, log), '']
     },
   },
   check: {
-    help: 'Pre-deploy checks: drift, what the pending scripts change, and the dry-run script (Pro). With no flags, runs all three. Exits 13 when drift is found.',
+    help: 'Pre-deploy checks: drift, what the pending scripts change, and the dry-run script. With no flags, runs all three. Exits 13 when drift is found.',
     options: {
       drift: { type: 'boolean', help: 'Compare the environment with what its applied scripts build' },
       changes: { type: 'boolean', help: 'What the pending scripts will change' },
@@ -243,7 +235,6 @@ const COMMANDS: Record<string, Command> = {
     },
     async run(ctx, v) {
       const cfg = load(ctx)
-      requireLicense(ctx, 'check')
       if (flag(v, 'model')) {
         const cmp = await model.versusMigrations(cfg, str(v, 'scratch'), log)
         const text = cmp.changes.map((c) => `  ${kindOf(c)} ${c.name}${c.destructive ? '  (may lose data)' : ''}`).join('\n')
@@ -329,7 +320,7 @@ const COMMANDS: Record<string, Command> = {
     },
   },
   capture: {
-    help: 'Write the whole schema of an existing database as the next migration (Pro)',
+    help: 'Write the whole schema of an existing database as the next migration',
     options: {
       description: { type: 'string', default: 'existing schema', help: 'Description in the file name' },
       'dry-run': { type: 'boolean', help: 'Print the script instead of writing it' },
@@ -337,7 +328,6 @@ const COMMANDS: Record<string, Command> = {
     },
     async run(ctx, v) {
       const cfg = load(ctx)
-      requireLicense(ctx, 'generate')
       const g = await diff.capture(cfg, ctx.env, str(v, 'description')!, flag(v, 'as-baseline-script'))
       if (flag(v, 'dry-run')) return [g, g.sql]
       const written = diff.save(cfg, g.file_name, g.sql)
@@ -348,7 +338,7 @@ const COMMANDS: Record<string, Command> = {
     },
   },
   squash: {
-    help: 'Squash the versioned scripts into one baseline script (B…) that empty databases start from (Pro)',
+    help: 'Squash the versioned scripts into one baseline script (B…) that empty databases start from',
     options: {
       'up-to': { type: 'string', help: 'Last version to include (default: all of them)' },
       description: { type: 'string', default: 'squashed', help: 'Description in the file name' },
@@ -357,14 +347,13 @@ const COMMANDS: Record<string, Command> = {
     },
     async run(ctx, v) {
       const cfg = load(ctx)
-      requireLicense(ctx, 'generate')
       const { generated: g, path: written } = await diff.squash(cfg, str(v, 'up-to'), str(v, 'description')!, str(v, 'scratch'), flag(v, 'dry-run'), log)
       if (!written) return [g, g.sql]
       return [{ written, version: g.version }, `Wrote ${written} and checked it builds the same schema.\nDatabases with history are not affected; empty ones now start from it.`]
     },
   },
   model: {
-    help: 'Bring the schema-model folder up to date with dev: one file per object (Pro). With --check, build the folder on the scratch database instead',
+    help: 'Bring the schema-model folder up to date with dev: one file per object. With --check, build the folder on the scratch database instead',
     options: {
       source: { type: 'string', help: 'Dev environment (default: the first with role "dev")' },
       status: { type: 'boolean', help: 'List what differs instead of writing' },
@@ -374,7 +363,6 @@ const COMMANDS: Record<string, Command> = {
     },
     async run(ctx, v) {
       const cfg = load(ctx)
-      requireLicense(ctx, 'model')
       if (flag(v, 'check')) {
         const n = await model.check(cfg, str(v, 'scratch'), log)
         return [{ files: n }, `The schema model builds: ${n} object file(s)`]
@@ -423,7 +411,7 @@ const COMMANDS: Record<string, Command> = {
     },
   },
   diff: {
-    help: 'Compare the dev database (or the schema model) with what the migrations build (Pro)',
+    help: 'Compare the dev database (or the schema model) with what the migrations build',
     options: {
       from: { type: 'string', default: 'dev', help: 'dev (the dev database) or model (the schema-model folder; no dev database needed)' },
       source: { type: 'string', help: 'Dev environment (default: the first with role "dev")' },
@@ -431,14 +419,13 @@ const COMMANDS: Record<string, Command> = {
     },
     async run(ctx, v) {
       const cfg = load(ctx)
-      requireLicense(ctx, 'diff')
       const cmp = await compareFrom(cfg, v)
       const text = cmp.changes.map((c) => `${kindOf(c)} ${c.name}${c.destructive ? '  (may lose data)' : ''}`).join('\n')
       return [cmp, text || 'No differences']
     },
   },
   generate: {
-    help: 'Write the next migration from the differences (Pro)',
+    help: 'Write the next migration from the differences',
     options: {
       description: { type: 'string', help: 'What the migration does (required)' },
       from: { type: 'string', default: 'dev', help: 'dev (the dev database) or model (the schema-model folder; no dev database needed)' },
@@ -447,11 +434,10 @@ const COMMANDS: Record<string, Command> = {
       'skip-destructive': { type: 'boolean', help: 'Leave out changes that may lose data (dropped tables or columns, type changes)' },
       'dry-run': { type: 'boolean', help: 'Print the script instead of writing it' },
       'record-on-dev': { type: 'boolean', help: 'Also record the new script as applied on the dev database (it already has the change)' },
-      undo: { type: 'boolean', help: 'Also write the matching undo script (U…) (Pro)' },
+      undo: { type: 'boolean', help: 'Also write the matching undo script (U…)' },
     },
     async run(ctx, v) {
       const cfg = load(ctx)
-      requireLicense(ctx, 'generate')
       const description = str(v, 'description')
       if (description === undefined) throw configError('--description is required')
       let changes = (await compareFrom(cfg, v)).changes
@@ -468,16 +454,6 @@ const COMMANDS: Record<string, Command> = {
         await runner.markApplied(cfg, dev, g.file_name, log)
       }
       return [{ written, version: g.version, changes: changes.length }, `Wrote ${written}`]
-    },
-  },
-  license: {
-    help: 'Show the licence in use',
-    async run(ctx) {
-      const st = license.status(ctx.license, ctx.root)
-      const text = st
-        ? `${st.license.org} (${st.license.seats} seats, ${st.license.edition}) valid until ${st.license.expires}${st.grace_days_left !== null ? `, in grace period: ${st.grace_days_left} days left` : ''}; found in ${st.source}`
-        : 'No licence found. Free commands work without one.'
-      return [st ?? null, text]
     },
   },
 }
@@ -586,7 +562,6 @@ async function main(argv: string[]): Promise<number> {
       root: path.resolve(str(v, 'project-dir')!),
       env: str(v, 'environment') ?? (adhoc.url !== undefined ? 'default' : undefined),
       json,
-      license: str(v, 'license'),
       placeholders,
       adhoc,
     }

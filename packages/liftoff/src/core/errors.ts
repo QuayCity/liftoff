@@ -8,7 +8,6 @@ export type ErrorCode =
   | 'LIFTOFF_CONNECT'
   | 'LIFTOFF_MIGRATION_FAILED'
   | 'LIFTOFF_VALIDATE'
-  | 'LIFTOFF_LICENSE'
   | 'LIFTOFF_DRIFT'
   | 'LIFTOFF_NOT_BASELINED'
   /** a schema-model file does not build */
@@ -45,7 +44,6 @@ export class LiftoffError extends Error {
 export const configError = (msg: string) => new LiftoffError('LIFTOFF_CONFIG', 2, msg)
 export const connectError = (env: string, msg: string) => new LiftoffError('LIFTOFF_CONNECT', 10, `could not connect to '${env}': ${msg}`)
 export const validateError = (msg: string) => new LiftoffError('LIFTOFF_VALIDATE', 12, msg)
-export const licenseError = (msg: string) => new LiftoffError('LIFTOFF_LICENSE', 20, msg)
 /** A database refused a statement. `detail` is its own wording, e.g. `ERROR: relation "x" does not exist`. */
 export class DbError extends LiftoffError {
   readonly detail: string

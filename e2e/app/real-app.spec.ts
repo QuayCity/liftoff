@@ -2,7 +2,7 @@
 // Needs: LIFTOFF_TEST_PG (e.g. postgres://postgres:liftoff@localhost:55432) with databases shop_dev,
 // shop_scratch and shop_test in the Docker container named by LIFTOFF_TEST_PG_CONTAINER (default
 // liftoff-pg), and a built app: `npm run build && npm run build:electron` in apps/desktop.
-// It backs up and restores the app's recent-projects file and the licence file it touches.
+// It backs up and restores the app's recent-projects file.
 import { _electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -19,9 +19,6 @@ const electron = path.join(desktop, 'node_modules/electron/dist', process.platfo
 const built = path.join(desktop, 'dist-electron/main.mjs')
 const appData = process.env.APPDATA ?? path.join(os.homedir(), 'AppData/Roaming')
 const recentFile = path.join(appData, 'app.liftoff.desktop/recent.json')
-const licenseFile = path.join(appData, 'liftoff/license.txt')
-const devLicense = path.join(os.homedir(), '.liftoff/dev-license.txt')
-const hasLicense = fs.existsSync(devLicense)
 
 test.skip(!base || process.platform !== 'win32' || !fs.existsSync(built), 'needs LIFTOFF_TEST_PG, Windows and a built desktop app')
 test.describe.configure({ mode: 'serial' })
@@ -60,8 +57,6 @@ test.beforeAll(async () => {
       `[environments.test]\nurl = "${base}/shop_test"\nrole = "test"\n`,
   )
   replace(recentFile, JSON.stringify([{ name: 'app-e2e', path: project, exists: true }]))
-  if (hasLicense) replace(licenseFile, fs.readFileSync(devLicense, 'utf8'))
-  else replace(licenseFile, '')
 
   app = await _electron.launch({ executablePath: electron, args: [desktop], cwd: desktop })
   page = await app.firstWindow()
@@ -105,7 +100,6 @@ test('F04-E2 a failing script is rolled back and its Postgres error is shown', a
 })
 
 test('F03-H1 write a migration from dev changes; it is recorded as applied on dev', async () => {
-  test.skip(!hasLicense, 'needs ~/.liftoff/dev-license.txt')
   await column('dev').getByRole('button', { name: 'Run pending' }).click()
   await expect(page.getByText('Ran 1 script on dev', { exact: true })).toBeVisible()
   psql('shop_dev', 'create table customers (id bigint generated always as identity primary key, email text not null unique);')
@@ -129,7 +123,6 @@ test('F03-H1 write a migration from dev changes; it is recorded as applied on de
 })
 
 test('F08-H1 a hand change on test shows up as drift', async () => {
-  test.skip(!hasLicense, 'needs ~/.liftoff/dev-license.txt')
   psql('shop_test', 'alter table orders add column hotfix int;')
   await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Environments' }).click()
   await column('test').getByRole('button', { name: 'test' }).click()
@@ -170,7 +163,6 @@ test('F07-N2 a database with tables but no history asks for a baseline instead o
 })
 
 test('F02-H1 save dev into the schema model: one file per object', async () => {
-  test.skip(!hasLicense, 'needs ~/.liftoff/dev-license.txt')
   await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Changes' }).click()
   await page.getByRole('group', { name: 'Compare dev with' }).getByRole('button', { name: 'Schema model' }).click()
   await page.getByRole('button', { name: 'Compare' }).click()
@@ -202,7 +194,6 @@ test('F06-H1 commit the migration scripts with real git', async () => {
 })
 
 test('S20-H1 the history of a schema-model object comes from real git', async () => {
-  test.skip(!hasLicense, 'needs ~/.liftoff/dev-license.txt')
   const git = (...args: string[]) => execFileSync('git', args, { cwd: project, encoding: 'utf8' }).trim()
   const file = path.join(project, 'schema-model/public/tables/customers.sql')
   // F06 committed the schema-model files with the scripts; this adds a second commit to the object.

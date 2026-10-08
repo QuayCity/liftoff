@@ -58,11 +58,6 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
     return () => window.removeEventListener('keydown', onKey)
   }, [setView])
 
-  const lic = project.license
-  const licence = lic
-    ? { text: lic.grace_days_left != null ? `Pro, ${lic.grace_days_left} days of grace left` : `Pro until ${lic.license.expires}`, warn: lic.grace_days_left != null }
-    : { text: project.license_error ? 'Licence problem' : 'Free', warn: !!project.license_error }
-
   return (
     <div className="flex h-full flex-col">
       <TitleBar
@@ -75,14 +70,14 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
       />
       <main className="min-h-0 flex-1 overflow-auto">
         <h1 className="sr-only">{`${view}: ${project.name}`}</h1>
-        {view === 'Environments' && <Environments project={project} onProject={onProject} onSettings={() => setView('Settings')} />}
-        {view === 'Changes' && <Changes project={project} onProject={onProject} onSettings={() => setView('Settings')} onEnvironments={() => setView('Environments')} />}
+        {view === 'Environments' && <Environments project={project} onProject={onProject} />}
+        {view === 'Changes' && <Changes project={project} onProject={onProject} onEnvironments={() => setView('Environments')} />}
         {view === 'Settings' && <Settings project={project} onProject={onProject} onDirty={setSettingsDirty} />}
         {view === 'Scripts' && <Scripts project={project} />}
         {view === 'Commit' && <Commit project={project} />}
         {view === 'Pipelines' && <Pipelines project={project} />}
       </main>
-      <StatusBar path={project.root} engine={`${engineName(project.engine)} · ${project.schemas.join(', ')}`} licence={licence} />
+      <StatusBar path={project.root} engine={`${engineName(project.engine)} · ${project.schemas.join(', ')}`} />
     </div>
   )
 }

@@ -25,4 +25,4 @@ Your database migrations, next to your code.
 The extension comes with the `liftoff` program and runs it for you; nothing is sent anywhere but
 your own databases. Point `liftoff.cliPath` at another build if you need to.
 
-Comparing databases, the schema model, generating migrations and drift checks are part of LiftOff Pro.
+Free and open source (MIT).

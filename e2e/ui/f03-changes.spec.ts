@@ -54,12 +54,3 @@ test.describe('F03 Changes', () => {
     await expectNoA11yViolations(page, 'Changes (light)')
   })
 })
-
-test('F03-N1 without a licence Changes explains Pro', async ({ page }) => {
-  const checkConsole = watchConsole(page)
-  await page.goto('/?open=1&ws=Changes&licensed=0')
-  await expect(page.getByText(/part of LiftOff Pro/)).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Add a licence' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Compare' })).toHaveCount(0)
-  checkConsole()
-})

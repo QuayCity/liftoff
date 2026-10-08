@@ -5,8 +5,6 @@
 export type Role = 'dev' | 'scratch' | 'test' | 'prod'
 export type ErrorReport = { code: string; exit_code: number; message: string }
 export type EnvView = { name: string; role: Role; url: string; user: string | null; has_password: boolean; allow_clean: boolean }
-export type License = { org: string; seats: number; edition: string; expires: string; features: string[] }
-export type LicenseStatus = { license: License; grace_days_left: number | null; source: string }
 export type Filter = { action: 'include' | 'exclude'; object: string; pattern: string }
 export type LockMode = 'advisory' | 'table'
 export type Engine = 'postgresql' | 'sqlserver'
@@ -16,7 +14,6 @@ export const engineOfUrl = (url: string): Engine => (/^(jdbc:)?sqlserver:\/\//i.
 export type ProjectSettings = { name: string; engine: string; migrations: string; schemas: string[]; history_table: string; filters: Filter[]; lock: LockMode }
 export type Project = {
   root: string; name: string; engine: string; schemas: string[]; migrations: string; history_table: string; filters: Filter[]; lock: LockMode; environments: EnvView[]
-  license: LicenseStatus | null; license_error: string | null
 }
 export type Recent = { name: string; path: string; exists: boolean }
 export type EnvInput = { url: string; user: string | null; password: string | null; role: Role; allow_clean: boolean }
@@ -110,7 +107,6 @@ type Api = {
   undo(path: string, env: string): Promise<{ script: string; version: string | null }>
   check(path: string, env: string, opts: { drift: boolean; changes: boolean; dryRun: boolean }): Promise<CheckReport>
   migrationSave(path: string, fileName: string, sql: string): Promise<string>
-  licenseActivate(text: string): Promise<LicenseStatus>
   onLog(cb: (e: LogEvent) => void): Promise<() => void>
 }
 
@@ -162,7 +158,6 @@ const real: Api = {
   undo: (path, env) => invoke('undo', { path, env }),
   check: (path, env, o) => invoke('check', { path, env, drift: o.drift, changes: o.changes, dryRun: o.dryRun }),
   migrationSave: (path, fileName, sql) => invoke('migration_save', { path, fileName, sql }),
-  licenseActivate: (text) => invoke('license_activate', { text }),
   onLog: async (cb) => bridge!.onLog(cb),
 }
 
@@ -173,9 +168,7 @@ const fail = (code: string, message: string, exit_code = 1): ErrorReport => ({ c
 const logListeners = new Set<(e: LogEvent) => void>()
 const emit = (level: LogEvent['level'], message: string) => logListeners.forEach((l) => l({ level, message }))
 
-const demoLicense: LicenseStatus = { license: { org: 'Demo Org', seats: 5, edition: 'pro', expires: '2027-10-08', features: ['*'] }, grace_days_left: null, source: 'demo' }
 const fake = {
-  licensed: new URLSearchParams(location.search).get('licensed') !== '0',
   project: {
     root: 'C:/repos/shop-db', name: 'shop-db', engine: 'postgresql', schemas: ['public'], migrations: 'migrations', history_table: 'liftoff_schema_history', filters: [], lock: 'advisory' as LockMode, license: null, license_error: null,
     environments: [
@@ -202,7 +195,7 @@ const fake = {
   gitRejectPush: new URLSearchParams(location.search).has('rejectpush'),
   notGit: new URLSearchParams(location.search).has('nogit'),
 }
-const fakeProject = (): Project => ({ ...fake.project, license: fake.licensed ? demoLicense : null })
+const fakeProject = (): Project => ({ ...fake.project })
 const fakeInfo = (env: string): MigrationInfo[] =>
   fake.scripts.map(([version, description], i) => {
     const done = i < (fake.applied[env] ?? 0)
@@ -279,7 +272,6 @@ const fakeApi: Api = {
     return { ...fakeProject(), root: `${folder}/liftoff-sample`, name: 'shop-sample', environments: [] }
   },
   modelStatus: async () => {
-    if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'model' is part of LiftOff Pro.", 20)
     await wait(300)
     return fake.modelChanges
   },
@@ -368,18 +360,15 @@ const fakeApi: Api = {
     return fakeProject()
   },
   capture: async (_p, env, description, asBaseline) => {
-    if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'generate' is part of LiftOff Pro.", 20)
     await wait(500)
     return { file_name: `${asBaseline ? 'B' : 'V'}20261008.1200__${description.replaceAll(' ', '_')}.sql`, version: '20261008.1200', sql: `-- ${description}\n-- captured from ${env}\n\nCREATE TABLE public.orders (\n    id bigserial\n);\n`, undo: null }
   },
   squash: async (_p, upTo, description) => {
-    if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'generate' is part of LiftOff Pro.", 20)
     emit('info', `Building 'scratch' from the versioned scripts up to ${upTo}`)
     await wait(500)
     return `B${upTo}__${description.replaceAll(' ', '_')}.sql`
   },
   changesDiff: async () => {
-    if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'diff' is part of LiftOff Pro. Set LIFTOFF_LICENSE (CI) or activate a licence in the desktop app.", 20)
     emit('info', "Rebuilding scratch database 'scratch' from migrations")
     await wait(600)
     emit('info', "Comparing 'local' with the migrations")
@@ -408,7 +397,6 @@ const fakeApi: Api = {
     return { script: 'U20261008.0840__daily_totals_view.sql', version: '20261008.0840' }
   },
   check: async (_p, env, o) => {
-    if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'check' is part of LiftOff Pro.", 20)
     emit('info', `Rebuilding scratch database 'scratch' from migrations`)
     await wait(600)
     const drifted: Change = { id: 'table:public.orders', object_type: 'Tables', name: 'public.orders', kind: 'changed', destructive: false,
@@ -423,11 +411,6 @@ const fakeApi: Api = {
     }
   },
   migrationSave: async (path, fileName) => `${path}/migrations/${fileName}`,
-  licenseActivate: async (text) => {
-    if (!text.startsWith('LIFTOFF-1.')) throw fail('LIFTOFF_LICENSE', 'the licence is not valid (damaged or not issued by LiftOff)', 20)
-    fake.licensed = true
-    return demoLicense
-  },
   onLog: async (cb) => {
     logListeners.add(cb)
     return () => logListeners.delete(cb)

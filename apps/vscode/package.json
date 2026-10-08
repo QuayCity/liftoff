@@ -4,7 +4,7 @@
   "description": "Change your dev database or the schema-model files, pull the change into git, and let the pipeline write and run the migration.",
   "version": "0.1.0",
   "publisher": "liftoff",
-  "license": "SEE LICENSE IN LICENSE.txt",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.90.0"
   },

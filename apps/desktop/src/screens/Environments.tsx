@@ -25,7 +25,7 @@ function relative(iso: string) {
 }
 const local = (iso: string | null) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—')
 
-export function Environments({ project, onProject, onSettings }: { project: Project; onProject: (p: Project) => void; onSettings?: () => void }) {
+export function Environments({ project, onProject }: { project: Project; onProject: (p: Project) => void }) {
   const toast = useToast()
   const envs = project.environments
   const [status, setStatus] = useState<Record<string, EnvStatus>>({})
@@ -221,7 +221,6 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
               <CommandBar
                 key={sel.name}
                 env={sel.name}
-                licensed={!!project.license}
                 running={running === sel.name}
                 onRun={(c) => command(sel.name, c.id)}
                 commands={[
@@ -229,13 +228,13 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
                   { id: 'info', label: 'Refresh status' },
                   { id: 'validate', label: 'Validate' },
                   { id: 'repair', label: 'Repair history' },
-                  { id: 'undo', label: 'Undo latest', paid: true },
+                  { id: 'undo', label: 'Undo latest' },
                   ...(selStatus?.info?.length === 0 || selStatus?.info?.every((i) => !i.installed_on)
                   ? [{ id: 'import-flyway', label: 'Import Flyway history…' }, { id: 'baseline', label: 'Baseline…' }]
                   : []),
                   ...(sel.role === 'scratch' || sel.allow_clean ? [{ id: 'clean', label: 'Clean…', destructive: true }] : []),
-                  { id: 'capture', label: 'Capture as script…', paid: true },
-                { id: 'capture-b', label: 'Capture as baseline script…', paid: true },
+                  { id: 'capture', label: 'Capture as script…' },
+                { id: 'capture-b', label: 'Capture as baseline script…' },
                 ]}
               />
             </Card>
@@ -243,7 +242,7 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
             {(log.length > 0 || running) && <div className={cx(running && running !== sel.name && 'opacity-70')}><LogConsole lines={log} status={logStatus} /></div>}
             </Tabs.Content>
             <Tabs.Content value="checks">
-              <Checks key={sel.name} project={project} env={sel.name} onSettings={onSettings} onDrift={(env, d) => setDrift((m) => ({ ...m, [env]: d }))} />
+              <Checks key={sel.name} project={project} env={sel.name} onDrift={(env, d) => setDrift((m) => ({ ...m, [env]: d }))} />
             </Tabs.Content>
           </Tabs.Root>
         </section>

@@ -45,9 +45,9 @@ export function TitleBar({ project, workspace, tabsActive = true, onWorkspace, o
   )
 }
 
-export function StatusBar({ path, branch, ahead, engine, licence, task }: {
+export function StatusBar({ path, branch, ahead, engine, task }: {
   path: string; branch?: string; ahead?: number; engine: string
-  licence: { text: string; warn?: boolean }; task?: string
+  task?: string
 }) {
   const sep = <span aria-hidden className="text-border">|</span>
   return (
@@ -57,7 +57,6 @@ export function StatusBar({ path, branch, ahead, engine, licence, task }: {
       <span>{engine}</span>
       <span className="flex-1" />
       {task && <Spinner label={task} />}
-      <span className={cx(licence.warn && 'font-medium text-warning')}>{licence.text}</span>
     </footer>
   )
 }

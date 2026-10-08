@@ -1,5 +1,5 @@
 // Changes workspace, slice version of S06: compare dev with the migrations, pick changes, write the next migration.
-import { FileClock, CheckCircle2, GitCompareArrows, Lock } from 'lucide-react'
+import { FileClock, CheckCircle2, GitCompareArrows } from 'lucide-react'
 import { ObjectHistory } from './ObjectHistory'
 import { Tabs } from 'radix-ui'
 import { useEffect, useRef, useState } from 'react'
@@ -10,7 +10,7 @@ import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
 import { DiffView } from '../ui/diffview'
 import { Dialog, useToast } from '../ui/overlays'
 
-export function Changes({ project, onSettings, onEnvironments, onProject }: { project: Project; onSettings: () => void; onEnvironments: () => void; onProject: (p: Project) => void }) {
+export function Changes({ project, onEnvironments, onProject }: { project: Project; onEnvironments: () => void; onProject: (p: Project) => void }) {
   const toast = useToast()
   const dev = project.environments.find((e) => e.role === 'dev')
   const scratch = project.environments.find((e) => e.role === 'scratch')
@@ -48,16 +48,6 @@ export function Changes({ project, onSettings, onEnvironments, onProject }: { pr
     }
   })
 
-  if (!project.license) {
-    return (
-      <div className="p-8">
-        <Card>
-          <EmptyState icon={Lock} text="Writing migrations from your changes is part of LiftOff Pro. Running migrations stays free."
-            action={<Button variant="primary" onClick={onSettings}>Add a licence</Button>} />
-        </Card>
-      </div>
-    )
-  }
   if (!dev) {
     return (
       <div className="p-8">

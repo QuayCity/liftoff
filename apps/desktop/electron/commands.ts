@@ -8,10 +8,9 @@ import * as ci from '../../../packages/liftoff/src/core/ci.ts'
 import { Config, init, PROJECT_FILE, saveEnvironment, saveProject, type Environment, type Project, type Role } from '../../../packages/liftoff/src/core/config.ts'
 import { open } from '../../../packages/liftoff/src/core/db.ts'
 import * as diff from '../../../packages/liftoff/src/core/diff.ts'
-import { LiftoffError, licenseError } from '../../../packages/liftoff/src/core/errors.ts'
+import { LiftoffError } from '../../../packages/liftoff/src/core/errors.ts'
 import * as flyway from '../../../packages/liftoff/src/core/flyway.ts'
 import * as git from '../../../packages/liftoff/src/core/git.ts'
-import * as license from '../../../packages/liftoff/src/core/license.ts'
 import { scan } from '../../../packages/liftoff/src/core/migration.ts'
 import * as model from '../../../packages/liftoff/src/core/model.ts'
 import * as runner from '../../../packages/liftoff/src/core/runner.ts'
@@ -36,15 +35,8 @@ export function redact(url: string): string {
   return `${url.slice(0, s + 3)}${user}${url.slice(at)}`
 }
 
-/** A project as the screens see it: no passwords, the licence state included. */
+/** A project as the screens see it: no passwords. */
 function view(cfg: Config) {
-  let lic: license.Status | null = null
-  let licenseErrorText: string | null = null
-  try {
-    lic = license.status(undefined, cfg.root) ?? null
-  } catch (e) {
-    licenseErrorText = e instanceof Error ? e.message : String(e)
-  }
   return {
     root: cfg.root,
     name: cfg.project.name,
@@ -62,8 +54,6 @@ function view(cfg: Config) {
       has_password: e.password !== undefined || redact(e.url) !== e.url,
       allow_clean: e.allow_clean,
     })),
-    license: lic,
-    license_error: licenseErrorText,
   }
 }
 
@@ -172,25 +162,21 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
   clean: (a, h) => runner.clean(load(a.path), s(a, 'env'), h.log),
   mark_applied: (a, h) => runner.markApplied(load(a.path), s(a, 'env'), s(a, 'script'), h.log),
 
-  /* F03: changes (Pro) */
+  /* F03: changes */
   changes_diff: (a, h) => {
     const cfg = load(a.path)
-    license.require('diff', undefined, cfg.root)
     return diff.devVsMigrations(cfg, undefined, undefined, h.log)
   },
   migration_generate: (a) => {
     const cfg = load(a.path)
-    license.require('generate', undefined, cfg.root)
     return diff.generate(cfg, a.changes as diff.Comparison['changes'], s(a, 'description'), b(a, 'withUndo'))
   },
   undo: (a, h) => {
     const cfg = load(a.path)
-    license.require('undo', undefined, cfg.root)
     return runner.undo(cfg, s(a, 'env'), h.log)
   },
   check: (a, h) => {
     const cfg = load(a.path)
-    license.require('check', undefined, cfg.root)
     return checks.check(cfg, s(a, 'env'), undefined, { drift: b(a, 'drift'), changes: b(a, 'changes'), dryRun: b(a, 'dryRun') }, h.log)
   },
   migration_save: (a) => diff.save(load(a.path), s(a, 'fileName'), s(a, 'sql')),
@@ -201,13 +187,11 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
   script_add: (a) => diff.add(load(a.path), b(a, 'repeatable'), s(a, 'description'), s(a, 'sql')),
   capture: (a) => {
     const cfg = load(a.path)
-    license.require('generate', undefined, cfg.root)
     return diff.capture(cfg, s(a, 'env'), s(a, 'description'), b(a, 'asBaseline'))
   },
   /** Writes the B script and checks it builds the same schema; returns its file name. */
   squash: async (a, h) => {
     const cfg = load(a.path)
-    license.require('generate', undefined, cfg.root)
     return (await diff.squash(cfg, s(a, 'upTo'), s(a, 'description'), undefined, false, h.log)).generated.file_name
   },
   /** Writes the HTML report of a check to the file the user picked. */
@@ -227,17 +211,14 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
   /* S05 schema model, S15/S16 settings, S17 CI */
   model_status: (a) => {
     const cfg = load(a.path)
-    license.require('model', undefined, cfg.root)
     return model.status(cfg, undefined)
   },
   model_save: (a) => {
     const cfg = load(a.path)
-    license.require('model', undefined, cfg.root)
     return model.save(cfg, a.changes as model.ModelChange[])
   },
   model_files: (a) => {
     const cfg = load(a.path)
-    license.require('model', undefined, cfg.root)
     return model.listFiles(cfg)
   },
   /** S20: the commits that changed one schema-model file (path relative to schema-model/). */
@@ -254,14 +235,4 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
   ci_workflow: (a) => ci.githubActions(load(a.path), a.options as ci.CiOptions),
   ci_write: (a) => ci.write(load(a.path), s(a, 'yaml'), b(a, 'overwrite')),
 
-  /* licence */
-  license_activate: (a) => {
-    const text = s(a, 'text')
-    const { license: lic, graceDaysLeft } = license.verify(text)
-    const file = license.defaultFile()
-    if (!file) throw licenseError('no config folder to store the licence in')
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, text.trim())
-    return { license: lic, grace_days_left: graceDaysLeft, source: file }
-  },
 }

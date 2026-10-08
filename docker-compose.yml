@@ -1,0 +1,35 @@
+# The databases the tests run against. Local development only: the passwords are not secrets.
+#   docker compose up -d
+# then set the variables listed in CONTRIBUTING.md.
+services:
+  pg:
+    image: postgres:16-alpine
+    container_name: liftoff-pg
+    environment:
+      POSTGRES_PASSWORD: liftoff
+    ports: ['55432:5432']
+    volumes:
+      - ./test-databases/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  bouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: liftoff-bouncer
+    environment:
+      DB_HOST: pg
+      DB_USER: postgres
+      DB_PASSWORD: liftoff
+      POOL_MODE: transaction
+      AUTH_TYPE: scram-sha-256
+      MAX_PREPARED_STATEMENTS: 0
+      DEFAULT_POOL_SIZE: 5
+    ports: ['56432:5432']
+    depends_on: [pg]
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: liftoff-mssql
+    environment:
+      ACCEPT_EULA: 'Y'
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: Liftoff!2026
+    ports: ['51433:1433']

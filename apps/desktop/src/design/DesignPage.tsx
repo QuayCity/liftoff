@@ -106,7 +106,7 @@ function Page() {
 
           <Section title="Migration states">
             <div className="flex flex-wrap gap-2">{states.map((s) => <StatePill key={s} state={s} />)}</div>
-            <div className="flex items-center gap-3"><Badge>Test</Badge><Badge tone="accent">Pro</Badge><Kbd>Ctrl K</Kbd><Spinner label="Comparing…" /></div>
+            <div className="flex items-center gap-3"><Badge>Test</Badge><Badge tone="accent">New</Badge><Kbd>Ctrl K</Kbd><Spinner label="Comparing…" /></div>
           </Section>
 
           <Section title="Alerts and toasts">
@@ -162,9 +162,9 @@ function Page() {
                 empty={<EmptyState icon={Database} text="No scripts yet. Write one from your changes, or add one by hand." action={<Button variant="primary" icon={Plus}>New script</Button>} />} />
             </Card>
             <Card className="p-4">
-              <CommandBar env="staging" licensed={false} onRun={() => {}} commands={[
+              <CommandBar env="staging" onRun={() => {}} commands={[
                 { id: 'migrate', label: 'Run' }, { id: 'info', label: 'Info' }, { id: 'validate', label: 'Validate' },
-                { id: 'undo', label: 'Undo', paid: true }, { id: 'clean', label: 'Clean', destructive: true },
+                { id: 'undo', label: 'Undo' }, { id: 'clean', label: 'Clean', destructive: true },
               ]} />
             </Card>
           </Section>
@@ -181,7 +181,7 @@ function Page() {
           </Section>
         </div>
       </main>
-      <StatusBar path="~/repos/shop-db" branch="main" ahead={2} engine="PostgreSQL 16" licence={{ text: 'Pro, 12 days of grace left', warn: true }} task="Comparing local" />
+      <StatusBar path="~/repos/shop-db" branch="main" ahead={2} engine="PostgreSQL 16" task="Comparing local" />
     </div>
   )
 }

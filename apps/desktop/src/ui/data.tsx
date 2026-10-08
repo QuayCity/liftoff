@@ -147,30 +147,27 @@ export function ChangeList({ changes, selected, onSelectedChange, activeId, onAc
 
 /* ---------- CommandBar ---------- */
 
-export type Command = { id: string; label: string; paid?: boolean; destructive?: boolean }
+export type Command = { id: string; label: string; destructive?: boolean }
 
-export function CommandBar({ commands, licensed, env, running, onRun, onCancel }: {
-  commands: Command[]; licensed: boolean; env: string; running?: boolean
+export function CommandBar({ commands, env, running, onRun, onCancel }: {
+  commands: Command[]; env: string; running?: boolean
   onRun: (c: Command) => void; onCancel?: () => void
 }) {
   const [id, setId] = useState(commands[0].id)
   const cmd = commands.find((c) => c.id === id)!
-  const locked = cmd.paid && !licensed
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
         <div className="w-48">
           <Select aria-label="Command" value={id} onChange={(e) => setId(e.target.value)} disabled={running}>
-            {commands.map((c) => <option key={c.id} value={c.id}>{c.label}{c.paid ? ' (Pro)' : ''}</option>)}
+            {commands.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
           </Select>
         </div>
-        <Button variant={cmd.destructive ? 'danger' : 'primary'} icon={Play} loading={running} disabled={locked} onClick={() => onRun(cmd)}>
+        <Button variant={cmd.destructive ? 'danger' : 'primary'} icon={Play} loading={running} onClick={() => onRun(cmd)}>
           {cmd.label}
         </Button>
         {running && onCancel && <Button variant="ghost" onClick={onCancel}>Cancel</Button>}
-        {cmd.paid && <Badge tone="accent">Pro</Badge>}
       </div>
-      {locked && <InlineAlert tone="info" title="Part of LiftOff Pro">Add a licence in Settings, or set LIFTOFF_LICENSE, to unlock this command.</InlineAlert>}
       <details className="text-sm">
         <summary className="cursor-pointer text-muted select-none">Show CLI</summary>
         <div className="mt-2"><CodeBlock label="Equivalent command" code={`liftoff ${cmd.id} --environment=${env}`} /></div>

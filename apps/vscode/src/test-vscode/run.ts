@@ -39,15 +39,12 @@ role = "scratch"
 `)
   execFileSync(cli, ['-C', workspace, '-e', 'dev', 'clean'])
   execFileSync(cli, ['-C', workspace, '-e', 'dev', 'migrate'])
-  // The schema model is a paid feature: use the developer's own licence (never printed).
-  const licenseFile = path.join(os.homedir(), '.liftoff', 'dev-license.txt')
-  const license = process.env.LIFTOFF_LICENSE ?? (fs.existsSync(licenseFile) ? fs.readFileSync(licenseFile, 'utf8').trim() : '')
 
   await runTests({
     extensionDevelopmentPath: extensionDir,
     extensionTestsPath: path.join(__dirname, 'suite.js'),
     launchArgs: [workspace, '--disable-extensions', '--skip-welcome', '--skip-release-notes'],
-    extensionTestsEnv: { LIFTOFF_WORKSPACE: workspace, LIFTOFF_LICENSE: license },
+    extensionTestsEnv: { LIFTOFF_WORKSPACE: workspace },
   })
   fs.rmSync(workspace, { recursive: true, force: true })
 }

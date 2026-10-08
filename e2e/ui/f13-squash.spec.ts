@@ -21,11 +21,3 @@ test('FX1-H1 squash up to a version from the Scripts workspace', async ({ page }
   await expect(dialog).toBeHidden()
   checkConsole()
 })
-
-test('FX1-N1 without a licence squash explains Pro and keeps the dialog open', async ({ page }) => {
-  await page.goto('/?open=1&ws=Scripts&licensed=0')
-  await page.getByRole('button', { name: 'Squash…' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Squash scripts' })
-  await dialog.getByRole('button', { name: 'Squash' }).click()
-  await expect(dialog.getByText(/part of LiftOff Pro/)).toBeVisible()
-})

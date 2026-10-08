@@ -2,7 +2,7 @@
   "name": "liftoff",
   "version": "0.1.0",
   "description": "Database migrations for PostgreSQL and SQL Server",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "engines": {

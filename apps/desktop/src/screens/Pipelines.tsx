@@ -77,7 +77,6 @@ export function Pipelines({ project }: { project: Project }) {
         <div>
           <h3 className="text-sm font-medium">Repository secrets to add</h3>
           <ul className="mt-1 list-disc pl-5 font-mono text-xs">
-            <li>LIFTOFF_LICENSE</li>
             {stages.map((s) => <li key={s}>{secret(s, 'PASSWORD')}</li>)}
           </ul>
           <p className="mt-1 text-xs font-normal text-muted">A GitHub environment with the same name as each stage can require approval before it runs.</p>

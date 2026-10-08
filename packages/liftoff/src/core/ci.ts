@@ -59,7 +59,7 @@ function modelJob(cfg: Config, o: CiOptions, migrations: string): string {
   if (generate) y += '    permissions:\n      contents: write\n'
   y += sc.service
   y +=
-    '    env:\n      LIFTOFF_LICENSE: ${{ secrets.LIFTOFF_LICENSE }}\n' +
+    '    env:\n' +
     `      LIFTOFF_ENV_CI_SCRATCH_URL: ${yamlStr(sc.url)}\n      LIFTOFF_ENV_CI_SCRATCH_ROLE: scratch\n`
   y += '    steps:\n      - uses: actions/checkout@v4\n'
   // To commit back, check out the pull request's own branch (pull requests from forks cannot be written to).
@@ -103,7 +103,7 @@ export function githubActions(cfg: Config, o: CiOptions): string {
   const migrations = cfg.project.migrations.replace(/\/+$/, '')
   const withModel = o.model === 'check' || o.model === 'generate'
   let y =
-    `# Written by LiftOff. Add these repository secrets: LIFTOFF_LICENSE${o.stages.map((s) => `, ${envVar(s, 'PASSWORD')}`).join('')}\n` +
+    `# Written by LiftOff. Add these repository secrets: ${o.stages.map((s) => envVar(s, 'PASSWORD')).join(', ')}\n` +
     `# (and ${o.stages.map((s) => envVar(s, 'URL')).join(', ')} if the connection URL is not in liftoff.toml).\n` +
     'name: Database migrations\n' +
     `on:\n  push:\n    branches: [${yamlStr(o.branch)}]\n    paths: [${yamlStr(`${migrations}/**`)}, 'liftoff.toml']\n` +
@@ -122,7 +122,7 @@ export function githubActions(cfg: Config, o: CiOptions): string {
     // A GitHub environment of the same name holds approvals and its own secrets.
     y += `    environment: ${yamlStr(s)}\n`
     const pw = envVar(s, 'PASSWORD')
-    y += `    env:\n      LIFTOFF_LICENSE: \${{ secrets.LIFTOFF_LICENSE }}\n      ${pw}: \${{ secrets.${pw} }}\n`
+    y += `    env:\n      ${pw}: \${{ secrets.${pw} }}\n`
     y += '    steps:\n      - uses: actions/checkout@v4\n'
     y += `      - name: Install LiftOff\n        run: ${yamlStr(o.install)}\n`
     const e = yamlStr(s)

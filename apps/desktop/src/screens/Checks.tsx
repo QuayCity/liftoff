@@ -1,4 +1,4 @@
-// S13 checks for one environment: drift, what the pending scripts change, the dry-run script (Pro).
+// S13 checks for one environment: drift, what the pending scripts change, the dry-run script.
 import { FileSearch, GitCompareArrows, ShieldAlert } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, errorText, type Change, type CheckReport, type Project } from '../api'
@@ -11,8 +11,8 @@ import { NotCompared } from './Changes'
 
 type Which = 'drift' | 'changes' | 'dryRun'
 
-export function Checks({ project, env, onDrift, onSettings }: {
-  project: Project; env: string; onDrift: (env: string, drifted: boolean) => void; onSettings?: () => void
+export function Checks({ project, env, onDrift }: {
+  project: Project; env: string; onDrift: (env: string, drifted: boolean) => void
 }) {
   const toast = useToast()
   const [running, setRunning] = useState<Which | null>(null)
@@ -28,14 +28,6 @@ export function Checks({ project, env, onDrift, onSettings }: {
     }).then((f) => (off = f))
     return () => off?.()
   }, [])
-
-  if (!project.license) {
-    return (
-      <InlineAlert tone="info" title="Checks are part of LiftOff Pro" action={onSettings && <Button size="sm" onClick={onSettings}>Add a licence</Button>}>
-        Drift detection, change previews and dry runs need a licence. Running migrations stays free.
-      </InlineAlert>
-    )
-  }
 
   const run = async (which: Which) => {
     setRunning(which)

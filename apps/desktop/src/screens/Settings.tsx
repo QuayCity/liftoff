@@ -1,8 +1,8 @@
-// Settings: project (S15), comparison filters (S16), licence (S19).
+// Settings: project (S15), comparison filters (S16).
 import { Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, errorText, type Filter, type LockMode, type Project } from '../api'
-import { Button, Field, IconButton, Input, Select, Textarea } from '../ui/controls'
+import { Button, Field, IconButton, Input, Select } from '../ui/controls'
 import { Card, InlineAlert } from '../ui/display'
 import { useToast } from '../ui/overlays'
 
@@ -110,52 +110,6 @@ export function Settings({ project, onProject, onDirty }: { project: Project; on
         {dirty && <span className="text-sm text-warning">Unsaved changes</span>}
       </div>
 
-      <Licence project={project} onProject={onProject} />
     </div>
-  )
-}
-
-function Licence({ project, onProject }: { project: Project; onProject: (p: Project) => void }) {
-  const [text, setText] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const lic = project.license
-
-  const activate = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      await api.licenseActivate(text.trim())
-      onProject(await api.projectOpen(project.root))
-      setText('')
-    } catch (e) {
-      setError(errorText(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <section aria-labelledby="lic-h" className="flex flex-col gap-2">
-      <h3 id="lic-h" className="text-lg">Licence</h3>
-      <Card className="flex flex-col gap-4 p-4">
-        {lic ? (
-          <InlineAlert tone={lic.grace_days_left != null ? 'warning' : 'success'} title={`${lic.license.org}: ${lic.license.seats} seat${lic.license.seats === 1 ? '' : 's'}`}>
-            {lic.grace_days_left != null
-              ? `Expired on ${lic.license.expires}. Paid features keep working for ${lic.grace_days_left} more days.`
-              : `Valid until ${lic.license.expires}.`}
-          </InlineAlert>
-        ) : project.license_error ? (
-          <InlineAlert tone="danger" title="Licence problem">{project.license_error}</InlineAlert>
-        ) : (
-          <p className="text-sm text-muted">No licence. Running migrations is free; writing them from your changes needs Pro.</p>
-        )}
-        <Field label={lic ? 'Replace licence' : 'Paste your licence'} error={error ?? undefined} help="Checked on this computer only. LiftOff never sends it anywhere.">
-          {(a) => <Textarea {...a} value={text} onChange={(e) => setText(e.target.value)} className="font-mono text-xs" placeholder="LIFTOFF-1.…" spellCheck={false} />}
-        </Field>
-        <div><Button variant="primary" disabled={!text.trim()} loading={busy} onClick={activate}>Activate</Button></div>
-        <p className="text-xs font-normal text-muted">In CI, set the same text as the LIFTOFF_LICENSE secret instead.</p>
-      </Card>
-    </section>
   )
 }
