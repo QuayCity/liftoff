@@ -34,3 +34,12 @@ test('edited and failed scripts become editor problems, grouped per file', () =>
   assert.equal(grouped.get('V1__a.sql')?.length, 2, 'one warning per environment')
   assert.equal(grouped.has('V3__c.sql'), false)
 })
+
+test('schema-model changes are described from the dev side, problems grouped per file', async () => {
+  const { describeModelChange, modelProblems } = await import('../model.js')
+  const c = (kind: 'added' | 'changed' | 'removed', object_type: string) => ({ path: 'public/x.sql', object_type, kind, before: null, after: null })
+  assert.equal(describeModelChange(c('added', 'tables')), 'table · new in dev')
+  assert.equal(describeModelChange(c('removed', 'materialized-views')), 'materialized view · dropped in dev')
+  const grouped = modelProblems([{ path: 'a.sql', message: 'one' }, { path: 'b.sql', message: 'x' }, { path: 'a.sql', message: 'two' }])
+  assert.deepEqual([...grouped], [['a.sql', ['one', 'two']], ['b.sql', ['x']]])
+})

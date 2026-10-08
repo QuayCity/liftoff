@@ -1,7 +1,7 @@
 {
   "name": "liftoff",
   "displayName": "LiftOff",
-  "description": "See, run and check your database migrations without leaving the editor.",
+  "description": "Change your dev database or the schema-model files, pull the change into git, and let the pipeline write and run the migration.",
   "version": "0.1.0",
   "publisher": "liftoff",
   "license": "SEE LICENSE IN LICENSE.txt",
@@ -36,6 +36,10 @@
         {
           "id": "liftoff.environments",
           "name": "Environments"
+        },
+        {
+          "id": "liftoff.model",
+          "name": "Schema Model"
         }
       ]
     },
@@ -43,6 +47,10 @@
       {
         "view": "liftoff.environments",
         "contents": "No liftoff.toml in this workspace.\nRun `liftoff init` in your project folder, or open the folder that has one."
+      },
+      {
+        "view": "liftoff.model",
+        "contents": "See what the dev database has that the schema-model files do not, and pull it in to commit.\n[Compare with Dev](command:liftoff.model.compare)\nEdited the files by hand? [Check Schema Model](command:liftoff.model.check)"
       }
     ],
     "commands": [
@@ -82,6 +90,46 @@
         "command": "liftoff.showLog",
         "title": "Show Log",
         "category": "LiftOff"
+      },
+      {
+        "command": "liftoff.model.compare",
+        "title": "Compare Dev with Schema Model",
+        "category": "LiftOff",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "liftoff.model.open",
+        "title": "Show the Difference",
+        "category": "LiftOff"
+      },
+      {
+        "command": "liftoff.model.pull",
+        "title": "Pull into Schema Model",
+        "category": "LiftOff",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "liftoff.model.pullAll",
+        "title": "Pull All into Schema Model",
+        "category": "LiftOff",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "liftoff.model.check",
+        "title": "Check Schema Model",
+        "category": "LiftOff",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "liftoff.model.generate",
+        "title": "Generate Migration from Schema Model",
+        "category": "LiftOff",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "liftoff.pipeline",
+        "title": "Set Up Pipeline",
+        "category": "LiftOff"
       }
     ],
     "menus": {
@@ -90,6 +138,31 @@
           "command": "liftoff.refresh",
           "when": "view == liftoff.environments",
           "group": "navigation"
+        },
+        {
+          "command": "liftoff.model.compare",
+          "when": "view == liftoff.model",
+          "group": "navigation@1"
+        },
+        {
+          "command": "liftoff.model.pullAll",
+          "when": "view == liftoff.model",
+          "group": "navigation@2"
+        },
+        {
+          "command": "liftoff.model.check",
+          "when": "view == liftoff.model",
+          "group": "navigation@3"
+        },
+        {
+          "command": "liftoff.model.generate",
+          "when": "view == liftoff.model",
+          "group": "1_model@1"
+        },
+        {
+          "command": "liftoff.pipeline",
+          "when": "view == liftoff.model",
+          "group": "1_model@2"
         }
       ],
       "view/item/context": [
@@ -122,6 +195,31 @@
           "command": "liftoff.testConnection",
           "when": "view == liftoff.environments && viewItem == environment",
           "group": "2_check@3"
+        },
+        {
+          "command": "liftoff.model.pull",
+          "when": "view == liftoff.model && viewItem == modelChange",
+          "group": "inline"
+        },
+        {
+          "command": "liftoff.model.pull",
+          "when": "view == liftoff.model && viewItem == modelChange",
+          "group": "1_pull@1"
+        },
+        {
+          "command": "liftoff.model.open",
+          "when": "view == liftoff.model && viewItem == modelChange",
+          "group": "1_pull@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "liftoff.model.open",
+          "when": "false"
+        },
+        {
+          "command": "liftoff.model.pull",
+          "when": "false"
         }
       ]
     },
@@ -132,6 +230,21 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Path to the `liftoff` program. Leave empty to use the one that comes with the extension, or `liftoff` on your PATH."
+        },
+        "liftoff.devEnvironment": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "The environment you change by hand (your dev database). Leave empty to use the one with role `dev` in liftoff.toml."
+        },
+        "liftoff.checkModelOnSave": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Check that the schema model builds every time a file in `schema-model/` is saved (uses the scratch database)."
+        },
+        "liftoff.generateUndo": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Also write the matching undo script (`U\u2026`) when generating a migration from the schema model."
         }
       }
     }

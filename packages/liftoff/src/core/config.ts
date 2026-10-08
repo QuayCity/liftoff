@@ -104,6 +104,23 @@ export class Config {
       env.password ??= keychainGet(root, name)
       environments.set(name, env)
     }
+    // Environments that exist only as variables: a CI job's throwaway database
+    // (LIFTOFF_ENV_CI_SCRATCH_URL + LIFTOFF_ENV_CI_SCRATCH_ROLE=scratch is environment "ci_scratch").
+    const known = new Set([...environments.keys()].map((n) => n.toUpperCase().replaceAll('-', '_')))
+    for (const [k, url] of Object.entries(process.env)) {
+      const m = /^LIFTOFF_ENV_(.+)_URL$/.exec(k)
+      if (!m || !url || known.has(m[1])) continue
+      const role = process.env[`LIFTOFF_ENV_${m[1]}_ROLE`] ?? 'test'
+      if (!ROLES.includes(role as Role)) throw configError(`LIFTOFF_ENV_${m[1]}_ROLE must be dev, scratch, test or prod`)
+      environments.set(m[1].toLowerCase(), {
+        url,
+        user: process.env[`LIFTOFF_ENV_${m[1]}_USER`],
+        password: process.env[`LIFTOFF_ENV_${m[1]}_PASSWORD`],
+        role: role as Role,
+        allow_clean: false,
+        placeholders: {},
+      })
+    }
     return new Config(root, project, environments)
   }
 

@@ -11,7 +11,7 @@ import * as ci from '../core/ci.ts'
 import { Config, defaultSchema, init, PROJECT_FILE, type Environment } from '../core/config.ts'
 import { engineOf, isSqlServerUrl, open } from '../core/db.ts'
 import * as diff from '../core/diff.ts'
-import { asLiftoffError, configError, driftError, LiftoffError } from '../core/errors.ts'
+import { asLiftoffError, configError, driftError, LiftoffError, modelAheadError } from '../core/errors.ts'
 import * as flyway from '../core/flyway.ts'
 import * as license from '../core/license.ts'
 import * as model from '../core/model.ts'
@@ -239,10 +239,19 @@ const COMMANDS: Record<string, Command> = {
       'dry-run': { type: 'boolean', help: 'The SQL that would run' },
       scratch: { type: 'string', help: 'Scratch environment rebuilt for the comparison (default: the first with role "scratch")' },
       report: { type: 'string', help: 'Also write a self-contained HTML report to this file', value: 'FILE' },
+      model: { type: 'boolean', help: 'Instead: fail (exit 14) when the schema model has changes no migration script makes; for pull requests' },
     },
     async run(ctx, v) {
       const cfg = load(ctx)
       requireLicense(ctx, 'check')
+      if (flag(v, 'model')) {
+        const cmp = await model.versusMigrations(cfg, str(v, 'scratch'), log)
+        const text = cmp.changes.map((c) => `  ${kindOf(c)} ${c.name}${c.destructive ? '  (may lose data)' : ''}`).join('\n')
+        if (!cmp.changes.length) return [cmp, 'The migration scripts cover the schema model']
+        const err = modelAheadError(cmp.changes.map((c) => c.name))
+        process.stdout.write(ctx.json ? `${JSON.stringify({ ok: false, result: cmp, error: err.report() })}\n` : `Not covered by a migration script:\n${text}\n`)
+        throw new Reported(err)
+      }
       const all = !(flag(v, 'drift') || flag(v, 'changes') || flag(v, 'dry-run'))
       const r = await checks.check(cfg, ctx.env, str(v, 'scratch'), { drift: all || flag(v, 'drift'), changes: all || flag(v, 'changes'), dryRun: all || flag(v, 'dry-run') }, log)
       const report = str(v, 'report')
@@ -260,7 +269,7 @@ const COMMANDS: Record<string, Command> = {
       if (checks.hasDrift(r)) {
         // The report is the useful part: print it, then fail with the drift exit code.
         process.stdout.write(ctx.json ? `${JSON.stringify({ ok: false, result: r, error: driftError(r.environment).report() })}\n` : `${text.join('\n')}\n`)
-        throw new ReportedDrift(r.environment)
+        throw new Reported(driftError(r.environment))
       }
       return [r, text.join('\n')]
     },
@@ -355,15 +364,22 @@ const COMMANDS: Record<string, Command> = {
     },
   },
   model: {
-    help: 'Bring the schema-model folder up to date with dev: one file per object (Pro)',
+    help: 'Bring the schema-model folder up to date with dev: one file per object (Pro). With --check, build the folder on the scratch database instead',
     options: {
       source: { type: 'string', help: 'Dev environment (default: the first with role "dev")' },
       status: { type: 'boolean', help: 'List what differs instead of writing' },
+      path: { type: 'string', multiple: true, help: 'Only this object file, e.g. public/tables/orders.sql (repeatable)', value: 'FILE' },
+      check: { type: 'boolean', help: 'Check the schema model builds (on the scratch database); exits 12 naming each file that does not' },
+      scratch: { type: 'string', help: 'Scratch environment for --check (default: the first with role "scratch")' },
     },
     async run(ctx, v) {
       const cfg = load(ctx)
       requireLicense(ctx, 'model')
-      const changes = await model.status(cfg, str(v, 'source'))
+      if (flag(v, 'check')) {
+        const n = await model.check(cfg, str(v, 'scratch'), log)
+        return [{ files: n }, `The schema model builds: ${n} object file(s)`]
+      }
+      const changes = model.pick(await model.status(cfg, str(v, 'source')), v.path as string[] | undefined)
       const list = changes.map((c) => `${kindOf(c)} ${c.path}`).join('\n')
       if (flag(v, 'status')) return [changes, list || 'The schema model is up to date']
       const n = model.save(cfg, changes)
@@ -376,6 +392,7 @@ const COMMANDS: Record<string, Command> = {
       stage: { type: 'string', multiple: true, help: 'Environments to deploy to, in order (repeat the flag; required)' },
       branch: { type: 'string', default: 'main', help: 'The branch whose pushes deploy' },
       'no-checks': { type: 'boolean', help: 'Leave out validate and the drift check' },
+      model: { type: 'string', default: 'off', help: 'Pull requests and the schema model: off, check (fail when a model change has no migration script) or generate (write it and commit it to the pull request)' },
       install: { type: 'string', default: ci.DEFAULT_INSTALL, help: 'Command that installs liftoff on the runner' },
       write: { type: 'boolean', help: 'Write .github/workflows/liftoff.yml (otherwise print it)' },
       force: { type: 'boolean', help: 'Replace an existing workflow file' },
@@ -384,7 +401,9 @@ const COMMANDS: Record<string, Command> = {
       const cfg = load(ctx)
       const stages = (v.stage as string[] | undefined) ?? []
       if (!stages.length) throw configError('--stage is required: name the environments to deploy to, in order')
-      const yaml = ci.githubActions(cfg, { stages, branch: str(v, 'branch')!, checks: !flag(v, 'no-checks'), install: str(v, 'install')! })
+      const m = str(v, 'model')
+      if (m !== 'off' && m !== 'check' && m !== 'generate') throw new UsageError(`--model must be off, check or generate, not '${m}'`)
+      const yaml = ci.githubActions(cfg, { stages, branch: str(v, 'branch')!, checks: !flag(v, 'no-checks'), install: str(v, 'install')!, model: m })
       if (flag(v, 'write')) {
         const written = ci.write(cfg, yaml, flag(v, 'force'))
         return [{ written }, `Wrote ${written}`]
@@ -404,15 +423,16 @@ const COMMANDS: Record<string, Command> = {
     },
   },
   diff: {
-    help: 'Compare the dev database with what the migrations build (Pro)',
+    help: 'Compare the dev database (or the schema model) with what the migrations build (Pro)',
     options: {
+      from: { type: 'string', default: 'dev', help: 'dev (the dev database) or model (the schema-model folder; no dev database needed)' },
       source: { type: 'string', help: 'Dev environment (default: the first with role "dev")' },
       scratch: { type: 'string', help: 'Scratch environment rebuilt for the comparison (default: the first with role "scratch")' },
     },
     async run(ctx, v) {
       const cfg = load(ctx)
       requireLicense(ctx, 'diff')
-      const cmp = await diff.devVsMigrations(cfg, str(v, 'source'), str(v, 'scratch'), log)
+      const cmp = await compareFrom(cfg, v)
       const text = cmp.changes.map((c) => `${kindOf(c)} ${c.name}${c.destructive ? '  (may lose data)' : ''}`).join('\n')
       return [cmp, text || 'No differences']
     },
@@ -421,6 +441,7 @@ const COMMANDS: Record<string, Command> = {
     help: 'Write the next migration from the differences (Pro)',
     options: {
       description: { type: 'string', help: 'What the migration does (required)' },
+      from: { type: 'string', default: 'dev', help: 'dev (the dev database) or model (the schema-model folder; no dev database needed)' },
       source: { type: 'string', help: 'Dev environment (default: the first with role "dev")' },
       scratch: { type: 'string', help: 'Scratch environment (default: the first with role "scratch")' },
       'skip-destructive': { type: 'boolean', help: 'Leave out changes that may lose data (dropped tables or columns, type changes)' },
@@ -433,7 +454,7 @@ const COMMANDS: Record<string, Command> = {
       requireLicense(ctx, 'generate')
       const description = str(v, 'description')
       if (description === undefined) throw configError('--description is required')
-      let changes = (await diff.devVsMigrations(cfg, str(v, 'source'), str(v, 'scratch'), log)).changes
+      let changes = (await compareFrom(cfg, v)).changes
       if (flag(v, 'skip-destructive')) changes = changes.filter((c) => !c.destructive)
       else if (changes.some((c) => c.destructive)) log('warn', 'the script includes changes that may lose data; review it before running, or use --skip-destructive')
       if (!changes.length) return [{ written: null }, 'No differences; nothing written']
@@ -441,6 +462,7 @@ const COMMANDS: Record<string, Command> = {
       if (flag(v, 'dry-run')) return [g, g.sql]
       const written = diff.save(cfg, g.file_name, g.sql)
       if (g.undo) diff.save(cfg, g.undo.file_name, g.undo.sql)
+      if (flag(v, 'record-on-dev') && str(v, 'from') === 'model') throw configError('--record-on-dev is for --from dev')
       if (flag(v, 'record-on-dev')) {
         const [dev] = cfg.pickRole(str(v, 'source'), 'dev')
         await runner.markApplied(cfg, dev, g.file_name, log)
@@ -460,13 +482,21 @@ const COMMANDS: Record<string, Command> = {
   },
 }
 
-/** Drift was already printed with its report; only the exit code is left to set. */
-class ReportedDrift extends Error {
-  readonly environment: string
-  constructor(environment: string) {
-    super(environment)
-    this.environment = environment
+/** The report was already printed on stdout; only the message (stderr) and the exit code are left. */
+class Reported extends Error {
+  readonly error: LiftoffError
+  constructor(error: LiftoffError) {
+    super(error.message)
+    this.error = error
   }
+}
+
+/** The changes from the dev database or from the schema model (--from), against the migrations. */
+function compareFrom(cfg: Config, v: Values): Promise<diff.Comparison> {
+  const from = str(v, 'from') ?? 'dev'
+  if (from === 'model') return model.versusMigrations(cfg, str(v, 'scratch'), log)
+  if (from !== 'dev') throw new UsageError(`--from must be dev or model, not '${from}'`)
+  return diff.devVsMigrations(cfg, str(v, 'source'), str(v, 'scratch'), log)
 }
 
 class UsageError extends Error {}
@@ -565,9 +595,9 @@ async function main(argv: string[]): Promise<number> {
     else if (text) process.stdout.write(`${text}\n`)
     return 0
   } catch (e) {
-    if (e instanceof ReportedDrift) {
-      process.stderr.write(`error: ${driftError(e.environment).message}\n`)
-      return 13
+    if (e instanceof Reported) {
+      process.stderr.write(`error: ${e.error.message}\n`)
+      return e.error.exitCode
     }
     // Usage mistakes: exit 2, like any command line.
     if (e instanceof UsageError || e instanceof FlywayArgError || (e as { code?: string }).code?.startsWith('ERR_PARSE_ARGS')) {

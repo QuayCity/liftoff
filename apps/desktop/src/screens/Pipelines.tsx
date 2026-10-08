@@ -2,7 +2,7 @@
 import { Rocket } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, errorText, type Project } from '../api'
-import { Button, Checkbox, Field, Input, Switch } from '../ui/controls'
+import { Button, Checkbox, Field, Input, RadioGroup, Switch } from '../ui/controls'
 import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
 import { useToast } from '../ui/overlays'
 
@@ -15,6 +15,7 @@ export function Pipelines({ project }: { project: Project }) {
   const [stages, setStages] = useState<string[]>(targets.map((e) => e.name))
   const [branch, setBranch] = useState('main')
   const [checks, setChecks] = useState(true)
+  const [model, setModel] = useState<'off' | 'check' | 'generate'>('off')
   const [install, setInstall] = useState(DEFAULT_INSTALL)
   const [yaml, setYaml] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -22,11 +23,11 @@ export function Pipelines({ project }: { project: Project }) {
 
   useEffect(() => {
     if (!stages.length) return
-    api.ciWorkflow(project.root, { stages, branch, checks, install }).then(
+    api.ciWorkflow(project.root, { stages, branch, checks, install, model }).then(
       (y) => { setYaml(y); setError(null) },
       (e) => { setYaml(null); setError(errorText(e)) },
     )
-  }, [project.root, stages, branch, checks, install])
+  }, [project.root, stages, branch, checks, install, model])
 
   if (targets.length === 0) {
     return (
@@ -64,6 +65,11 @@ export function Pipelines({ project }: { project: Project }) {
         </fieldset>
         <Field label="Branch that deploys">{(a) => <Input {...a} mono value={branch} onChange={(e) => setBranch(e.target.value)} />}</Field>
         <Switch checked={checks} onChange={setChecks} label="Validate and check for drift before migrating" />
+        <RadioGroup legend="Pull requests that change the schema model" name="model" value={model} onChange={setModel} options={[
+          { value: 'off', label: 'Nothing', help: 'Migration scripts are written by hand or in LiftOff, and committed with the change.' },
+          { value: 'generate', label: 'Write the migration script', help: 'The pipeline writes it from the schema model and commits it to the pull request, so it is reviewed with the change.' },
+          { value: 'check', label: 'Require a migration script', help: 'The pull request fails while a schema model change has no migration script.' },
+        ]} />
         <Field label="Install command" help="Runs on the CI machine before the steps.">
           {(a) => <Input {...a} mono value={install} onChange={(e) => setInstall(e.target.value)} />}
         </Field>

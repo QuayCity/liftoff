@@ -26,12 +26,28 @@ async function main(): Promise<void> {
   fs.mkdirSync(path.join(workspace, '.vscode'))
   fs.writeFileSync(path.join(workspace, '.vscode', 'settings.json'), JSON.stringify({ 'liftoff.cliPath': cli }))
   execFileSync(cli, ['-C', workspace, '-e', 'test', 'clean'])
+  // A dev database with the orders table on it, for the Schema Model view, and a scratch one to build the model on.
+  fs.appendFileSync(path.join(workspace, 'liftoff.toml'), `
+[environments.dev]
+url = "${pg}/shop_dev"
+role = "dev"
+allow_clean = true
+
+[environments.scratch]
+url = "${pg}/shop_scratch"
+role = "scratch"
+`)
+  execFileSync(cli, ['-C', workspace, '-e', 'dev', 'clean'])
+  execFileSync(cli, ['-C', workspace, '-e', 'dev', 'migrate'])
+  // The schema model is a paid feature: use the developer's own licence (never printed).
+  const licenseFile = path.join(os.homedir(), '.liftoff', 'dev-license.txt')
+  const license = process.env.LIFTOFF_LICENSE ?? (fs.existsSync(licenseFile) ? fs.readFileSync(licenseFile, 'utf8').trim() : '')
 
   await runTests({
     extensionDevelopmentPath: extensionDir,
     extensionTestsPath: path.join(__dirname, 'suite.js'),
     launchArgs: [workspace, '--disable-extensions', '--skip-welcome', '--skip-release-notes'],
-    extensionTestsEnv: { LIFTOFF_WORKSPACE: workspace },
+    extensionTestsEnv: { LIFTOFF_WORKSPACE: workspace, LIFTOFF_LICENSE: license },
   })
   fs.rmSync(workspace, { recursive: true, force: true })
 }

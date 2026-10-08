@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
-export type CliErrorReport = { code: string; exit_code: number; message: string }
+export type CliErrorReport = { code: string; exit_code: number; message: string; problems?: { path: string; message: string }[] }
 
 /** A failed command, with the CLI's own error code (e.g. LIFTOFF_DRIFT, LIFTOFF_LICENSE). */
 export class LiftoffError extends Error {

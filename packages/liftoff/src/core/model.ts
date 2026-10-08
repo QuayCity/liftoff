@@ -5,9 +5,11 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { ChangeKind } from './changes.ts'
 import type { Config } from './config.ts'
-import { open } from './db.ts'
-import { modelOf } from './diff.ts'
-import { configError } from './errors.ts'
+import type { Change } from './changes.ts'
+import { dialect, open, type Conn } from './db.ts'
+import { diffSchemas, modelOf, notComparedBetween, rebuildScratch, scratchEnv, type Comparison } from './diff.ts'
+import { configError, DbError, ModelInvalidError } from './errors.ts'
+import { quiet, type Log } from './runner.ts'
 import * as ms from './msdiff.ts'
 import * as pgd from './pgdiff.ts'
 
@@ -85,4 +87,93 @@ export function save(cfg: Config, changes: ModelChange[]): number {
     }
   }
   return changes.length
+}
+
+/* ---------- the schema model as the source of truth ---------- */
+
+/** Which kinds of object are created first; dependencies the order misses are retried. */
+const ORDER = ['extensions', 'types', 'domains', 'sequences', 'tables', 'functions', 'views', 'materialized-views', 'procedures', 'triggers']
+const rank = (file: string) => {
+  const kind = file.split('/').at(-2) ?? ''
+  const i = ORDER.indexOf(kind)
+  return i < 0 ? ORDER.length : i
+}
+
+/** Only the given schema-model files (relative to schema-model/); all of them when not given. */
+export function pick(changes: ModelChange[], only: string[] | undefined): ModelChange[] {
+  if (!only?.length) return changes
+  const wanted = new Set(only.map((p) => p.replaceAll('\\', '/').replace(/^schema-model\//, '')))
+  const missing = [...wanted].filter((w) => !changes.some((c) => c.path === w))
+  if (missing.length) throw configError(`not a change between dev and the schema model: ${missing.join(', ')}`)
+  return changes.filter((c) => wanted.has(c.path))
+}
+
+/**
+ * Builds the schema-model files into the (empty) database `c` is connected to. Each file runs in
+ * its own transaction; files that fail because something they need is not there yet are tried
+ * again, pass by pass, until everything is in. When a pass makes no progress, what is left are
+ * real errors in those files.
+ */
+export async function applyModel(cfg: Config, c: Conn, log: Log = quiet): Promise<number> {
+  const files = [...readFolder(cfg.root)].sort(([a], [b]) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0))
+  if (!files.length) throw configError(`the ${FOLDER} folder is empty; save dev into it first (liftoff model)`)
+  const d = dialect[c.engine]
+  let todo = files
+  let problems: { path: string; message: string }[] = []
+  while (todo.length) {
+    const left: [string, string][] = []
+    problems = []
+    for (const [file, sql] of todo) {
+      const transactional = !d.needsNoTransaction(sql)
+      try {
+        if (transactional) await c.batch(d.begin)
+        await c.script(sql, transactional)
+        if (transactional) await c.batch('COMMIT')
+      } catch (e) {
+        if (transactional) await c.batch('ROLLBACK').catch(() => {})
+        left.push([file, sql])
+        problems.push({ path: file, message: e instanceof DbError ? e.detail : e instanceof Error ? e.message : String(e) })
+      }
+    }
+    if (left.length === todo.length) throw new ModelInvalidError(problems)
+    todo = left
+  }
+  log('info', `Built ${files.length} object file(s) from ${FOLDER}/`)
+  return files.length
+}
+
+/** Checks that the schema model builds, on the scratch database. */
+export async function check(cfg: Config, scratch: string | undefined, log: Log = quiet): Promise<number> {
+  const [name, env] = scratchEnv(cfg, scratch)
+  log('info', `Building ${FOLDER}/ on '${name}'`)
+  const c = await open(name, env)
+  try {
+    await c.resetSchemas(cfg.project.schemas)
+    return await applyModel(cfg, c, log)
+  } finally {
+    await c.close()
+  }
+}
+
+/**
+ * The schema model against the migrations: what a new migration must change so the scripts build
+ * what the files describe. One scratch database, used twice: built from the scripts, then from the
+ * files. No dev database needed, so it runs in a pipeline.
+ */
+export async function versusMigrations(cfg: Config, scratch: string | undefined, log: Log = quiet): Promise<Comparison> {
+  const [name, env] = scratchEnv(cfg, scratch)
+  const s = await rebuildScratch(cfg, name, env, undefined, log)
+  try {
+    const target = await modelOf(cfg, s)
+    log('info', `Building ${FOLDER}/ on '${name}'`)
+    await s.resetSchemas(cfg.project.schemas)
+    await applyModel(cfg, s, log)
+    const source = await modelOf(cfg, s)
+    const changes: Change[] = diffSchemas(source, target)
+    const notCompared = notComparedBetween(source, target, 'the schema model', 'the scripts')
+    log('info', `${changes.length} difference(s) between the schema model and the scripts`)
+    return { changes, not_compared: notCompared }
+  } finally {
+    await s.close()
+  }
 }

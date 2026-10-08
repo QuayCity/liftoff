@@ -285,6 +285,8 @@ export class SqlServerConn implements Conn {
       if (left.length === todo.length) throw last
       todo = left
     }
+    // The schemas themselves stay, or are created when the database never had them.
+    for (const s of schemas) await this.query("IF SCHEMA_ID(@P1) IS NULL BEGIN DECLARE @s nvarchar(400) = N'CREATE SCHEMA ' + QUOTENAME(@P1); EXEC (@s) END", [s])
   }
 
   async close(): Promise<void> {

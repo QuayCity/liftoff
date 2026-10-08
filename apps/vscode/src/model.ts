@@ -131,3 +131,32 @@ export function groupProblems(byEnvironment: Map<string, Problem[]>): Map<string
   }
   return out
 }
+
+/** One object that differs between the dev database and the schema-model folder (`liftoff model --status`). */
+export type ModelChange = {
+  /** relative to schema-model/, e.g. public/tables/orders.sql */
+  path: string
+  /** tables, views, functions, … */
+  object_type: string
+  /** what dev did: added (not in the files yet), changed, removed (dev dropped it) */
+  kind: 'added' | 'changed' | 'removed'
+  /** the file as it is (null when there is none) */
+  before: string | null
+  /** what dev has (null when dev dropped it) */
+  after: string | null
+}
+
+const kindText = { added: 'new in dev', changed: 'changed in dev', removed: 'dropped in dev' }
+
+/** "table · changed in dev" */
+export function describeModelChange(c: ModelChange): string {
+  const type = c.object_type.replace(/-/g, ' ').replace(/s$/, '')
+  return `${type} · ${kindText[c.kind]}`
+}
+
+/** Build problems from `model --check`, grouped by file. */
+export function modelProblems(problems: { path: string; message: string }[]): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  for (const p of problems) out.set(p.path, [...(out.get(p.path) ?? []), p.message])
+  return out
+}

@@ -11,6 +11,10 @@ export type ErrorCode =
   | 'LIFTOFF_LICENSE'
   | 'LIFTOFF_DRIFT'
   | 'LIFTOFF_NOT_BASELINED'
+  /** a schema-model file does not build */
+  | 'LIFTOFF_MODEL_INVALID'
+  /** the schema model has changes no migration script makes */
+  | 'LIFTOFF_MODEL_AHEAD'
   | 'LIFTOFF_GIT'
   | 'LIFTOFF_GIT_PUSH_REJECTED'
   | 'LIFTOFF_GIT_NOT_A_REPOSITORY'
@@ -21,7 +25,7 @@ export type ErrorCode =
   | 'LIFTOFF_IO'
 
 /** What the CLI prints for a failure: `{"ok": false, "error": <ErrorReport>}` */
-export type ErrorReport = { code: ErrorCode; exit_code: number; message: string }
+export type ErrorReport = { code: ErrorCode; exit_code: number; message: string; problems?: { path: string; message: string }[] }
 
 export class LiftoffError extends Error {
   readonly code: ErrorCode
@@ -73,6 +77,22 @@ export const notBaselinedError = (env: string) =>
     12,
     `'${env}' already has tables but no migration history. Baseline it first (\`liftoff baseline --version …\`), or run the scripts anyway with --allow-non-empty`,
   )
+
+/** Schema-model files that do not build, each with the database's error. */
+export class ModelInvalidError extends LiftoffError {
+  readonly problems: { path: string; message: string }[]
+  constructor(problems: { path: string; message: string }[]) {
+    super('LIFTOFF_MODEL_INVALID', 12, `${problems.length} schema-model file(s) do not build:\n${problems.map((p) => `  ${p.path}: ${p.message}`).join('\n')}`)
+    this.problems = problems
+  }
+
+  report(): ErrorReport {
+    return { ...super.report(), problems: this.problems }
+  }
+}
+
+export const modelAheadError = (names: string[]) =>
+  new LiftoffError('LIFTOFF_MODEL_AHEAD', 14, `the schema model has changes no migration script makes: ${names.join(', ')}. Generate the migration (liftoff generate --from model)`)
 
 export type GitErrorKind = 'push_rejected' | 'not_a_repository' | 'no_upstream' | 'diverged' | 'auth' | 'other'
 

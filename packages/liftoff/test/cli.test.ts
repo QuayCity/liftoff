@@ -86,6 +86,53 @@ test('BUG-013: an unreachable server says why', () => {
   assert.match(r.stderr, /could not connect to 'down': .*(refused|ECONNREFUSED)/i)
 })
 
+test('schema model as the source: pull, check, gate and generate from the command line', { skip: !base && 'set LIFTOFF_TEST_PG' }, async () => {
+  const licenseFile = path.join(os.homedir(), '.liftoff', 'dev-license.txt')
+  if (!fs.existsSync(licenseFile)) return
+  const license = fs.readFileSync(licenseFile, 'utf8').trim()
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-model-'))
+  init(dir, 'm', 'postgresql')
+  fs.appendFileSync(path.join(dir, 'liftoff.toml'), `\n[environments.dev]\nurl = "${base}/shop_dev"\nrole = "dev"\n`)
+  const dev = new Config(dir, { name: 'm', engine: 'postgresql', migrations: 'migrations', schemas: ['public'], history_table: 'liftoff_schema_history', filters: [], lock: 'advisory', placeholders: {} }, new Map([['dev', { url: `${base}/shop_dev`, role: 'dev', allow_clean: false, placeholders: {} }]]))
+  await sql(dev, 'dev', `${pgSchemaReset} create table customers (id int primary key); create table orders (id int primary key, customer_id int references customers (id));`)
+  // The pipeline's throwaway database exists only as variables.
+  process.env.LIFTOFF_ENV_CI_SCRATCH_URL = `${base}/shop_scratch`
+  process.env.LIFTOFF_ENV_CI_SCRATCH_ROLE = 'scratch'
+  try {
+    const run = (args: string[]) => liftoff(dir, [...args, '--output-type', 'json'], license)
+
+    // Pull one object, then the rest.
+    let r = run(['model', '--path', 'public/tables/customers.sql'])
+    assert.equal(r.code, 0, r.stderr)
+    assert.deepEqual(fs.readdirSync(path.join(dir, 'schema-model/public/tables')), ['customers.sql'])
+    assert.equal(run(['model']).code, 0)
+    assert.equal(run(['model', '--check']).code, 0)
+
+    // The gate fails while no migration covers the model, and says what is missing.
+    r = run(['check', '--model'])
+    assert.equal(r.code, 14, r.stderr)
+    const gate = json(r)
+    assert.equal(gate.error.code, 'LIFTOFF_MODEL_AHEAD')
+    assert.deepEqual(gate.result.changes.map((c: { id: string }) => c.id).sort(), ['table:public.customers', 'table:public.orders'])
+
+    // Generate from the model (no dev database involved), then the gate passes.
+    r = run(['generate', '--from', 'model', '--description', 'from model'])
+    assert.equal(r.code, 0, r.stderr)
+    assert.match(json(r).result.written, /__from_model\.sql$/)
+    assert.equal(run(['check', '--model']).code, 0)
+
+    // A broken file: exit 12, the file named in the JSON.
+    fs.mkdirSync(path.join(dir, 'schema-model/public/views'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'schema-model/public/views/bad.sql'), 'CREATE VIEW public.bad AS SELECT nope FROM public.orders;\n')
+    r = run(['model', '--check'])
+    assert.equal(r.code, 12, r.stderr)
+    assert.deepEqual(json(r).error.problems.map((p: { path: string }) => p.path), ['public/views/bad.sql'])
+  } finally {
+    delete process.env.LIFTOFF_ENV_CI_SCRATCH_URL
+    delete process.env.LIFTOFF_ENV_CI_SCRATCH_ROLE
+  }
+})
+
 test('the CI contract', { skip: !base && 'set LIFTOFF_TEST_PG' }, async () => {
   const licenseFile = path.join(os.homedir(), '.liftoff', 'dev-license.txt')
   const license = fs.existsSync(licenseFile) ? fs.readFileSync(licenseFile, 'utf8').trim() : undefined

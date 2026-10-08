@@ -26,3 +26,23 @@ test('stages run in order, with secrets from the repository', () => {
   assert.ok(!y.includes('\t'), 'YAML forbids tabs for indentation')
   assert.throws(() => githubActions(cfg, { ...o, stages: ['dev'] }), /dev database/)
 })
+
+test('pull requests: the schema model job (generate and check), deployments only on push', () => {
+  const cfg = new Config(
+    os.tmpdir(),
+    { name: 'shop', engine: 'postgresql', migrations: 'db/migrations', schemas: ['public'], history_table: 'h', filters: [], lock: 'advisory', placeholders: {} },
+    new Map([['prod', env('prod')]]),
+  )
+  const base = { stages: ['prod'], branch: 'main', checks: false, install: DEFAULT_INSTALL }
+  const gen = githubActions(cfg, { ...base, model: 'generate' })
+  assert.ok(gen.includes("  pull_request:\n    paths: ['schema-model/**', 'db/migrations/**', 'liftoff.toml']"), gen)
+  assert.ok(gen.includes('    permissions:\n      contents: write\n'), 'generate commits back to the pull request')
+  assert.ok(gen.includes('liftoff generate --from model --scratch ci_scratch'), gen)
+  assert.ok(gen.includes('git add db/migrations'), gen)
+  assert.ok(gen.includes("  prod:\n    name: 'Migrate prod'\n    runs-on: ubuntu-latest\n    if: github.event_name != 'pull_request'"), 'no deployment from a pull request')
+  const chk = githubActions(cfg, { ...base, model: 'check' })
+  assert.ok(chk.includes('liftoff check --model --scratch ci_scratch') && !chk.includes('contents: write'), chk)
+  const ms = githubActions(new Config(os.tmpdir(), { ...cfg.project, engine: 'sqlserver' }, cfg.environments), { ...base, model: 'check' })
+  assert.ok(ms.includes('mcr.microsoft.com/mssql/server') && ms.includes("CREATE DATABASE scratch"), ms)
+  assert.ok(!githubActions(cfg, base).includes('pull_request:'), 'off by default')
+})

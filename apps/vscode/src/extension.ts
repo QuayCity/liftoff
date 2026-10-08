@@ -5,6 +5,7 @@
 import * as path from 'node:path'
 import * as vscode from 'vscode'
 import { findBinary, LiftoffError, runCli } from './cli'
+import { registerSchemaModel, type SchemaModelView } from './modelView'
 import {
   describe,
   groupProblems,
@@ -63,6 +64,8 @@ export class Liftoff implements vscode.TreeDataProvider<Item> {
 
   project: Project | undefined
   projectDir: string | undefined
+  /** the Schema Model view (modelView.ts) */
+  schemaModel: SchemaModelView | undefined
   /** what `info` last returned per environment; only environments someone opened are loaded */
   private readonly infos = new Map<string, MigrationInfo[]>()
   private readonly problems = new Map<string, Problem[]>()
@@ -296,6 +299,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
     }),
   )
   await lo.load()
+  lo.schemaModel = registerSchemaModel(context, lo)
   // Returned for the integration tests.
   return lo
 }

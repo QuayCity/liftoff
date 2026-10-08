@@ -41,7 +41,7 @@ export type ConvertReport = { source: string; written: string; environments: str
 export type HistoryImport = { environment: string; imported: number; skipped: string[]; edited: string[]; attention: string[] }
 export type GitStatus = { branch: string | null; upstream: string | null; ahead: number; behind: number; files: { path: string; change: string }[] }
 export type ModelChange = { path: string; object_type: string; kind: 'added' | 'changed' | 'removed'; before: string | null; after: string | null }
-export type CiOptions = { stages: string[]; branch: string; checks: boolean; install: string }
+export type CiOptions = { stages: string[]; branch: string; checks: boolean; install: string; model?: 'off' | 'check' | 'generate' }
 export type ObjectCommit = { sha: string; short: string; author: string; date: string; message: string; path: string; deleted: boolean }
 export type RepairReport = { removed_failed: string[]; realigned: string[]; forgotten: string[] }
 
