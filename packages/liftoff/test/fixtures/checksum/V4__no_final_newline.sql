@@ -1,0 +1,1 @@
+create table t4 (id int);

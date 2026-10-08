@@ -1,0 +1,19 @@
+{
+  // Node 24 runs these .ts files directly (type stripping), so `tsc` only checks types.
+  // erasableSyntaxOnly keeps to the TypeScript that Node can run as is: no enums, no namespaces,
+  // no constructor parameter properties.
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "target": "es2024",
+    "lib": ["es2024"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "test"]
+}
