@@ -1,0 +1,154 @@
+{
+  "name": "liftoff",
+  "displayName": "LiftOff",
+  "description": "See, run and check your database migrations without leaving the editor.",
+  "version": "0.1.0",
+  "publisher": "liftoff",
+  "license": "SEE LICENSE IN LICENSE.txt",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "database",
+    "migrations",
+    "postgresql",
+    "sql server"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/liftoff.toml"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "liftoff",
+          "title": "LiftOff",
+          "icon": "media/liftoff.svg"
+        }
+      ]
+    },
+    "views": {
+      "liftoff": [
+        {
+          "id": "liftoff.environments",
+          "name": "Environments"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "liftoff.environments",
+        "contents": "No liftoff.toml in this workspace.\nRun `liftoff init` in your project folder, or open the folder that has one."
+      }
+    ],
+    "commands": [
+      {
+        "command": "liftoff.refresh",
+        "title": "Refresh",
+        "category": "LiftOff",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "liftoff.migrate",
+        "title": "Run Pending Migrations",
+        "category": "LiftOff",
+        "icon": "$(play)"
+      },
+      {
+        "command": "liftoff.validate",
+        "title": "Validate",
+        "category": "LiftOff"
+      },
+      {
+        "command": "liftoff.dryRun",
+        "title": "Show the SQL That Would Run",
+        "category": "LiftOff"
+      },
+      {
+        "command": "liftoff.checkDrift",
+        "title": "Check for Drift",
+        "category": "LiftOff"
+      },
+      {
+        "command": "liftoff.testConnection",
+        "title": "Test Connection",
+        "category": "LiftOff"
+      },
+      {
+        "command": "liftoff.showLog",
+        "title": "Show Log",
+        "category": "LiftOff"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "liftoff.refresh",
+          "when": "view == liftoff.environments",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "liftoff.migrate",
+          "when": "view == liftoff.environments && viewItem == environment",
+          "group": "inline"
+        },
+        {
+          "command": "liftoff.migrate",
+          "when": "view == liftoff.environments && viewItem == environment",
+          "group": "1_run@1"
+        },
+        {
+          "command": "liftoff.dryRun",
+          "when": "view == liftoff.environments && viewItem == environment",
+          "group": "1_run@2"
+        },
+        {
+          "command": "liftoff.validate",
+          "when": "view == liftoff.environments && viewItem == environment",
+          "group": "2_check@1"
+        },
+        {
+          "command": "liftoff.checkDrift",
+          "when": "view == liftoff.environments && viewItem == environment",
+          "group": "2_check@2"
+        },
+        {
+          "command": "liftoff.testConnection",
+          "when": "view == liftoff.environments && viewItem == environment",
+          "group": "2_check@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "LiftOff",
+      "properties": {
+        "liftoff.cliPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the `liftoff` program. Leave empty to use the one that comes with the extension, or `liftoff` on your PATH."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -p . --watch",
+    "test": "npm run build && node --test \"out/test/*.test.js\"",
+    "test:vscode": "npm run build && node out/test-vscode/run.js",
+    "bundle-cli": "node scripts/bundle-cli.mjs",
+    "package": "npm run build && npm run bundle-cli && vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^2.4.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "~5.8.0"
+  }
+}

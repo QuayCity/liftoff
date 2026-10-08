@@ -1,0 +1,133 @@
+// What the CLI returns, and the small decisions made from it: how a migration's state is shown,
+// and which scripts deserve a warning in the editor.
+//
+// No VS Code API here, so it can be tested with plain Node.
+
+export type Role = 'dev' | 'scratch' | 'test' | 'prod'
+
+export type Environment = {
+  name: string
+  role: Role
+  /** "PostgreSQL" or "SQL Server" */
+  engine: string
+  allow_clean: boolean
+}
+
+/** `liftoff project` */
+export type Project = {
+  name: string
+  engine: string
+  /** the migrations folder, relative to the project folder */
+  migrations: string
+  schemas: string[]
+  environments: Environment[]
+}
+
+export type State =
+  | 'pending'
+  | 'applied'
+  | 'failed'
+  | 'outdated'
+  | 'ignored'
+  | 'below_baseline'
+  | 'missing'
+  | 'baseline'
+  | 'future'
+
+/** One row of `liftoff info` */
+export type MigrationInfo = {
+  kind: 'versioned' | 'repeatable' | 'undo' | 'baseline'
+  version: string | null
+  description: string
+  script: string
+  state: State
+  installed_on: string | null
+  execution_time_ms: number | null
+  /** applied, but the file was edited afterwards */
+  checksum_mismatch: boolean
+}
+
+/** `liftoff migrate` */
+export type MigrateResult = {
+  environment: string
+  applied: { script: string; version: string | null; execution_time_ms: number; transactional: boolean }[]
+  execution_time_ms: number
+  dry_run_sql: string | null
+}
+
+/** A change found by `liftoff check --drift` */
+export type Change = { id: string; object_type: string; name: string; kind: 'added' | 'changed' | 'removed'; sql: string }
+
+/** `liftoff check` */
+export type CheckReport = { environment: string; drift: Change[] | null; not_compared: string[] }
+
+export const stateText: Record<State, string> = {
+  pending: 'pending',
+  applied: 'applied',
+  failed: 'failed',
+  outdated: 'changed, runs again',
+  ignored: 'skipped: older than the latest applied',
+  below_baseline: 'covered by the baseline',
+  missing: 'applied, file missing',
+  baseline: 'baseline',
+  future: 'applied, newer than these files',
+}
+
+/** Codicon names (https://code.visualstudio.com/api/references/icons-in-labels). */
+export const stateIcon: Record<State, string> = {
+  pending: 'circle-large-outline',
+  applied: 'pass',
+  failed: 'error',
+  outdated: 'sync',
+  ignored: 'warning',
+  below_baseline: 'circle-slash',
+  missing: 'question',
+  baseline: 'milestone',
+  future: 'arrow-up',
+}
+
+/** "2 pending", "up to date", "1 failed, 3 pending" */
+export function summary(infos: MigrationInfo[]): string {
+  const failed = infos.filter((i) => i.state === 'failed').length
+  const pending = infos.filter((i) => i.state === 'pending' || i.state === 'outdated').length
+  const parts: string[] = []
+  if (failed) parts.push(`${failed} failed`)
+  if (pending) parts.push(`${pending} pending`)
+  return parts.length ? parts.join(', ') : 'up to date'
+}
+
+/** The line next to a migration in the tree. */
+export function describe(info: MigrationInfo): string {
+  const when = info.installed_on ? ` · ${info.installed_on.replace('T', ' ').replace('Z', ' UTC')}` : ''
+  const edited = info.checksum_mismatch ? ' · edited after it ran' : ''
+  return stateText[info.state] + edited + (info.state === 'applied' ? when : '')
+}
+
+export type Problem = { script: string; severity: 'error' | 'warning'; message: string }
+
+/** Scripts that need attention on one environment, as editor warnings. */
+export function problemsFor(environment: string, infos: MigrationInfo[]): Problem[] {
+  const out: Problem[] = []
+  for (const i of infos) {
+    if (i.checksum_mismatch) {
+      out.push({
+        script: i.script,
+        severity: 'warning',
+        message: `Changed after it ran on ${environment}. Put new changes in a new script; if this edit is intended, run "liftoff repair" there.`,
+      })
+    }
+    if (i.state === 'failed') {
+      out.push({ script: i.script, severity: 'error', message: `Failed on ${environment}. Fix it, then run "liftoff repair" there before migrating again.` })
+    }
+  }
+  return out
+}
+
+/** Problems from several environments, grouped by script file. */
+export function groupProblems(byEnvironment: Map<string, Problem[]>): Map<string, Problem[]> {
+  const out = new Map<string, Problem[]>()
+  for (const problems of byEnvironment.values()) {
+    for (const p of problems) out.set(p.script, [...(out.get(p.script) ?? []), p])
+  }
+  return out
+}

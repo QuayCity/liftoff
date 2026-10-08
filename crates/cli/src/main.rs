@@ -64,6 +64,8 @@ enum Command {
         #[arg(long)]
         accept_edited: bool,
     },
+    /// Show the project and its environments: name, role and engine (no connection details)
+    Project,
     /// Check that an environment is reachable
     #[command(alias = "testConnection")]
     TestConnection,
@@ -292,6 +294,20 @@ async fn run(cli: &Cli, adhoc: &Adhoc) -> Result<(Value, String)> {
             }
             config::init(root, &name, engine)?;
             Ok((json!({ "project": name, "path": root }), format!("Created {} in {}", config::PROJECT_FILE, root.display())))
+        }
+        Command::Project => {
+            let cfg = load(cli, adhoc)?;
+            let list: Vec<Value> = cfg
+                .environments
+                .iter()
+                .map(|(name, e)| {
+                    json!({ "name": name, "role": config::role_name(e.role), "engine": liftoff_core::db::Engine::of(&e.url).name(), "allow_clean": e.allow_clean })
+                })
+                .collect();
+            let text = list.iter().map(|e| format!("{:<16} {:<8} {}", e["name"].as_str().unwrap_or(""), e["role"].as_str().unwrap_or(""), e["engine"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n");
+            let p = &cfg.project;
+            let value = json!({ "name": p.name, "engine": p.engine, "migrations": p.migrations, "schemas": p.schemas, "environments": list });
+            Ok((value, format!("{} ({}, scripts in {})\n{text}", p.name, p.engine, p.migrations)))
         }
         Command::TestConnection => {
             let cfg = load(cli, adhoc)?;
