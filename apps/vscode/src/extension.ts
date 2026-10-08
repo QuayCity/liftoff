@@ -6,6 +6,7 @@ import * as path from 'node:path'
 import * as vscode from 'vscode'
 import { findBinary, LiftoffError, runCli } from './cli'
 import { importFlyway, type ImportAnswers } from './flywayImport'
+import { newProject, type NewProjectAnswers } from './newProject'
 import { registerSchemaModel, type SchemaModelView } from './modelView'
 import { SettingsPanel } from './settingsPanel'
 import {
@@ -313,6 +314,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
     vscode.commands.registerCommand('liftoff.testConnection', (item?: EnvironmentItem) => testConnection(lo, item)),
     vscode.commands.registerCommand('liftoff.showLog', () => lo.log.show()),
     vscode.commands.registerCommand('liftoff.importFlyway', (answers?: ImportAnswers) => importFlyway(lo, answers)),
+    vscode.commands.registerCommand('liftoff.newProject', (answers?: NewProjectAnswers) => newProject(lo, answers)),
     // From an environment's menu (its item), the import (a name), or the palette (nothing).
     vscode.commands.registerCommand('liftoff.settings', (target?: EnvironmentItem | string) =>
       SettingsPanel.show(context, lo, typeof target === 'string' ? target : target?.env?.name),

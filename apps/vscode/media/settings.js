@@ -98,6 +98,8 @@ if (typeof document !== 'undefined') {
   /** @type {string | undefined} */
   let openEnv
 
+  const newEnvironment = () => ({ name: '', url: '', user: null, role: /** @type {const} */ ('test'), allow_clean: false, placeholders: {}, shared: true, has_password: false, password: '', isNew: true })
+
   const ROLES = {
     dev: 'Dev: changed by hand; compared with the schema model',
     scratch: 'Scratch: rebuilt by LiftOff for comparisons',
@@ -328,7 +330,7 @@ if (typeof document !== 'undefined') {
         type: 'button',
         text: 'Add environment',
         onclick: () => {
-          state.environments.push({ name: '', url: '', user: null, role: 'test', allow_clean: false, placeholders: {}, shared: true, has_password: false, password: '', isNew: true })
+          state.environments.push(newEnvironment())
           render()
         },
       }),
@@ -393,7 +395,12 @@ if (typeof document !== 'undefined') {
       openEnv = m.focus
       status = { text: '', tone: '' }
       load(m.settings)
-      if (m.focus) document.querySelector(`details[open] summary`)?.scrollIntoView()
+      if (m.focus === '+') {
+        // A new project: start with an empty environment to fill in.
+        state.environments.push(newEnvironment())
+        render()
+        document.getElementById(`env-${state.environments.length - 1}-name`)?.focus()
+      } else if (m.focus) document.querySelector(`details[open] summary`)?.scrollIntoView()
     } else if (m.type === 'saved') {
       status = { text: 'Saved.', tone: 'ok' }
       load(m.settings)

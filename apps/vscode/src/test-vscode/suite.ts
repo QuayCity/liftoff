@@ -100,6 +100,15 @@ export async function run(): Promise<void> {
   assert.ok(saved && !saved.environments.some((e) => e.name === 'qa'))
   panel.panel.dispose()
 
+  // A new project in an empty folder (outside the workspace, so nothing else opens): empty, and the sample.
+  const blank = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-new-'))
+  assert.equal(await vscode.commands.executeCommand('liftoff.newProject', { folder: blank, engine: 'sqlserver', sample: false, name: 'billing' }), path.join(blank, 'liftoff.toml'))
+  assert.match(fs.readFileSync(path.join(blank, 'liftoff.toml'), 'utf8'), /name = "billing"[^]*engine = "sqlserver"/)
+  const sampleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-new-'))
+  await vscode.commands.executeCommand('liftoff.newProject', { folder: sampleDir, engine: 'sqlserver', sample: true, name: 'try-it' })
+  assert.match(fs.readFileSync(path.join(sampleDir, 'liftoff.toml'), 'utf8'), /name = "try-it"/)
+  assert.match(fs.readFileSync(path.join(sampleDir, 'migrations', 'V1__customers.sql'), 'utf8'), /IDENTITY/)
+
   fs.writeFileSync(path.join(workspace, '.suite-passed'), '')
   console.log('liftoff suite: all checks passed')
 }

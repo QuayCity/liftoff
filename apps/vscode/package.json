@@ -49,12 +49,12 @@
       {
         "view": "liftoff.environments",
         "when": "liftoff.flywayProject",
-        "contents": "This folder has a Flyway project. Import it to use it with LiftOff: a few questions, and your Flyway files stay as they are.\n[Import Flyway Project](command:liftoff.importFlyway)"
+        "contents": "This folder has a Flyway project. Import it to use it with LiftOff: a few questions, and your Flyway files stay as they are.\n[Import Flyway Project](command:liftoff.importFlyway)\nOr start fresh: [Create LiftOff Project](command:liftoff.newProject)"
       },
       {
         "view": "liftoff.environments",
         "when": "!liftoff.flywayProject",
-        "contents": "No liftoff.toml in this workspace.\nRun `liftoff init` in your project folder, or open the folder that has one.\nComing from Flyway? [Import Flyway Project](command:liftoff.importFlyway)"
+        "contents": "There is no LiftOff project in this workspace yet.\n[Create LiftOff Project](command:liftoff.newProject)\nComing from Flyway? [Import Flyway Project](command:liftoff.importFlyway)"
       },
       {
         "view": "liftoff.model",
@@ -153,6 +153,11 @@
       {
         "command": "liftoff.editEnvironment",
         "title": "Edit Environment",
+        "category": "LiftOff"
+      },
+      {
+        "command": "liftoff.newProject",
+        "title": "New Project",
         "category": "LiftOff"
       }
     ],

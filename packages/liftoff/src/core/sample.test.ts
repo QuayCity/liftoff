@@ -15,3 +15,13 @@ test('the sample project is a working project with every kind of script', () => 
   assert.deepEqual(scan(cfg.migrationsDir()).map((s) => s.fileName).sort(), ['R__customer_totals.sql', 'U3__orders_by_customer.sql', 'V1__customers.sql', 'V2__orders.sql', 'V3__orders_by_customer.sql'])
   assert.throws(() => createSample(root), /not empty/)
 })
+
+test('the sample in T-SQL for SQL Server projects', () => {
+  const root = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lo-sample-')), 'liftoff-sample')
+  createSample(root, 'sqlserver')
+  const cfg = Config.load(root)
+  assert.deepEqual([cfg.project.engine, cfg.project.schemas], ['sqlserver', ['dbo']])
+  const v1 = fs.readFileSync(path.join(cfg.migrationsDir(), 'V1__customers.sql'), 'utf8')
+  assert.match(v1, /IDENTITY\(1, 1\)/)
+  assert.doesNotMatch(v1, /timestamptz|generated always/)
+})

@@ -25,7 +25,7 @@ const settings = {
   ],
 }
 
-async function open(page: Page) {
+async function open(page: Page, focus?: string) {
   await page.setContent(`<!doctype html><html lang="en"><head><title>LiftOff Settings</title><style>${THEME}</style></head><body><main id="app" aria-busy="true"></main></body></html>`)
   await page.addStyleTag({ path: path.join(media, 'settings.css') })
   // The webview API: messages the page posts are kept for the test.
@@ -35,7 +35,7 @@ async function open(page: Page) {
     w.acquireVsCodeApi = () => ({ postMessage: (m) => w.posted.push(m) })
   })
   await page.addScriptTag({ path: path.join(media, 'settings.js') })
-  await page.evaluate((s) => window.postMessage({ type: 'settings', settings: s }, '*'), settings)
+  await page.evaluate(([s, f]) => window.postMessage({ type: 'settings', settings: s, focus: f }, '*'), [settings, focus] as const)
   await expect(page.getByRole('heading', { name: 'LiftOff settings: shop' })).toBeVisible()
 }
 
@@ -85,4 +85,15 @@ test('VS-SET-E1 production cannot allow clean; removing an environment is sent a
   await page.getByRole('button', { name: 'Save' }).click()
   const save = (await posted(page)).find((m) => m.type === 'save')
   expect(save?.change).toEqual({ remove: ['dev'] })
+})
+
+test('VS-SET-H2 after New Project the page starts with an empty environment, its name focused', async ({ page }) => {
+  await open(page, '+')
+  await expect(page.locator('#env-2-name')).toBeFocused()
+  await expect(page.getByText('New environment')).toBeVisible()
+  await page.locator('#env-2-name').fill('staging')
+  await page.locator('#env-2-url').fill('postgres://db/staging')
+  await page.getByRole('button', { name: 'Save' }).click()
+  const save = (await posted(page)).find((m) => m.type === 'save')
+  expect(save?.change).toEqual({ environments: [{ name: 'staging', url: 'postgres://db/staging', user: null, role: 'test', allow_clean: false, placeholders: {}, shared: true }] })
 })

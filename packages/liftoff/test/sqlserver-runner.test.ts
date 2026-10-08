@@ -11,6 +11,25 @@ import { project, sql, succeeds } from './helpers.ts'
 
 const base = process.env.LIFTOFF_TEST_MSSQL
 
+test('the SQL Server sample project runs and undoes', { skip: !base && 'set LIFTOFF_TEST_MSSQL' }, async () => {
+  const { createSample } = await import('../src/core/sample.ts')
+  const { Config, saveEnvironment } = await import('../src/core/config.ts')
+  const fs = await import('node:fs')
+  const os = await import('node:os')
+  const path = await import('node:path')
+  const master = await SqlServerConn.open('master', { url: `${base};databaseName=master`, role: 'prod', allow_clean: false, placeholders: {} })
+  await master.batch(`IF DB_ID('shop_sample') IS NOT NULL BEGIN ALTER DATABASE [shop_sample] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [shop_sample]; END; CREATE DATABASE [shop_sample];`)
+  await master.close()
+  const root = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lo-mssample-')), 'sample')
+  createSample(root, 'sqlserver')
+  saveEnvironment(root, 'test', { url: `${base};databaseName=shop_sample`, role: 'test', allow_clean: false, placeholders: {} }, true, false)
+  const cfg = Config.load(root)
+  const r = await runner.migrate(cfg, 'test')
+  assert.deepEqual(r.applied.map((a) => a.script), ['V1__customers.sql', 'V2__orders.sql', 'V3__orders_by_customer.sql', 'R__customer_totals.sql'])
+  await runner.undo(cfg, 'test')
+  assert.equal((await runner.info(cfg, 'test')).find((i) => i.script === 'V3__orders_by_customer.sql')?.state, 'pending')
+})
+
 test('the runner on SQL Server', { skip: !base && 'set LIFTOFF_TEST_MSSQL' }, async () => {
   const master = await SqlServerConn.open('master', { url: `${base};databaseName=master`, role: 'prod', allow_clean: false, placeholders: {} })
   for (const db of ['shop_test', 'shop_dev']) {

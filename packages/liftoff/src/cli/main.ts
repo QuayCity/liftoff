@@ -167,7 +167,7 @@ const COMMANDS: Record<string, Command> = {
         return [r, text.join('\n')]
       }
       if (flag(v, 'sample')) {
-        createSample(ctx.root)
+        createSample(ctx.root, str(v, 'engine')!)
         return [{ project: 'shop-sample', path: ctx.root }, `Created the sample project in ${ctx.root}; add an environment, then run its scripts`]
       }
       if (flyway.detect(ctx.root).length) process.stderr.write('note: this folder has a Flyway config; `liftoff init --from-flyway` converts it\n')
