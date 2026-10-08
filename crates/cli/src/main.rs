@@ -48,6 +48,7 @@ enum Command {
     Init {
         #[arg(long)]
         name: Option<String>,
+        /// postgresql or sqlserver
         #[arg(long, default_value = "postgresql")]
         engine: String,
         /// Convert the folder's flyway.toml or flyway.conf instead of starting empty (the originals stay)
@@ -295,9 +296,9 @@ async fn run(cli: &Cli, adhoc: &Adhoc) -> Result<(Value, String)> {
         Command::TestConnection => {
             let cfg = load(cli, adhoc)?;
             let (name, e) = cfg.pick(env)?;
-            let c = liftoff_core::db::connect(&name, e).await?;
-            let info = liftoff_core::db::server_info(&c).await?;
-            let text = format!("Connected to {name}: {} as {} (PostgreSQL {})", info.database, info.user, info.version);
+            let c = liftoff_core::db::Conn::open(&name, e).await?;
+            let info = c.server_info().await?;
+            let text = format!("Connected to {name}: {} as {} ({} {})", info.database, info.user, c.engine().name(), info.version);
             Ok((to(&info)?, text))
         }
         Command::Info => {
@@ -536,8 +537,21 @@ fn parse_placeholder(s: &str) -> std::result::Result<(String, String), String> {
 
 fn load(cli: &Cli, adhoc: &Adhoc) -> Result<Config> {
     let root = &cli.project_dir;
-    let mut cfg = if adhoc.url.is_some() && !root.join(config::PROJECT_FILE).exists() {
-        Config::adhoc(root, adhoc.locations.as_deref().unwrap_or("sql"))
+    let url = match &adhoc.url {
+        Some(u) => Some(
+            flyway::jdbc_to_url(u)
+                .or_else(|| (u.starts_with("postgres") || liftoff_core::mssql::is_url(u)).then(|| u.clone()))
+                .ok_or_else(|| Error::Config(format!("-url={u}: LiftOff supports PostgreSQL and SQL Server")))?,
+        ),
+        None => None,
+    };
+    let mut cfg = if let Some(u) = url.as_ref().filter(|_| !root.join(config::PROJECT_FILE).exists()) {
+        let mut c = Config::adhoc(root, adhoc.locations.as_deref().unwrap_or("sql"));
+        if liftoff_core::mssql::is_url(u) {
+            c.project.engine = "sqlserver".into();
+            c.project.schemas = vec!["dbo".into()];
+        }
+        c
     } else {
         Config::load(root)?
     };
@@ -552,7 +566,7 @@ fn load(cli: &Cli, adhoc: &Adhoc) -> Result<Config> {
         cfg.project.schemas.insert(0, d.clone());
     }
     if cfg.project.schemas.is_empty() {
-        cfg.project.schemas.push("public".into());
+        cfg.project.schemas.push(config::default_schema(&cfg.project.engine)?.into());
     }
     if let Some(t) = &adhoc.table {
         if t.to_lowercase().contains("flyway") {
@@ -562,10 +576,7 @@ fn load(cli: &Cli, adhoc: &Adhoc) -> Result<Config> {
         }
         cfg.project.history_table = t.clone();
     }
-    if let Some(url) = &adhoc.url {
-        let url = flyway::jdbc_to_url(url)
-            .or_else(|| url.starts_with("postgres").then(|| url.clone()))
-            .ok_or_else(|| Error::Config(format!("-url={url}: LiftOff supports PostgreSQL for now")))?;
+    if let Some(url) = url {
         let name = cli.environment.clone().unwrap_or_else(|| "default".into());
         let old = cfg.environments.get(&name).cloned();
         let env = Environment {

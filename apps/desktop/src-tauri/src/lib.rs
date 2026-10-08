@@ -131,8 +131,8 @@ fn recent_forget(app: AppHandle, path: String) {
 /* ---------- F01: projects and environments ---------- */
 
 #[tauri::command]
-fn project_init(app: AppHandle, path: String, name: String) -> R<ProjectView> {
-    config::init(Path::new(&path), &name, "postgresql").map_err(rep)?;
+fn project_init(app: AppHandle, path: String, name: String, engine: String) -> R<ProjectView> {
+    config::init(Path::new(&path), &name, &engine).map_err(rep)?;
     project_open(app, path)
 }
 
@@ -201,15 +201,15 @@ fn env_save(path: String, name: String, env: EnvInput, shared: bool) -> R<Projec
 #[tauri::command]
 async fn env_test(path: String, name: String) -> R<db::ServerInfo> {
     let cfg = load(&path)?;
-    let c = db::connect(&name, cfg.env(&name).map_err(rep)?).await.map_err(rep)?;
-    db::server_info(&c).await.map_err(rep)
+    let c = db::Conn::open(&name, cfg.env(&name).map_err(rep)?).await.map_err(rep)?;
+    c.server_info().await.map_err(rep)
 }
 
 /// Test from the connection dialog before anything is saved.
 #[tauri::command]
 async fn env_test_draft(env: EnvInput) -> R<db::ServerInfo> {
-    let c = db::connect("new environment", &env.into_env()).await.map_err(rep)?;
-    db::server_info(&c).await.map_err(rep)
+    let c = db::Conn::open("new environment", &env.into_env()).await.map_err(rep)?;
+    c.server_info().await.map_err(rep)
 }
 
 /* ---------- F04: run ---------- */

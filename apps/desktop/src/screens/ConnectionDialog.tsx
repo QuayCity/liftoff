@@ -1,6 +1,6 @@
 // S03 connection dialog: add or edit an environment, test before saving.
 import { useState } from 'react'
-import { api, errorText, type EnvView, type Project, type Role, type ServerInfo } from '../api'
+import { api, engineName, engineOfUrl, errorText, type EnvView, type Project, type Role, type ServerInfo } from '../api'
 import { Button, Checkbox, Field, Input, PasswordInput, RadioGroup, Select } from '../ui/controls'
 import { InlineAlert } from '../ui/display'
 import { Dialog } from '../ui/overlays'
@@ -79,7 +79,7 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
           <Field label="Name" error={nameError || undefined}>{(a) => <Input {...a} value={name} disabled={!!editing} onChange={(e) => setName(e.target.value)} placeholder="staging" />}</Field>
           <Field label="Role">{(a) => <Select {...a} value={role} onChange={(e) => setRole(e.target.value as Role)}>{roles.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}</Select>}</Field>
         </div>
-        <Field label="Connection URL" error={urlError || undefined} help="postgres://host:5432/database. Use ${env.NAME} to read a value from an environment variable.">
+        <Field label="Connection URL" error={urlError || undefined} help="postgres://host:5432/database or sqlserver://host:1433;databaseName=database;encrypt=true. Use ${env.NAME} to read a value from an environment variable.">
           {(a) => <Input {...a} mono value={url} onChange={(e) => setUrl(e.target.value)} placeholder="postgres://localhost:5432/shop" spellCheck={false} />}
         </Field>
         <div className="grid grid-cols-2 gap-4">
@@ -101,7 +101,7 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
           <Checkbox checked={allowClean} onChange={setAllowClean} label="Allow commands that erase this database (clean)" />
         )}
         {test && test !== 'running' && ('ok' in test
-          ? <InlineAlert tone="success" title="Connected">{test.ok.database} as {test.ok.user}, PostgreSQL {test.ok.version}</InlineAlert>
+          ? <InlineAlert tone="success" title="Connected">{test.ok.database} as {test.ok.user}, {engineName(engineOfUrl(url))} {test.ok.version}</InlineAlert>
           : <InlineAlert tone="danger" title="Couldn't connect">{test.error}</InlineAlert>)}
         {error && <InlineAlert tone="danger" title="Not saved">{error}</InlineAlert>}
         <button type="submit" hidden />

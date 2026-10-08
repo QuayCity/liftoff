@@ -11,6 +11,10 @@ export type License = { org: string; seats: number; edition: string; expires: st
 export type LicenseStatus = { license: License; grace_days_left: number | null; source: string }
 export type Filter = { action: 'include' | 'exclude'; object: string; pattern: string }
 export type LockMode = 'advisory' | 'table'
+export type Engine = 'postgresql' | 'sqlserver'
+export const engineName = (engine: string) => (engine === 'sqlserver' ? 'SQL Server' : 'PostgreSQL')
+/** The engine a connection URL points at. */
+export const engineOfUrl = (url: string): Engine => (/^(jdbc:)?sqlserver:\/\//i.test(url.trim()) ? 'sqlserver' : 'postgresql')
 export type ProjectSettings = { name: string; engine: string; migrations: string; schemas: string[]; history_table: string; filters: Filter[]; lock: LockMode }
 export type Project = {
   root: string; name: string; engine: string; schemas: string[]; migrations: string; history_table: string; filters: Filter[]; lock: LockMode; environments: EnvView[]
@@ -51,7 +55,7 @@ type Api = {
   recentProjects(): Promise<Recent[]>
   recentForget(path: string): Promise<void>
   pickFolder(): Promise<string | null>
-  projectInit(path: string, name: string): Promise<Project>
+  projectInit(path: string, name: string, engine: Engine): Promise<Project>
   projectOpen(path: string): Promise<Project>
   convertFlyway(path: string): Promise<{ report: ConvertReport; project: Project }>
   historyImport(path: string, env: string, table: string, acceptEdited: boolean): Promise<HistoryImport>
@@ -97,7 +101,7 @@ const real: Api = {
     const r = await openDialog({ directory: true, multiple: false })
     return typeof r === 'string' ? r : null
   },
-  projectInit: (path, name) => invoke('project_init', { path, name }),
+  projectInit: (path, name, engine) => invoke('project_init', { path, name, engine }),
   projectOpen: (path) => invoke('project_open', { path }),
   convertFlyway: (path) => invoke('project_convert_flyway', { path }),
   historyImport: (path, env, table, acceptEdited) => invoke('history_import', { path, env, table, acceptEdited }),
@@ -195,7 +199,7 @@ const fakeApi: Api = {
   ],
   recentForget: async () => {},
   pickFolder: async () => 'C:/repos/new-project',
-  projectInit: async (path, name) => ({ ...fakeProject(), root: path, name, environments: [] }),
+  projectInit: async (path, name, engine) => ({ ...fakeProject(), root: path, name, engine, schemas: [engine === 'sqlserver' ? 'dbo' : 'public'], environments: [] }),
   projectOpen: async (path) => {
     await wait()
     if (path.includes('old')) throw fail('LIFTOFF_CONFIG', `no liftoff.toml in ${path}; run \`liftoff init\` first`, 2)

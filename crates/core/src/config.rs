@@ -260,14 +260,21 @@ pub fn role_name(r: Role) -> &'static str {
 
 /// Creates liftoff.toml, migrations/, schema-model/ and git-ignores the user file.
 pub fn init(root: &Path, name: &str, engine: &str) -> Result<()> {
-    if engine != "postgresql" {
-        return config(format!("engine '{engine}' is not supported yet; use postgresql"));
+    init_with(root, name, engine, "migrations", &[default_schema(engine)?.to_string()])
+}
+
+/// Where a new project's history table goes: `public` on PostgreSQL, `dbo` on SQL Server.
+pub fn default_schema(engine: &str) -> Result<&'static str> {
+    match engine {
+        "postgresql" => Ok("public"),
+        "sqlserver" => Ok("dbo"),
+        other => config(format!("engine '{other}' is not supported; use postgresql or sqlserver")),
     }
-    init_with(root, name, "migrations", &["public".to_string()])
 }
 
 /// `init` with a given migrations folder and schemas (used when converting a Flyway project).
-pub fn init_with(root: &Path, name: &str, migrations: &str, schemas: &[String]) -> Result<()> {
+pub fn init_with(root: &Path, name: &str, engine: &str, migrations: &str, schemas: &[String]) -> Result<()> {
+    default_schema(engine)?;
     let path = root.join(PROJECT_FILE);
     if path.exists() {
         return config(format!("{} already exists", path.display()));
@@ -276,7 +283,7 @@ pub fn init_with(root: &Path, name: &str, migrations: &str, schemas: &[String]) 
     std::fs::create_dir_all(root.join("schema-model"))?;
     let mut project = toml::Table::new();
     project.insert("name".into(), name.into());
-    project.insert("engine".into(), "postgresql".into());
+    project.insert("engine".into(), engine.into());
     project.insert("migrations".into(), migrations.into());
     project.insert("schemas".into(), toml::Value::Array(schemas.iter().map(|s| s.as_str().into()).collect()));
     project.insert("history_table".into(), "liftoff_schema_history".into());

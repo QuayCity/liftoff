@@ -1,7 +1,7 @@
 // S01 start page + S02 new project dialog.
 import { FolderOpen, FolderPlus, History } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { api, errorText, isErrorReport, type ConvertReport, type Project, type Recent } from '../api'
+import { api, type Engine, errorText, isErrorReport, type ConvertReport, type Project, type Recent } from '../api'
 import { Button, Field, Input, RadioGroup, Select } from '../ui/controls'
 import { Card, EmptyState, InlineAlert, Spinner } from '../ui/display'
 import { Dialog } from '../ui/overlays'
@@ -149,6 +149,7 @@ export function Home({ onOpen }: { onOpen: (p: Project) => void }) {
 
 function NewProjectDialog({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: (p: Project) => void }) {
   const [name, setName] = useState('')
+  const [engine, setEngine] = useState<Engine>('postgresql')
   const [folder, setFolder] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -170,7 +171,7 @@ function NewProjectDialog({ open, onOpenChange, onCreated }: { open: boolean; on
     setBusy(true)
     setError(null)
     try {
-      onCreated(await api.projectInit(folder, name.trim()))
+      onCreated(await api.projectInit(folder, name.trim(), engine))
       onOpenChange(false)
     } catch (e) {
       setError(errorText(e))
@@ -199,8 +200,13 @@ function NewProjectDialog({ open, onOpenChange, onCreated }: { open: boolean; on
           )}
         </Field>
         <Field label="Project name" error={nameError}>{(a) => <Input {...a} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />}</Field>
-        <Field label="Database engine" help="More engines are planned.">
-          {(a) => <Select {...a} value="postgresql" disabled><option value="postgresql">PostgreSQL</option></Select>}
+        <Field label="Database engine" help={engine === 'sqlserver' ? 'SQL Server: running and checking migrations. Comparing databases and generating scripts are PostgreSQL only for now.' : undefined}>
+          {(a) => (
+            <Select {...a} value={engine} onChange={(e) => setEngine(e.target.value as Engine)}>
+              <option value="postgresql">PostgreSQL</option>
+              <option value="sqlserver">SQL Server</option>
+            </Select>
+          )}
         </Field>
         <RadioGroup legend="How changes reach other databases" name="style" value="migrations" onChange={() => {}} options={[
           { value: 'migrations', label: 'Migration scripts', help: 'Ordered SQL files, reviewed in git, run the same way everywhere.' },

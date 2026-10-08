@@ -113,7 +113,11 @@ fn parse_toml(text: &str) -> Result<Parsed> {
 }
 
 /// `jdbc:postgresql://host:5432/db?x=y` -> `postgres://host:5432/db?x=y`
+/// `jdbc:postgresql://…` becomes `postgres://…`; `jdbc:sqlserver://…;props` keeps its form without `jdbc:`.
 pub fn jdbc_to_url(jdbc: &str) -> Option<String> {
+    if let Some(rest) = jdbc.trim().strip_prefix("jdbc:sqlserver:") {
+        return Some(format!("sqlserver:{rest}"));
+    }
     let rest = jdbc.trim().strip_prefix("jdbc:postgresql:")?;
     let rest = rest.strip_prefix("//").unwrap_or(rest);
     Some(format!("postgres://{rest}"))
@@ -177,12 +181,13 @@ fn convert_with(root: &Path, name: &str, use_keychain: bool) -> Result<ConvertRe
     if schemas.is_empty() && let Some((_, e)) = p.envs.iter().find(|(_, e)| e.contains_key("schemas")) {
         schemas = e["schemas"].split(',').map(|x| x.trim().to_string()).collect();
     }
+    let engine = if p.envs.iter().any(|(_, e)| e.get("url").is_some_and(|u| u.trim().starts_with("jdbc:sqlserver:"))) { "sqlserver" } else { "postgresql" };
     if let Some(d) = default_schema {
         schemas.retain(|s| *s != d);
         schemas.insert(0, d);
     }
     if schemas.is_empty() {
-        schemas.push("public".into());
+        schemas.push(config::default_schema(engine)?.into());
     }
     r.schemas = schemas.clone();
     let clean_allowed = p.settings.remove("cleanDisabled").is_some_and(|v| v.eq_ignore_ascii_case("false"));
@@ -210,7 +215,7 @@ fn convert_with(root: &Path, name: &str, use_keychain: bool) -> Result<ConvertRe
         r.not_converted.push(format!("{k} = {v}: {reason}"));
     }
 
-    config::init_with(root, name, &r.migrations, &schemas)?;
+    config::init_with(root, name, engine, &r.migrations, &schemas)?;
     if !placeholders.is_empty() {
         let mut project = config::Config::load(root)?.project;
         project.placeholders = placeholders;
@@ -226,7 +231,7 @@ fn convert_with(root: &Path, name: &str, use_keychain: bool) -> Result<ConvertRe
             continue;
         };
         let Some(url) = jdbc_to_url(&interpolate_flyway(jdbc)) else {
-            r.not_converted.push(format!("environment {env_name}: {jdbc} is not PostgreSQL; LiftOff supports PostgreSQL for now"));
+            r.not_converted.push(format!("environment {env_name}: {jdbc}: LiftOff supports PostgreSQL and SQL Server"));
             continue;
         };
         let role = role_for(env_name, &desktop);
@@ -294,6 +299,9 @@ pub async fn import_history(cfg: &config::Config, env_name: Option<&str>, from_t
     let (schema, table) = (cfg.history_schema().to_string(), cfg.project.history_table.clone());
     if from_table == table {
         return cfg_err("the Flyway table and LiftOff's history table must have different names");
+    }
+    if db::Engine::of(&env.url) == db::Engine::SqlServer {
+        return cfg_err("importing Flyway history works on PostgreSQL only for now; on SQL Server, baseline the database at Flyway's latest version instead");
     }
     let c = db::connect(&name, env).await?;
     let lock = db::lock(&c, &name, env, &schema, &table, cfg.project.lock, || log(Level::Info, "Another run holds the lock on this database; waiting")).await?;
@@ -403,13 +411,31 @@ mod tests {
     #[test]
     fn jdbc_urls() {
         assert_eq!(jdbc_to_url("jdbc:postgresql://db:5432/shop?ssl=true").as_deref(), Some("postgres://db:5432/shop?ssl=true"));
-        assert_eq!(jdbc_to_url("jdbc:sqlserver://db;databaseName=x"), None);
+        assert_eq!(jdbc_to_url("jdbc:sqlserver://db;databaseName=x").as_deref(), Some("sqlserver://db;databaseName=x"));
+        assert_eq!(jdbc_to_url("jdbc:mysql://db/x"), None);
     }
 
     #[test]
     fn env_placeholders() {
         assert_eq!(interpolate_flyway("${env.DB_PW}"), "${env.DB_PW}");
         assert_eq!(interpolate_flyway("pre-${DB_USER}-x"), "pre-${env.DB_USER}-x");
+    }
+
+    #[test]
+    fn converts_sql_server() {
+        let dir = std::env::temp_dir().join(format!("liftoff-fw-ms-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("flyway.conf"), "flyway.url=jdbc:sqlserver://db:1433;databaseName=shop;encrypt=true
+flyway.user=app
+flyway.locations=filesystem:sql
+").unwrap();
+        let r = convert_with(&dir, "shop", false).unwrap();
+        assert_eq!(r.schemas, ["dbo"]);
+        let cfg = config::Config::load(&dir).unwrap();
+        assert_eq!(cfg.project.engine, "sqlserver");
+        assert_eq!(cfg.env("default").unwrap().url, "sqlserver://db:1433;databaseName=shop;encrypt=true");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -1,4 +1,5 @@
-//! Postgres connections, the run lock and the history table.
+//! Connections, the run lock and the history table. `Conn` is what the runner uses, for either
+//! engine; the rest of this file is PostgreSQL, which comparisons and checks use directly.
 
 use crate::config::Environment;
 use crate::error::{Error, Result};
@@ -46,13 +47,24 @@ fn tls() -> MakeRustlsConnect {
     MakeRustlsConnect::new((**config).clone())
 }
 
-pub async fn connect(env_name: &str, env: &Environment) -> Result<Client> {
-    let fail = |msg: String| Error::Connect { env: env_name.to_string(), msg };
+fn check_vars(env_name: &str, env: &Environment) -> Result<()> {
     for v in [Some(&env.url), env.user.as_ref(), env.password.as_ref()].into_iter().flatten() {
         if let Some(i) = v.find("${env.") {
             let var = v[i + 6..].split('}').next().unwrap_or("");
-            return Err(fail(format!("environment variable {var} is not set")));
+            return Err(Error::Connect { env: env_name.to_string(), msg: format!("environment variable {var} is not set") });
         }
+    }
+    Ok(())
+}
+
+/// A PostgreSQL connection, for comparisons, checks and the schema model.
+pub async fn connect(env_name: &str, env: &Environment) -> Result<Client> {
+    let fail = |msg: String| Error::Connect { env: env_name.to_string(), msg };
+    check_vars(env_name, env)?;
+    if crate::mssql::is_url(&env.url) {
+        return Err(Error::Config(format!(
+            "'{env_name}' is SQL Server; comparisons, drift checks and the schema model support PostgreSQL only for now (migrate, info, validate, baseline, repair, undo and clean work)"
+        )));
     }
     let mut cfg = tokio_postgres::Config::from_str(&env.url).map_err(|e| fail(format!("bad url: {e}")))?;
     if let Some(u) = &env.user { cfg.user(u); }
@@ -80,6 +92,205 @@ pub fn with_database(url: &str, db: &str) -> String {
     let mut parts: Vec<String> = url.split_whitespace().filter(|p| !p.starts_with("dbname=")).map(String::from).collect();
     parts.push(format!("dbname={db}"));
     parts.join(" ")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Engine {
+    Postgres,
+    SqlServer,
+}
+
+impl Engine {
+    pub fn of(url: &str) -> Engine {
+        if crate::mssql::is_url(url) { Engine::SqlServer } else { Engine::Postgres }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Engine::Postgres => "PostgreSQL",
+            Engine::SqlServer => "SQL Server",
+        }
+    }
+
+    pub fn quote(self, s: &str) -> String {
+        match self {
+            Engine::Postgres => quote_ident(s),
+            Engine::SqlServer => crate::mssql::quote(s),
+        }
+    }
+
+    pub fn needs_no_transaction(self, sql: &str) -> bool {
+        match self {
+            Engine::Postgres => crate::migration::needs_no_transaction(sql),
+            Engine::SqlServer => crate::migration::tsql_needs_no_transaction(sql),
+        }
+    }
+
+    pub fn begin(self) -> &'static str {
+        match self {
+            Engine::Postgres => "BEGIN",
+            Engine::SqlServer => "BEGIN TRANSACTION",
+        }
+    }
+
+    /// The SQL expression for the logged-in user.
+    pub fn current_user(self) -> &'static str {
+        match self {
+            Engine::Postgres => "current_user",
+            Engine::SqlServer => "SUSER_SNAME()",
+        }
+    }
+}
+
+/// The runner's connection, for either engine.
+pub enum Conn {
+    Pg(Client),
+    Ms(Box<crate::mssql::Db>),
+}
+
+/// A held run lock; give it back with `Conn::release`.
+pub enum Held {
+    Pg(RunLock),
+    Ms(String),
+}
+
+impl Conn {
+    pub async fn open(env_name: &str, env: &Environment) -> Result<Conn> {
+        check_vars(env_name, env)?;
+        match Engine::of(&env.url) {
+            Engine::Postgres => Ok(Conn::Pg(connect(env_name, env).await?)),
+            Engine::SqlServer => Ok(Conn::Ms(Box::new(crate::mssql::connect(env_name, env).await?))),
+        }
+    }
+
+    pub fn engine(&self) -> Engine {
+        match self {
+            Conn::Pg(_) => Engine::Postgres,
+            Conn::Ms(_) => Engine::SqlServer,
+        }
+    }
+
+    pub async fn server_info(&self) -> Result<ServerInfo> {
+        match self {
+            Conn::Pg(c) => server_info(c).await,
+            Conn::Ms(c) => c.server_info().await,
+        }
+    }
+
+    /// On SQL Server `mode` does not apply: it always takes a session application lock.
+    pub async fn lock(&self, env_name: &str, env: &Environment, schema: &str, table: &str, mode: crate::config::LockMode, on_wait: impl Fn()) -> Result<Held> {
+        match self {
+            Conn::Pg(c) => Ok(Held::Pg(lock(c, env_name, env, schema, table, mode, on_wait).await?)),
+            Conn::Ms(c) => {
+                let resource = format!("liftoff:{schema}.{table}");
+                c.lock(&resource, on_wait).await?;
+                Ok(Held::Ms(resource))
+            }
+        }
+    }
+
+    pub async fn release(&self, held: Held) {
+        match (self, held) {
+            (Conn::Pg(c), Held::Pg(l)) => l.release(c).await,
+            (Conn::Ms(c), Held::Ms(r)) => c.unlock(&r).await,
+            _ => {}
+        }
+    }
+
+    /// A control statement or a whole batch, as is (BEGIN, COMMIT, ROLLBACK, a script body).
+    pub async fn batch(&self, sql: &str) -> Result<()> {
+        match self {
+            Conn::Pg(c) => Ok(c.batch_execute(sql).await?),
+            Conn::Ms(c) => c.batch(sql).await,
+        }
+    }
+
+    /// A migration script. Postgres: one batch, or statement by statement outside a transaction
+    /// (each its own implicit transaction). SQL Server: batch by batch on GO lines.
+    pub async fn script(&self, sql: &str, transactional: bool) -> Result<()> {
+        match self {
+            Conn::Pg(c) if transactional => Ok(c.batch_execute(sql).await?),
+            Conn::Pg(c) => {
+                for stmt in crate::migration::split_statements(sql) {
+                    c.batch_execute(&stmt).await?;
+                }
+                Ok(())
+            }
+            Conn::Ms(c) => c.script(sql).await,
+        }
+    }
+
+    pub async fn ensure_history(&self, schema: &str, table: &str) -> Result<()> {
+        match self {
+            Conn::Pg(c) => ensure_history(c, schema, table).await,
+            Conn::Ms(c) => c.ensure_history(schema, table).await,
+        }
+    }
+
+    pub async fn read_history(&self, schema: &str, table: &str) -> Result<Vec<HistoryRow>> {
+        match self {
+            Conn::Pg(c) => read_history(c, schema, table).await,
+            Conn::Ms(c) => c.read_history(schema, table).await,
+        }
+    }
+
+    pub async fn insert_history(&self, schema: &str, table: &str, row: NewRow<'_>) -> Result<()> {
+        match self {
+            Conn::Pg(c) => insert_history(c, schema, table, row).await,
+            Conn::Ms(c) => c.insert_history(schema, table, row).await,
+        }
+    }
+
+    /// Objects in the managed schemas besides LiftOff's own tables: a database with any of these
+    /// and no history needs a baseline first.
+    pub async fn user_objects(&self, schemas: &[String], table: &str) -> Result<i64> {
+        match self {
+            Conn::Pg(c) => Ok(row(
+                c,
+                "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                 where n.nspname = any($1) and c.relkind in ('r', 'p', 'v', 'm', 'S') and c.relname <> $2 and c.relname <> $3
+                   and not exists (select 1 from pg_depend d where d.objid = c.oid and d.deptype in ('a', 'i', 'e'))",
+                &[(&schemas, Type::TEXT_ARRAY), (&table, Type::TEXT), (&format!("{table}_lock"), Type::TEXT)],
+            )
+            .await?
+            .get(0)),
+            Conn::Ms(c) => c.user_objects(schemas, table).await,
+        }
+    }
+
+    /// Removes failed rows; returns their scripts.
+    pub async fn delete_failed(&self, schema: &str, table: &str) -> Result<Vec<String>> {
+        match self {
+            Conn::Pg(c) => Ok(rows(c, &format!("delete from {}.{} where not success returning script", quote_ident(schema), quote_ident(table)), &[])
+                .await?
+                .iter()
+                .map(|r| r.get(0))
+                .collect()),
+            Conn::Ms(c) => c.delete_failed(schema, table).await,
+        }
+    }
+
+    pub async fn realign(&self, schema: &str, table: &str, rank: i32, checksum: i32, description: &str) -> Result<()> {
+        match self {
+            Conn::Pg(c) => {
+                exec(
+                    c,
+                    &format!("update {}.{} set checksum = $1, description = $2 where installed_rank = $3", quote_ident(schema), quote_ident(table)),
+                    &[(&checksum, Type::INT4), (&description, Type::VARCHAR), (&rank, Type::INT4)],
+                )
+                .await?;
+                Ok(())
+            }
+            Conn::Ms(c) => c.realign(schema, table, rank, checksum, description).await,
+        }
+    }
+
+    pub async fn reset_schemas(&self, schemas: &[String]) -> Result<()> {
+        match self {
+            Conn::Pg(c) => crate::runner::reset_schemas(c, schemas).await,
+            Conn::Ms(c) => c.reset_schemas(schemas).await,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]

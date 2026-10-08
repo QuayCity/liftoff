@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, inTauri, type Project } from './api'
+import { api, engineName, inTauri, type Project } from './api'
 import { Changes } from './screens/Changes'
 import { Environments } from './screens/Environments'
 import { Home } from './screens/Home'
@@ -82,7 +82,7 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
         {view === 'Commit' && <Commit project={project} />}
         {view === 'Pipelines' && <Pipelines project={project} />}
       </main>
-      <StatusBar path={project.root} engine={`PostgreSQL · ${project.schemas.join(', ')}`} licence={licence} />
+      <StatusBar path={project.root} engine={`${engineName(project.engine)} · ${project.schemas.join(', ')}`} licence={licence} />
     </div>
   )
 }

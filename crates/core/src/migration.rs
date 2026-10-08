@@ -204,6 +204,61 @@ pub fn needs_no_transaction(sql: &str) -> bool {
         .any(|k| up.contains(k))
 }
 
+/// SQL Server statements that cannot run inside a transaction.
+pub fn tsql_needs_no_transaction(sql: &str) -> bool {
+    let up = sql.to_uppercase();
+    ["CREATE DATABASE", "ALTER DATABASE", "DROP DATABASE", "BACKUP ", "RESTORE ", "RECONFIGURE", "CREATE FULLTEXT", "ALTER FULLTEXT", "DROP FULLTEXT"]
+        .iter()
+        .any(|k| up.contains(k))
+}
+
+/// Splits a SQL Server script into batches on `GO` lines (`GO 3` runs a batch three times), as
+/// sqlcmd and SSMS do. A GO inside a string or a block comment does not count.
+pub fn split_batches(sql: &str) -> Vec<(String, u32)> {
+    let (mut out, mut cur) = (Vec::new(), String::new());
+    let (mut in_string, mut comment_depth) = (false, 0u32);
+    for line in sql.split_inclusive('\n') {
+        if !in_string && comment_depth == 0 {
+            let t = line.trim();
+            let t = t.split("--").next().unwrap_or("").trim();
+            let mut words = t.split_whitespace();
+            if words.next().is_some_and(|w| w.eq_ignore_ascii_case("go")) {
+                let count = words.next().map(|n| n.parse::<u32>());
+                if words.next().is_none() && !matches!(count, Some(Err(_))) {
+                    if !cur.trim().is_empty() {
+                        out.push((std::mem::take(&mut cur), count.and_then(|c| c.ok()).unwrap_or(1)));
+                    }
+                    cur.clear();
+                    continue;
+                }
+            }
+        }
+        let b = line.as_bytes();
+        let mut i = 0;
+        while i < b.len() {
+            match b[i] {
+                b'\'' if comment_depth == 0 => in_string = !in_string,
+                b'-' if !in_string && comment_depth == 0 && b.get(i + 1) == Some(&b'-') => break,
+                b'/' if !in_string && b.get(i + 1) == Some(&b'*') => {
+                    comment_depth += 1;
+                    i += 1;
+                }
+                b'*' if !in_string && comment_depth > 0 && b.get(i + 1) == Some(&b'/') => {
+                    comment_depth -= 1;
+                    i += 1;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        cur.push_str(line);
+    }
+    if !cur.trim().is_empty() {
+        out.push((cur, 1));
+    }
+    out
+}
+
 /// Splits a Postgres script into statements on `;`, respecting quotes, dollar quotes and comments.
 /// Only needed for scripts that run outside a transaction (each statement is its own implicit one).
 pub fn split_statements(sql: &str) -> Vec<String> {
@@ -296,6 +351,37 @@ mod tests {
         assert_eq!(next_version(&[mk("20261001.0900")], now), "20261008.1104");
         // Same minute as the latest timestamp: bump instead of colliding.
         assert_eq!(next_version(&[mk("20261008.1104")], now), "20261008.1105");
+    }
+
+    #[test]
+    fn go_batches() {
+        let sql = "create table a (id int)
+GO
+create proc p as select 'GO
+go' /* 
+GO
+ */
+  go 2 -- twice
+
+GO
+select 1
+go;
+";
+        let b = split_batches(sql);
+        assert_eq!(b.len(), 3, "{b:#?}");
+        assert_eq!(b[0], ("create table a (id int)
+".to_string(), 1));
+        assert!(b[1].0.contains("'GO
+go'") && b[1].0.contains("/* 
+GO
+ */") && b[1].1 == 2, "{b:#?}");
+        assert_eq!(b[2].0, "select 1
+go;
+", "`go;` is not a separator");
+        assert_eq!(split_batches("select 1"), [("select 1".to_string(), 1)]);
+        assert!(split_batches("
+GO
+").is_empty());
     }
 
     #[test]

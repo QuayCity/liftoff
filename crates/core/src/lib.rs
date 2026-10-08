@@ -10,6 +10,7 @@ pub mod flyway;
 pub mod git;
 pub mod license;
 pub mod migration;
+pub mod mssql;
 pub mod model;
 pub mod runner;
 

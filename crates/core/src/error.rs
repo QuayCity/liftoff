@@ -24,6 +24,9 @@ pub enum Error {
     Git(&'static str, String),
     #[error("database error: {0}")]
     Db(#[from] tokio_postgres::Error),
+    /// a SQL Server error, already formatted with its number and line
+    #[error("database error: {0}")]
+    Sql(String),
     #[error("{0}")]
     Io(#[from] std::io::Error),
 }
@@ -38,7 +41,7 @@ impl Error {
             Error::License(_) => 20,
             Error::Drift(_) => 13,
             Error::NotBaselined(_) => 12,
-            Error::Git(..) | Error::Db(_) | Error::Io(_) => 1,
+            Error::Git(..) | Error::Db(_) | Error::Sql(_) | Error::Io(_) => 1,
         }
     }
 
@@ -59,7 +62,7 @@ impl Error {
                 "auth" => "LIFTOFF_GIT_AUTH",
                 _ => "LIFTOFF_GIT",
             },
-            Error::Db(_) => "LIFTOFF_DB",
+            Error::Db(_) | Error::Sql(_) => "LIFTOFF_DB",
             Error::Io(_) => "LIFTOFF_IO",
         }
     }
