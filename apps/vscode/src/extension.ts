@@ -5,7 +5,9 @@
 import * as path from 'node:path'
 import * as vscode from 'vscode'
 import { findBinary, LiftoffError, runCli } from './cli'
+import { importFlyway, type ImportAnswers } from './flywayImport'
 import { registerSchemaModel, type SchemaModelView } from './modelView'
+import { SettingsPanel } from './settingsPanel'
 import {
   describe,
   groupProblems,
@@ -66,6 +68,8 @@ export class Liftoff implements vscode.TreeDataProvider<Item> {
   projectDir: string | undefined
   /** the Schema Model view (modelView.ts) */
   schemaModel: SchemaModelView | undefined
+  /** folders with a Flyway config and no liftoff.toml, for the import */
+  flywayDirs: string[] = []
   /** what `info` last returned per environment; only environments someone opened are loaded */
   private readonly infos = new Map<string, MigrationInfo[]>()
   private readonly problems = new Map<string, Problem[]>()
@@ -77,10 +81,15 @@ export class Liftoff implements vscode.TreeDataProvider<Item> {
   }
 
   /** Runs a CLI command for the project, logging its progress to the LiftOff output panel. */
-  run<T>(args: string[], environment?: string): Promise<T> {
+  run<T>(args: string[], environment?: string, input?: string): Promise<T> {
     if (!this.projectDir) return Promise.reject(new Error('No liftoff.toml in this workspace'))
+    return this.runIn<T>(this.projectDir, args, environment, input)
+  }
+
+  /** The same, in any folder (the Flyway import runs before there is a liftoff.toml). */
+  runIn<T>(dir: string, args: string[], environment?: string, input?: string): Promise<T> {
     this.log.appendLine(`> liftoff ${environment ? `--environment ${environment} ` : ''}${args.join(' ')}`)
-    return runCli<T>(this.binary(), args, { projectDir: this.projectDir, environment, onLog: (l) => this.log.appendLine(l) })
+    return runCli<T>(this.binary(), args, { projectDir: dir, environment, input, onLog: (l) => this.log.appendLine(l) })
   }
 
   /** Finds liftoff.toml and reads the project; clears what was loaded before. */
@@ -90,6 +99,10 @@ export class Liftoff implements vscode.TreeDataProvider<Item> {
     this.diagnostics.clear()
     const found = await vscode.workspace.findFiles('**/liftoff.toml', '**/node_modules/**', 1)
     this.projectDir = found[0] ? path.dirname(found[0].fsPath) : undefined
+    // No LiftOff project but a Flyway one: the sidebar offers to import it.
+    const flyway = this.projectDir ? [] : await vscode.workspace.findFiles('{**/flyway.toml,**/flyway.conf}', '**/node_modules/**', 10)
+    this.flywayDirs = [...new Set(flyway.map((f) => flywayProjectDir(f.fsPath)))]
+    void vscode.commands.executeCommand('setContext', 'liftoff.flywayProject', this.flywayDirs.length > 0)
     this.project = undefined
     if (this.projectDir) {
       try {
@@ -98,6 +111,7 @@ export class Liftoff implements vscode.TreeDataProvider<Item> {
         this.log.appendLine(`Could not read the project: ${message(e)}`)
       }
     }
+    void vscode.commands.executeCommand('setContext', 'liftoff.hasProject', this.projectDir !== undefined)
     this.changed.fire(undefined)
   }
 
@@ -163,6 +177,12 @@ export class Liftoff implements vscode.TreeDataProvider<Item> {
   refreshTree(): void {
     this.changed.fire(undefined)
   }
+}
+
+/** The project folder of a Flyway config file: its folder, or the one above for `conf/flyway.*`. */
+function flywayProjectDir(file: string): string {
+  const dir = path.dirname(file)
+  return path.basename(dir) === 'conf' ? path.dirname(dir) : dir
 }
 
 function message(e: unknown): string {
@@ -292,6 +312,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
     vscode.commands.registerCommand('liftoff.checkDrift', (item?: EnvironmentItem) => checkDrift(lo, item)),
     vscode.commands.registerCommand('liftoff.testConnection', (item?: EnvironmentItem) => testConnection(lo, item)),
     vscode.commands.registerCommand('liftoff.showLog', () => lo.log.show()),
+    vscode.commands.registerCommand('liftoff.importFlyway', (answers?: ImportAnswers) => importFlyway(lo, answers)),
+    // From an environment's menu (its item), the import (a name), or the palette (nothing).
+    vscode.commands.registerCommand('liftoff.settings', (target?: EnvironmentItem | string) =>
+      SettingsPanel.show(context, lo, typeof target === 'string' ? target : target?.env?.name),
+    ),
+    vscode.commands.registerCommand('liftoff.editEnvironment', (item?: EnvironmentItem) => SettingsPanel.show(context, lo, item?.env?.name)),
     // Saving a script or liftoff.toml re-reads what is open, so warnings follow the edit.
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (path.basename(doc.fileName) === 'liftoff.toml') void lo.load()

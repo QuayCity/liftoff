@@ -5,7 +5,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { parse } from 'smol-toml'
-import { Config, defaultSchema, initWith, PROJECT_FILE, saveEnvironment, saveProject, type Role } from './config.ts'
+import { Config, defaultSchema, initWith, PROJECT_FILE, redactUrl, saveEnvironment, saveProject, type Role } from './config.ts'
 import { open, type HistoryRow } from './db.ts'
 import { configError, validateError } from './errors.ts'
 import { compareVersions, parseVersion, scan } from './migration.ts'
@@ -22,6 +22,8 @@ export function detect(root: string): string[] {
 
 export type ConvertReport = {
   source: string
+  /** every Flyway config file in the folder; `source` is the one used */
+  sources: string[]
   written: string
   environments: string[]
   migrations: string
@@ -31,6 +33,21 @@ export type ConvertReport = {
   /** settings LiftOff did not carry over, each with the reason */
   not_converted: string[]
   notes: string[]
+  /** each environment brought over (or, in a preview, that would be): no passwords */
+  planned: { name: string; role: Role; url: string; user: string | null; has_password: boolean; skipped: boolean }[]
+  /** a preview: nothing was written */
+  preview: boolean
+}
+
+export type ConvertOptions = {
+  /** which Flyway config file (default: flyway.toml before flyway.conf) */
+  source?: string
+  /** only these environments, by their LiftOff name (default: all) */
+  only?: string[]
+  /** a role per environment, instead of the guess from its name */
+  roles?: Record<string, Role>
+  /** work out the report without writing anything */
+  preview?: boolean
 }
 
 /** Everything read from either format, before liftoff.toml is written. */
@@ -135,14 +152,20 @@ export function interpolateFlyway(v: string): string {
  * Writes liftoff.toml (and credentials to the keychain or the user file) from the folder's Flyway
  * config. The Flyway files are left untouched; refuses when liftoff.toml already exists.
  */
-export function convert(root: string, name: string, useKeychain = keychainEnabled()): ConvertReport {
+export function convert(root: string, name: string, useKeychain = keychainEnabled(), o: ConvertOptions = {}): ConvertReport {
   const found = detect(root)
-  const source = found.find((p) => p.endsWith('.toml')) ?? found[0]
+  let source = found.find((p) => p.endsWith('.toml')) ?? found[0]
   if (!source) throw configError(`no flyway.toml or flyway.conf in ${root}`)
+  if (o.source !== undefined) {
+    const chosen = path.resolve(root, o.source)
+    if (!found.includes(chosen)) throw configError(`${o.source} is not one of the Flyway config files here: ${found.map((f) => path.relative(root, f)).join(', ')}`)
+    source = chosen
+  }
+  const write = !o.preview
   if (fs.existsSync(path.join(root, PROJECT_FILE))) throw configError(`${PROJECT_FILE} already exists; remove it to convert again`)
   const text = fs.readFileSync(source, 'utf8')
   const p = source.endsWith('.toml') ? parseToml(text) : parseConf(text)
-  const r: ConvertReport = { source, written: '', environments: [], migrations: '', schemas: [], flyway_table: '', not_converted: [], notes: [] }
+  const r: ConvertReport = { source, sources: found, written: '', environments: [], migrations: '', schemas: [], flyway_table: '', not_converted: [], notes: [], planned: [], preview: !write }
   for (const other of found.filter((f) => f !== source)) r.notes.push(`${other} was also found and was not merged; ${source} was used`)
 
   const desktop = new Map([...p.settings].filter(([k]) => k.startsWith('flywayDesktop.')).map(([k, v]) => [k.slice('flywayDesktop.'.length), v]))
@@ -193,8 +216,10 @@ export function convert(root: string, name: string, useKeychain = keychainEnable
     r.not_converted.push(`${k} = ${v}: ${reason}`)
   }
 
-  initWith(root, name, engine, r.migrations, schemas)
-  if (Object.keys(placeholders).length) saveProject(root, { ...Config.load(root).project, placeholders })
+  if (write) {
+    initWith(root, name, engine, r.migrations, schemas)
+    if (Object.keys(placeholders).length) saveProject(root, { ...Config.load(root).project, placeholders })
+  }
   if (r.flyway_table !== DEFAULT_TABLE) r.notes.push(`Flyway's history table is ${r.flyway_table}; pass it to the history import`)
 
   for (const [envName, fields] of p.envs) {
@@ -208,11 +233,14 @@ export function convert(root: string, name: string, useKeychain = keychainEnable
       r.not_converted.push(`environment ${envName}: ${jdbc}: LiftOff supports PostgreSQL and SQL Server`)
       continue
     }
-    const role = roleFor(envName, desktop)
+    const saveName = envName === 'default' ? 'default' : envName.replace(/[^A-Za-z0-9_-]/g, '_')
+    const role = o.roles?.[saveName] ?? roleFor(envName, desktop)
     const user = fields.get('user')
     const password = fields.get('password')
     const envPlaceholders = Object.fromEntries([...fields].filter(([k]) => k.startsWith('placeholders.')).map(([k, v]) => [k.slice('placeholders.'.length), interpolateFlyway(v)]))
-    const saveName = envName === 'default' ? 'default' : envName.replace(/[^A-Za-z0-9_-]/g, '_')
+    const skipped = o.only !== undefined && !o.only.includes(saveName)
+    r.planned.push({ name: saveName, role, url: redactUrl(url), user: user ?? null, has_password: password !== undefined || redactUrl(url) !== url, skipped })
+    if (skipped || !write) continue
     saveEnvironment(
       root,
       saveName,
@@ -232,7 +260,10 @@ export function convert(root: string, name: string, useKeychain = keychainEnable
     }
     r.environments.push(saveName)
   }
-  r.written = path.join(root, PROJECT_FILE)
+  for (const n of [...(o.only ?? []), ...Object.keys(o.roles ?? {})]) {
+    if (!r.planned.some((p) => p.name === n)) throw configError(`the Flyway config has no environment '${n}'; it has: ${r.planned.map((p) => p.name).join(', ') || 'none'}`)
+  }
+  r.written = write ? path.join(root, PROJECT_FILE) : ''
   return r
 }
 

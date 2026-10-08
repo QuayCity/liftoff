@@ -5,7 +5,10 @@ import * as path from 'node:path'
 import * as vscode from 'vscode'
 import type { Liftoff } from '../extension'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
+import type { ConvertReport } from '../flywayImport'
 import type { MigrateResult, ModelChange } from '../model'
+import type { SettingsPanel } from '../settingsPanel'
 
 async function until<T>(what: string, check: () => T | undefined | Promise<T | undefined>, ms = 15000): Promise<T> {
   const end = Date.now() + ms
@@ -73,6 +76,30 @@ export async function run(): Promise<void> {
   fs.rmSync(bad.fsPath)
   assert.equal(await vscode.commands.executeCommand('liftoff.model.check'), true)
   assert.equal(vscode.languages.getDiagnostics(bad).length, 0)
+  // Import a Flyway project: the wizard's answers given, so nothing is asked.
+  const flywayDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-flyway-'))
+  fs.writeFileSync(
+    path.join(flywayDir, 'flyway.toml'),
+    '[environments.development]\nurl = "jdbc:postgresql://db/dev"\n\n[environments.live]\nurl = "jdbc:postgresql://db/live"\n\n[flyway]\nlocations = ["filesystem:sql"]\n',
+  )
+  const imported = await vscode.commands.executeCommand<ConvertReport>('liftoff.importFlyway', { folder: flywayDir, include: ['live'], roles: { live: 'prod' }, name: 'legacy', history: [] })
+  assert.deepEqual(imported?.environments, ['live'])
+  const toml = fs.readFileSync(path.join(flywayDir, 'liftoff.toml'), 'utf8')
+  assert.match(toml, /name = "legacy"/)
+  assert.match(toml, /\[environments\.live\][^[]*role = "prod"/)
+  assert.ok(fs.existsSync(path.join(flywayDir, 'flyway.toml')), 'the Flyway file stays')
+
+  // Settings: add an environment (with a password) and remove it again; the sidebar follows.
+  const panel = await vscode.commands.executeCommand<SettingsPanel>('liftoff.settings')
+  assert.ok(panel, 'the settings open')
+  let saved = await panel.save({ environments: [{ name: 'qa', url: 'postgres://localhost/shop_qa', user: 'app', password: 'qa-secret', role: 'test', allow_clean: false, placeholders: {}, shared: false }] })
+  assert.ok(saved?.environments.some((e) => e.name === 'qa' && e.has_password && !e.shared))
+  assert.ok(lo.project?.environments.some((e) => e.name === 'qa'), 'the sidebar shows the new environment')
+  assert.ok(!fs.readFileSync(path.join(workspace, 'liftoff.toml'), 'utf8').includes('qa'), 'a this-computer-only environment stays out of liftoff.toml')
+  saved = await panel.save({ remove: ['qa'] })
+  assert.ok(saved && !saved.environments.some((e) => e.name === 'qa'))
+  panel.panel.dispose()
+
   fs.writeFileSync(path.join(workspace, '.suite-passed'), '')
   console.log('liftoff suite: all checks passed')
 }

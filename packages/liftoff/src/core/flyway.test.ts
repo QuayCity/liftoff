@@ -64,3 +64,33 @@ test('converts flyway.conf, then flyway.toml', () => {
   assert.equal(cfg.project.migrations, 'migrations')
   assert.deepEqual(['development', 'shadow', 'production'].map((e) => cfg.env(e).role), ['dev', 'scratch', 'prod'])
 })
+
+test('a preview writes nothing; the chosen environments and roles are used', () => {
+  const dir = tmp()
+  fs.mkdirSync(path.join(dir, 'conf'))
+  fs.writeFileSync(
+    path.join(dir, 'flyway.toml'),
+    '[environments.development]\nurl = "jdbc:postgresql://db/dev"\nuser = "app"\npassword = "secret"\n\n' +
+      '[environments.qa]\nurl = "jdbc:postgresql://db/qa"\n\n[environments.live]\nurl = "jdbc:postgresql://db/live"\n\n' +
+      '[flyway]\nlocations = ["filesystem:sql"]\n',
+  )
+  fs.writeFileSync(path.join(dir, 'conf/flyway.conf'), 'flyway.url=jdbc:postgresql://other/db\n')
+
+  const preview = convert(dir, 'shop', false, { preview: true })
+  assert.equal(preview.preview, true)
+  assert.ok(!fs.existsSync(path.join(dir, PROJECT_FILE)), 'nothing written')
+  assert.deepEqual(preview.sources.map((f) => path.relative(dir, f)).sort(), [path.join('conf', 'flyway.conf'), 'flyway.toml'])
+  assert.deepEqual(preview.planned.map((p) => [p.name, p.role, p.has_password]), [['development', 'dev', true], ['live', 'test', false], ['qa', 'test', false]])
+  assert.ok(!JSON.stringify(preview).includes('secret'), 'no password in the preview')
+
+  // The other config file, by choice.
+  assert.deepEqual(convert(dir, 'shop', false, { preview: true, source: 'conf/flyway.conf' }).planned.map((p) => p.name), ['default'])
+  assert.throws(() => convert(dir, 'shop', false, { preview: true, source: 'nope.conf' }), /not one of the Flyway config files/)
+  assert.throws(() => convert(dir, 'shop', false, { preview: true, only: ['staging'] }), /no environment 'staging'/)
+
+  const r = convert(dir, 'shop', false, { only: ['development', 'live'], roles: { live: 'prod' } })
+  assert.deepEqual(r.environments, ['development', 'live'])
+  const cfg = Config.load(dir)
+  assert.deepEqual([...cfg.environments.keys()].sort(), ['development', 'live'])
+  assert.equal(cfg.env('live').role, 'prod')
+})

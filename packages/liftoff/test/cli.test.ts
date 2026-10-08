@@ -16,11 +16,11 @@ import { keychainDelete } from '../src/core/keychain.ts'
 const base = process.env.LIFTOFF_TEST_PG
 const main = path.join(import.meta.dirname, '../src/cli/main.ts')
 
-function liftoff(dir: string, args: string[], o: { keychain?: boolean } = {}) {
+function liftoff(dir: string, args: string[], o: { keychain?: boolean; input?: string } = {}) {
   const env: NodeJS.ProcessEnv = { ...process.env, LIFTOFF_NO_KEYRING: '1' }
   if (o.keychain) delete env.LIFTOFF_NO_KEYRING
   const [cmd, pre] = process.env.LIFTOFF_CLI ? [process.env.LIFTOFF_CLI, []] : [process.execPath, [main]]
-  const r = spawnSync(cmd, [...pre, ...args], { cwd: dir, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  const r = spawnSync(cmd, [...pre, ...args], { cwd: dir, env, encoding: 'utf8', input: o.input ?? '', stdio: ['pipe', 'pipe', 'pipe'] })
   return { code: r.status ?? -1, stdout: r.stdout, stderr: r.stderr }
 }
 
@@ -30,6 +30,38 @@ function json(r: { stdout: string; stderr: string }) {
   assert.equal(lines.length, 1, `one JSON object on stdout, got:\n${r.stdout}\nstderr:\n${r.stderr}`)
   return JSON.parse(lines[0])
 }
+
+test('Flyway import with choices, and settings over stdin', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-settings-'))
+  fs.writeFileSync(path.join(dir, 'flyway.toml'), '[environments.development]\nurl = "jdbc:postgresql://db/dev"\npassword = "fw-secret"\n\n[environments.live]\nurl = "jdbc:postgresql://db/live"\n')
+
+  // The wizard's preview: everything it needs, no password, nothing written.
+  let r = liftoff(dir, ['init', '--from-flyway', '--preview', '--output-type', 'json'])
+  assert.equal(r.code, 0, r.stderr)
+  assert.deepEqual(json(r).result.planned.map((e: { name: string; role: string }) => [e.name, e.role]), [['development', 'dev'], ['live', 'test']])
+  assert.ok(!r.stdout.includes('fw-secret') && !fs.existsSync(path.join(dir, 'liftoff.toml')))
+  assert.equal(liftoff(dir, ['init', '--from-flyway', '--role', 'live=boss']).code, 2, 'a bad role is a usage error')
+
+  r = liftoff(dir, ['init', '--from-flyway', '--name', 'shop', '--role', 'live=prod', '--output-type', 'json'])
+  assert.equal(r.code, 0, r.stderr)
+
+  // Settings: read, then save a change with a password on stdin.
+  r = liftoff(dir, ['settings', '--output-type', 'json'])
+  const s = json(r).result
+  assert.deepEqual(s.environments.map((e: { name: string; role: string; has_password: boolean }) => [e.name, e.role, e.has_password]), [['development', 'dev', true], ['live', 'prod', false]])
+  assert.ok(!r.stdout.includes('fw-secret'))
+  const change = { project: { schemas: ['public', 'sales'] }, environments: [{ name: 'qa', url: 'postgres://db/qa', user: 'app', password: 'qa-secret', role: 'test', allow_clean: false }], remove: ['development'] }
+  r = liftoff(dir, ['settings', '--save', '--output-type', 'json'], { input: JSON.stringify(change) })
+  assert.equal(r.code, 0, r.stderr)
+  assert.deepEqual(json(r).result.environments.map((e: { name: string }) => e.name), ['live', 'qa'])
+  const shared = fs.readFileSync(path.join(dir, 'liftoff.toml'), 'utf8')
+  assert.ok(shared.includes('"sales"') && !shared.includes('qa-secret') && !shared.includes('development'), shared)
+  assert.ok(fs.readFileSync(path.join(dir, 'liftoff.user.toml'), 'utf8').includes('qa-secret'))
+
+  // Not JSON: a usage error, nothing changed.
+  r = liftoff(dir, ['settings', '--save'], { input: 'not json' })
+  assert.equal(r.code, 2, r.stderr)
+})
 
 test('Flyway-style arguments', () => {
   const a = (s: string) => s.split(' ')

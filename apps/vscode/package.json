@@ -19,7 +19,9 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "workspaceContains:**/liftoff.toml"
+    "workspaceContains:**/liftoff.toml",
+    "workspaceContains:**/flyway.toml",
+    "workspaceContains:**/flyway.conf"
   ],
   "contributes": {
     "viewsContainers": {
@@ -46,7 +48,13 @@
     "viewsWelcome": [
       {
         "view": "liftoff.environments",
-        "contents": "No liftoff.toml in this workspace.\nRun `liftoff init` in your project folder, or open the folder that has one."
+        "when": "liftoff.flywayProject",
+        "contents": "This folder has a Flyway project. Import it to use it with LiftOff: a few questions, and your Flyway files stay as they are.\n[Import Flyway Project](command:liftoff.importFlyway)"
+      },
+      {
+        "view": "liftoff.environments",
+        "when": "!liftoff.flywayProject",
+        "contents": "No liftoff.toml in this workspace.\nRun `liftoff init` in your project folder, or open the folder that has one.\nComing from Flyway? [Import Flyway Project](command:liftoff.importFlyway)"
       },
       {
         "view": "liftoff.model",
@@ -130,6 +138,22 @@
         "command": "liftoff.pipeline",
         "title": "Set Up Pipeline",
         "category": "LiftOff"
+      },
+      {
+        "command": "liftoff.importFlyway",
+        "title": "Import Flyway Project",
+        "category": "LiftOff"
+      },
+      {
+        "command": "liftoff.settings",
+        "title": "Project Settings",
+        "category": "LiftOff",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "liftoff.editEnvironment",
+        "title": "Edit Environment",
+        "category": "LiftOff"
       }
     ],
     "menus": {
@@ -163,6 +187,11 @@
           "command": "liftoff.pipeline",
           "when": "view == liftoff.model",
           "group": "1_model@2"
+        },
+        {
+          "command": "liftoff.settings",
+          "when": "view == liftoff.environments && liftoff.hasProject",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -210,6 +239,11 @@
           "command": "liftoff.model.open",
           "when": "view == liftoff.model && viewItem == modelChange",
           "group": "1_pull@2"
+        },
+        {
+          "command": "liftoff.editEnvironment",
+          "when": "view == liftoff.environments && viewItem == environment",
+          "group": "3_edit@1"
         }
       ],
       "commandPalette": [
@@ -219,6 +253,10 @@
         },
         {
           "command": "liftoff.model.pull",
+          "when": "false"
+        },
+        {
+          "command": "liftoff.editEnvironment",
           "when": "false"
         }
       ]

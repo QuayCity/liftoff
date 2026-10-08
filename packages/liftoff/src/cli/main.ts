@@ -8,7 +8,7 @@ import * as path from 'node:path'
 import { parseArgs, type ParseArgsConfig } from 'node:util'
 import * as checks from '../core/checks.ts'
 import * as ci from '../core/ci.ts'
-import { Config, defaultSchema, init, PROJECT_FILE, type Environment } from '../core/config.ts'
+import { Config, defaultSchema, init, PROJECT_FILE, readSettings, saveSettings, type Environment, type Role, type SettingsChange } from '../core/config.ts'
 import { engineOf, isSqlServerUrl, open } from '../core/db.ts'
 import * as diff from '../core/diff.ts'
 import { asLiftoffError, configError, driftError, LiftoffError, modelAheadError } from '../core/errors.ts'
@@ -123,12 +123,39 @@ const COMMANDS: Record<string, Command> = {
       name: { type: 'string', help: 'Project name (default: the folder name)' },
       engine: { type: 'string', default: 'postgresql', help: 'postgresql or sqlserver' },
       'from-flyway': { type: 'boolean', help: "Convert the folder's flyway.toml or flyway.conf instead of starting empty (the originals stay)" },
+      'flyway-config': { type: 'string', help: 'With --from-flyway: which Flyway config file, when the folder has more than one', value: 'FILE' },
+      include: { type: 'string', multiple: true, help: 'With --from-flyway: only this environment (repeatable; default: all)', value: 'NAME' },
+      role: { type: 'string', multiple: true, help: 'With --from-flyway: the role for an environment, e.g. live=prod (repeatable)', value: 'NAME=ROLE' },
+      preview: { type: 'boolean', help: 'With --from-flyway: show what would be converted, and write nothing' },
       sample: { type: 'boolean', help: 'Start from a small sample shop project (an empty folder only)' },
     },
     async run(ctx, v) {
       const name = str(v, 'name') ?? path.basename(fs.realpathSync(ctx.root)) ?? 'project'
       if (flag(v, 'from-flyway')) {
-        const r = flyway.convert(ctx.root, name)
+        const roles: Record<string, Role> = {}
+        for (const r of (v.role as string[] | undefined) ?? []) {
+          const [env, role] = r.split('=')
+          if (!env || !['dev', 'scratch', 'test', 'prod'].includes(role)) throw new UsageError(`--role ${r}: use NAME=ROLE, with a role of dev, scratch, test or prod`)
+          roles[env] = role as Role
+        }
+        const r = flyway.convert(ctx.root, name, undefined, {
+          source: str(v, 'flyway-config'),
+          only: v.include as string[] | undefined,
+          roles,
+          preview: flag(v, 'preview'),
+        })
+        const envs = r.planned.map((e) => `    ${e.name.padEnd(16)} ${e.role.padEnd(8)} ${e.url}${e.skipped ? '   (left out)' : ''}`)
+        if (r.preview) {
+          const text = [
+            `Would convert ${r.source} (nothing written):`,
+            `  migrations: ${r.migrations}   schemas: ${r.schemas.join(', ')}   Flyway history table: ${r.flyway_table}`,
+            '  environments:',
+            ...envs,
+            ...r.notes.map((n) => `  note: ${n}`),
+            ...r.not_converted.map((n) => `  not converted: ${n}`),
+          ]
+          return [r, text.join('\n')]
+        }
         const text = [
           `Converted ${r.source} into ${r.written}`,
           `  environments: ${r.environments.length ? r.environments.join(', ') : 'none'}`,
@@ -163,6 +190,31 @@ const COMMANDS: Record<string, Command> = {
         ...r.attention.map((s) => `  needs attention: ${s}`),
       ]
       return [r, text.join('\n')]
+    },
+  },
+  settings: {
+    help: 'Show every project setting and environment as written in the files (passwords left out). With --save, apply changes read as JSON from stdin',
+    options: {
+      save: { type: 'boolean', help: 'Read {"project": {...}, "environments": [...], "remove": [...]} from stdin and save it; passwords go to the keychain or liftoff.user.toml' },
+    },
+    async run(ctx, v) {
+      if (!flag(v, 'save')) {
+        const s = readSettings(ctx.root)
+        const text = [
+          `${s.project.name} (${s.project.engine}, scripts in ${s.project.migrations}, schemas ${s.project.schemas.join(', ')})`,
+          ...s.environments.map((e) => `${e.name.padEnd(16)} ${e.role.padEnd(8)} ${e.url}${e.shared ? '' : '   (this computer only)'}`),
+        ]
+        return [s, text.join('\n')]
+      }
+      // Passwords come in on stdin, never as arguments (other programs can read a process's arguments).
+      let change: SettingsChange
+      try {
+        change = JSON.parse(fs.readFileSync(0, 'utf8')) as SettingsChange
+      } catch (e) {
+        throw new UsageError(`settings --save reads JSON from stdin: ${e instanceof Error ? e.message : String(e)}`)
+      }
+      const s = saveSettings(ctx.root, change)
+      return [s, `Saved the settings of ${s.project.name}`]
     },
   },
   project: {

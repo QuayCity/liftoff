@@ -20,6 +20,14 @@ Your database migrations, next to your code.
   committed to it, so the script is reviewed with the change (or, if you prefer, the pull request
   fails until someone adds one). Merging deploys, stage by stage. Small team without a pipeline?
   **Generate Migration from Schema Model** does the same step on your machine.
+- **Import a Flyway project.** Open a folder with `flyway.toml` or `flyway.conf` and the sidebar
+  offers the import: a few steps to choose the environments and their roles, a summary of anything
+  that does not carry over, then (on PostgreSQL) copying Flyway's history so LiftOff knows what
+  already ran. Your Flyway files stay as they are.
+- **Project settings in an editor tab.** **LiftOff: Project Settings** (the gear in the sidebar)
+  edits everything: the project, comparison filters, placeholders and every environment, including
+  whether it is shared through git or stays on your computer. Passwords go to your operating
+  system's keychain, never into `liftoff.toml`; `${env.NAME}` references are kept as written.
 - **PostgreSQL and SQL Server.**
 
 The extension comes with the `liftoff` program and runs it for you; nothing is sent anywhere but

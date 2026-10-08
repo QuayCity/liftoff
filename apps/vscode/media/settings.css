@@ -1,0 +1,72 @@
+/* The settings page, in the colours of the user's VS Code theme. */
+body {
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  padding: 0 16px 80px;
+}
+main { max-width: 760px; }
+h1 { font-size: 1.5em; font-weight: 600; margin: 20px 0 8px; }
+h2 { font-size: 1.2em; font-weight: 600; margin: 28px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); }
+h3 { font-size: 1em; font-weight: 600; margin: 16px 0 4px; }
+.field { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
+.field.check { flex-direction: row; align-items: center; gap: 8px; }
+label { font-weight: 600; }
+.help, .muted { color: var(--vscode-descriptionForeground); margin: 0; }
+.problem { color: var(--vscode-errorForeground); margin: 0; }
+input[type='text'], input[type='password'], select {
+  font: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent));
+  padding: 4px 6px;
+  border-radius: 2px;
+  min-width: 0;
+}
+input[readonly] { opacity: 0.8; }
+input[aria-invalid='true'] { border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); }
+input:focus, select:focus, button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+button {
+  font: inherit;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border: 1px solid var(--vscode-button-border, transparent);
+  padding: 4px 12px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
+button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
+button.secondary:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground); }
+button.danger, button.danger:hover:not(:disabled) { color: var(--vscode-errorForeground); background: transparent; border-color: var(--vscode-errorForeground); }
+button:disabled { opacity: 0.5; cursor: default; }
+.rows { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.row { display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap; margin: 6px 0; }
+.row > input { flex: 1 1 140px; }
+.row.filter .field input { width: 100%; box-sizing: border-box; }
+.row.filter .field { margin: 0; flex: 1 1 180px; }
+.row.filter .field label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+details { border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 4px; padding: 0 12px; margin: 8px 0; }
+details[open] { padding-bottom: 12px; }
+summary { cursor: pointer; padding: 8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.env-name { font-weight: 600; }
+.badge { font-size: 0.85em; padding: 0 6px; border-radius: 8px; color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); }
+.unsaved { font-size: 0.85em; color: var(--vscode-editorWarning-foreground); }
+.actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 16px;
+  background: var(--vscode-editor-background);
+  border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
+}
+.status { margin: 0 0 0 8px; }
+.status.error { color: var(--vscode-errorForeground); }
+.status.warn { color: var(--vscode-editorWarning-foreground); }
+.status.ok { color: var(--vscode-testing-iconPassed, var(--vscode-foreground)); }

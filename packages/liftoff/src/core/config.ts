@@ -5,7 +5,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { parse, stringify } from 'smol-toml'
 import { configError } from './errors.ts'
-import { keychainEnabled, keychainGet, keychainSet } from './keychain.ts'
+import { keychainDelete, keychainEnabled, keychainGet, keychainSet } from './keychain.ts'
 
 export const PROJECT_FILE = 'liftoff.toml'
 export const USER_FILE = 'liftoff.user.toml'
@@ -403,4 +403,158 @@ function tryInterpolate(s: string): string {
   } catch {
     return s
   }
+}
+
+/* ---------- settings as written in the files (for editors) ---------- */
+
+/** A URL with its password taken out, for showing: `postgres://u:secret@h` -> `postgres://u@h`; `;password=…` dropped. */
+export function redactUrl(url: string): string {
+  let u = url.replace(/;\s*password=[^;]*/gi, '')
+  const s = u.indexOf('://')
+  const at = u.lastIndexOf('@')
+  if (s >= 0 && at > s) u = `${u.slice(0, s + 3)}${u.slice(s + 3, at).split(':')[0]}${u.slice(at)}`
+  return u
+}
+
+/** One environment as an editor shows it: as written, `${env.X}` kept, no password. */
+export type EnvironmentSettings = {
+  name: string
+  url: string
+  user: string | null
+  role: Role
+  allow_clean: boolean
+  placeholders: Record<string, string>
+  /** in liftoff.toml, shared through git (else liftoff.user.toml, this computer only) */
+  shared: boolean
+  /** a password is stored: in the keychain, the user file, or the URL */
+  has_password: boolean
+}
+
+export type Settings = { project: Project; environments: EnvironmentSettings[] }
+
+/** What an editor sends back. Environments are added or replaced whole; a missing password keeps the stored one. */
+export type SettingsChange = {
+  /** every [project] field but the engine, which does not change after init */
+  project?: Partial<Omit<Project, 'engine'>>
+  environments?: {
+    name: string
+    url: string
+    user?: string | null
+    password?: string
+    role: Role
+    allow_clean: boolean
+    placeholders?: Record<string, string>
+    shared?: boolean
+  }[]
+  remove?: string[]
+}
+
+type Files = { project: Record<string, unknown>; user: Record<string, unknown> }
+
+function readFiles(root: string): Files {
+  const projectPath = path.join(root, PROJECT_FILE)
+  if (!fs.existsSync(projectPath)) throw configError(`no ${PROJECT_FILE} in ${root}; run \`liftoff init\` first`)
+  const userPath = path.join(root, USER_FILE)
+  return { project: readTable(projectPath), user: fs.existsSync(userPath) ? readTable(userPath) : {} }
+}
+
+const envTable = (t: Record<string, unknown>, name: string) => (t.environments as Record<string, Record<string, unknown>> | undefined)?.[name]
+
+/** An environment as written: the project file's entry with the user file's on top. */
+function rawEnvironment(files: Files, name: string): Environment | undefined {
+  const shared = envTable(files.project, name)
+  const mine = envTable(files.user, name)
+  if (!shared && !mine) return undefined
+  const t: Record<string, unknown> = structuredClone(shared ?? {})
+  merge(t, structuredClone(mine ?? {}))
+  return toEnvironment(name, t)
+}
+
+/** The project and its environments as written in the files: nothing expanded, no passwords. */
+export function readSettings(root: string): Settings {
+  const files = readFiles(root)
+  if (!isTable(files.project.project)) throw configError(`${PROJECT_FILE}: missing [project]`)
+  const names = new Set([files.project, files.user].flatMap((t) => Object.keys((t.environments ?? {}) as object)))
+  const environments = [...names].sort().map((name): EnvironmentSettings => {
+    const e = rawEnvironment(files, name)!
+    return {
+      name,
+      url: redactUrl(e.url),
+      user: e.user ?? null,
+      role: e.role,
+      allow_clean: e.allow_clean,
+      placeholders: e.placeholders,
+      shared: envTable(files.project, name)?.url !== undefined,
+      has_password: e.password !== undefined || redactUrl(e.url) !== e.url || keychainGet(root, name) !== undefined,
+    }
+  })
+  return { project: toProject(files.project.project), environments }
+}
+
+/** Applies an editor's changes: removals, then the project, then each environment. */
+export function saveSettings(root: string, change: SettingsChange, useKeychain = keychainEnabled()): Settings {
+  const before = readFiles(root)
+  // Check everything first, so a bad entry writes nothing.
+  for (const e of change.environments ?? []) {
+    if (!/^[A-Za-z0-9_-]+$/.test(e.name)) throw configError(`'${e.name}': environment names use letters, digits, - and _ only`)
+    if (!e.url?.trim()) throw configError(`${e.name}: the connection URL is empty`)
+    if (!ROLES.includes(e.role)) throw configError(`${e.name}: the role must be dev, scratch, test or prod`)
+  }
+  for (const name of change.remove ?? []) removeEnvironment(root, name)
+  if (change.project) {
+    const current = toProject(before.project.project as Record<string, unknown>)
+    saveProject(root, { ...current, ...change.project, engine: current.engine })
+  }
+  for (const e of change.environments ?? []) {
+    const old = rawEnvironment(before, e.name)
+    // The editor got the URL without its password: unchanged means keep what is written.
+    const url = old && e.url === redactUrl(old.url) ? old.url : e.url.trim()
+    const shared = e.shared ?? (old ? envTable(before.project, e.name)?.url !== undefined : true)
+    let password = e.password === '' ? undefined : e.password
+    // A password kept in a file has to be written again (the entry is replaced); one in the keychain stays there.
+    password ??= old?.password
+    // `${env.X}` passwords stay in the file, where they are expanded; the keychain would keep the text as is.
+    const keychain = useKeychain && !(password ?? '').includes('${')
+    saveEnvironment(
+      root,
+      e.name,
+      { url, user: e.user ?? undefined, password, role: e.role, allow_clean: e.allow_clean, placeholders: e.placeholders ?? old?.placeholders ?? {} },
+      shared,
+      keychain,
+    )
+    // The user file wins over the project file, so a stale copy in the other file must go.
+    const other = path.join(root, shared ? USER_FILE : PROJECT_FILE)
+    const t = fs.existsSync(other) ? readTable(other) : undefined
+    const stale = t && envTable(t, e.name)
+    if (t && stale) {
+      const envs = t.environments as Record<string, unknown>
+      if (!shared) {
+        delete envs[e.name] // now private: out of the shared file entirely
+      } else {
+        // now shared: the user file keeps only the password saveEnvironment may have put there
+        for (const k of Object.keys(stale)) if (k !== 'password') delete stale[k]
+        if (!Object.keys(stale).length) delete envs[e.name]
+      }
+      writeTable(other, t)
+    }
+  }
+  return readSettings(root)
+}
+
+/** Takes an environment out of both files, and its password out of the keychain. */
+export function removeEnvironment(root: string, name: string): void {
+  let found = false
+  for (const f of [PROJECT_FILE, USER_FILE]) {
+    const file = path.join(root, f)
+    if (!fs.existsSync(file)) continue
+    const table = readTable(file)
+    const envs = table.environments as Record<string, unknown> | undefined
+    if (envs && name in envs) {
+      delete envs[name]
+      writeTable(file, table)
+      found = true
+    }
+  }
+  if (!found) throw configError(`no environment '${name}' in ${PROJECT_FILE} or ${USER_FILE}`)
+  keychainDelete(root, name)
 }

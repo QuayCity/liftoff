@@ -46,6 +46,8 @@ export type RunOptions = {
   environment?: string
   /** called with each progress line */
   onLog?: (line: string) => void
+  /** written to the program's stdin (how passwords are passed: never as arguments) */
+  input?: string
 }
 
 export function runCli<T>(binary: string, args: string[], opts: RunOptions): Promise<T> {
@@ -55,6 +57,8 @@ export function runCli<T>(binary: string, args: string[], opts: RunOptions): Pro
 
   return new Promise((resolve, reject) => {
     const child = spawn(binary, fullArgs, { cwd: opts.projectDir, windowsHide: true })
+    child.stdin.on('error', () => {}) // the program may exit without reading it
+    child.stdin.end(opts.input ?? '')
     let stdout = ''
     let pending = '' // a stderr line that has not ended yet
 
