@@ -1,0 +1,62 @@
+use serde::Serialize;
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// Every failure maps to a stable exit code and error code (architecture.md, CLI contract).
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("{0}")]
+    Config(String),
+    #[error("could not connect to '{env}': {msg}")]
+    Connect { env: String, msg: String },
+    #[error("migration {script} failed: {msg}")]
+    Migration { script: String, msg: String },
+    #[error("{0}")]
+    Validate(String),
+    #[error("{0}")]
+    License(String),
+    #[error("database error: {0}")]
+    Db(#[from] tokio_postgres::Error),
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+}
+
+impl Error {
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            Error::Config(_) => 2,
+            Error::Connect { .. } => 10,
+            Error::Migration { .. } => 11,
+            Error::Validate(_) => 12,
+            Error::License(_) => 20,
+            Error::Db(_) | Error::Io(_) => 1,
+        }
+    }
+
+    pub fn code(&self) -> &'static str {
+        match self {
+            Error::Config(_) => "LIFTOFF_CONFIG",
+            Error::Connect { .. } => "LIFTOFF_CONNECT",
+            Error::Migration { .. } => "LIFTOFF_MIGRATION_FAILED",
+            Error::Validate(_) => "LIFTOFF_VALIDATE",
+            Error::License(_) => "LIFTOFF_LICENSE",
+            Error::Db(_) => "LIFTOFF_DB",
+            Error::Io(_) => "LIFTOFF_IO",
+        }
+    }
+
+    pub fn report(&self) -> ErrorReport {
+        ErrorReport { code: self.code(), exit_code: self.exit_code(), message: self.to_string() }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ErrorReport {
+    pub code: &'static str,
+    pub exit_code: i32,
+    pub message: String,
+}
+
+pub(crate) fn config<T>(msg: impl Into<String>) -> Result<T> {
+    Err(Error::Config(msg.into()))
+}
