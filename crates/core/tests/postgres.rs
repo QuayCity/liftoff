@@ -87,7 +87,11 @@ async fn full_slice() {
     d.batch_execute(
         "alter table orders add column total numeric(10,2) not null default 0;
          alter table orders alter column note set not null;
-         create table customers (id bigint generated always as identity, \"Name\" text not null, created_at timestamptz default now());",
+         create table customers (id bigint generated always as identity primary key, \"Name\" text not null unique,
+                                 created_at timestamptz default now(), check (length(\"Name\") > 0));
+         alter table orders add column customer_id bigint references customers(id);
+         alter table orders add primary key (id);
+         create index orders_customer_idx on orders (customer_id) where customer_id is not null;",
     )
     .await
     .unwrap();
@@ -102,6 +106,37 @@ async fn full_slice() {
     assert_eq!(r.applied.len(), 1);
     let after = diff::dev_vs_migrations(&cfg, None, None, &quiet).await.unwrap();
     assert!(after.is_empty(), "round trip left differences: {after:#?}\n--- script ---\n{}", g.sql);
+
+    // 6b. Dev already has the generated change: record it there instead of running it.
+    let state_on = |infos: &[runner::MigrationInfo], s: &str| infos.iter().find(|i| i.script == s).map(|i| i.state);
+    runner::mark_applied(&cfg, Some("dev"), &g.file_name, &quiet).await.unwrap();
+    assert_eq!(state_on(&runner::info(&cfg, Some("dev")).await.unwrap(), &g.file_name), Some(State::Applied));
+    assert!(runner::migrate(&cfg, Some("dev"), MigrateOptions::default(), &quiet).await.unwrap().applied.is_empty());
+    assert!(runner::mark_applied(&cfg, Some("dev"), &g.file_name, &quiet).await.is_err(), "only pending scripts");
+
+    // 6c. Repair: a failed non-transactional script, an edited file and a deleted file.
+    write(&dir, "V900__bad_index.sql", "create index concurrently bad_idx on no_such_table (x);\n");
+    assert!(runner::migrate(&cfg, Some("test"), MigrateOptions::default(), &quiet).await.is_err());
+    assert_eq!(state_on(&runner::info(&cfg, Some("test")).await.unwrap(), "V900__bad_index.sql"), Some(State::Failed));
+    std::fs::remove_file(dir.join("migrations/V900__bad_index.sql")).unwrap();
+    write(&dir, "V1__orders.sql", "-- reformatted after it ran\ncreate table orders (id serial, note text);\n");
+    std::fs::remove_file(dir.join("migrations/V2__index.sql")).unwrap();
+    let err = runner::validate_env(&cfg, Some("test")).await.unwrap_err().to_string();
+    assert!(err.contains("V900__bad_index.sql failed") && err.contains("V1__orders.sql changed") && err.contains("V2__index.sql was applied"), "{err}");
+    let report = runner::repair(&cfg, Some("test"), &quiet).await.unwrap();
+    assert_eq!((report.removed_failed, report.realigned, report.forgotten), (vec!["V900__bad_index.sql".to_string()], vec!["V1__orders.sql".to_string()], vec!["V2__index.sql".to_string()]));
+    runner::validate_env(&cfg, Some("test")).await.unwrap();
+
+    // 6d. Clean is refused on a test database, allowed on scratch; baseline skips old scripts.
+    assert!(runner::clean(&cfg, Some("test"), &quiet).await.unwrap_err().to_string().contains("allow_clean"));
+    runner::clean(&cfg, Some("scratch"), &quiet).await.unwrap();
+    let sc = db::connect("scratch", cfg.env("scratch").unwrap()).await.unwrap();
+    sc.batch_execute("create table orders (id serial, note text);").await.unwrap();
+    runner::baseline(&cfg, Some("scratch"), "1", "existing schema", &quiet).await.unwrap();
+    assert!(runner::baseline(&cfg, Some("scratch"), "1", "again", &quiet).await.is_err(), "baseline needs an empty history");
+    let r = runner::migrate(&cfg, Some("scratch"), MigrateOptions::default(), &quiet).await.unwrap();
+    assert!(r.applied.iter().all(|a| a.script != "V1__orders.sql"), "{:?}", r.applied);
+    assert_eq!(state_on(&runner::info(&cfg, Some("scratch")).await.unwrap(), "V1__orders.sql"), Some(State::BelowBaseline));
 
     // 7. Refuses to rebuild a non-scratch database.
     let err = diff::dev_vs_migrations(&cfg, Some("dev"), Some("test"), &quiet).await.unwrap_err();
