@@ -1,4 +1,4 @@
-// The CLI wrapper against the real liftoff program (built with `cargo build -p liftoff-cli`).
+// The CLI wrapper against the real liftoff program (the single-file build: npm run build:cli in packages/liftoff).
 // Set LIFTOFF_CLI to use another build.
 
 import assert from 'node:assert/strict'
@@ -11,7 +11,7 @@ import { findBinary, LiftoffError, parseAnswer, runCli } from '../cli'
 import type { Project } from '../model'
 
 const repo = path.resolve(__dirname, '../../../..')
-const binary = process.env.LIFTOFF_CLI ?? path.join(repo, 'target', 'debug', process.platform === 'win32' ? 'liftoff.exe' : 'liftoff')
+const binary = process.env.LIFTOFF_CLI ?? path.join(repo, 'packages', 'liftoff', 'build', process.platform === 'win32' ? 'liftoff.exe' : 'liftoff')
 
 test('parseAnswer finds the JSON line', () => {
   assert.deepEqual(parseAnswer('noise\n{"ok":true,"result":[1]}\n'), { ok: true, result: [1] })

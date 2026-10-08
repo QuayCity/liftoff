@@ -17,7 +17,8 @@ export type CiOptions = {
   install: string
 }
 
-export const DEFAULT_INSTALL = 'npm install --global liftoff'
+/** A placeholder: point it at wherever the single-file `liftoff` for Linux is published. */
+export const DEFAULT_INSTALL = 'curl -fsSL -o liftoff https://github.com/YOUR-ORG/liftoff/releases/latest/download/liftoff-linux-x64 && sudo install -m 755 liftoff /usr/local/bin/liftoff'
 
 /** `LIFTOFF_ENV_<NAME>_…` as the CLI reads it. */
 export const envVar = (env: string, field: string) => `LIFTOFF_ENV_${env.toUpperCase().replaceAll('-', '_')}_${field}`

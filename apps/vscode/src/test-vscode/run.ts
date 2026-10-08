@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   }
   const extensionDir = path.resolve(__dirname, '../..')
   const repo = path.resolve(extensionDir, '../..')
-  const cli = process.env.LIFTOFF_CLI ?? path.join(repo, 'target', 'debug', process.platform === 'win32' ? 'liftoff.exe' : 'liftoff')
+  const cli = process.env.LIFTOFF_CLI ?? path.join(repo, 'packages', 'liftoff', 'build', process.platform === 'win32' ? 'liftoff.exe' : 'liftoff')
 
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-vscode-'))
   execFileSync(cli, ['-C', workspace, 'init', '--name', 'shop'])

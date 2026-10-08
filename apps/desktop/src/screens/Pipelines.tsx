@@ -6,7 +6,7 @@ import { Button, Checkbox, Field, Input, Switch } from '../ui/controls'
 import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
 import { useToast } from '../ui/overlays'
 
-const DEFAULT_INSTALL = 'cargo install --locked --git https://github.com/YOUR-ORG/liftoff liftoff-cli'
+const DEFAULT_INSTALL = 'curl -fsSL -o liftoff https://github.com/YOUR-ORG/liftoff/releases/latest/download/liftoff-linux-x64 && sudo install -m 755 liftoff /usr/local/bin/liftoff'
 const secret = (env: string, field: string) => `LIFTOFF_ENV_${env.toUpperCase().replaceAll('-', '_')}_${field}`
 
 export function Pipelines({ project }: { project: Project }) {

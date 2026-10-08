@@ -1,5 +1,4 @@
 * text=auto eol=lf
 *.png binary
 # Checksum fixtures must keep their exact bytes (CRLF, BOM) across checkouts.
-crates/core/tests/fixtures/** -text
 packages/liftoff/test/fixtures/** -text

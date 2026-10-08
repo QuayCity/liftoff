@@ -575,4 +575,6 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
-process.exitCode = await main(process.argv.slice(2))
+void main(process.argv.slice(2)).then((code) => {
+  process.exitCode = code
+})

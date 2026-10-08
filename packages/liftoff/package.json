@@ -14,7 +14,8 @@
   "scripts": {
     "typecheck": "tsc -p .",
     "test": "node --test \"src/**/*.test.ts\"",
-    "test:db": "node --test --test-concurrency=1 \"test/*.test.ts\""
+    "test:db": "node --test --test-concurrency=1 \"test/*.test.ts\"",
+    "build:cli": "node scripts/build-cli.mjs"
   },
   "dependencies": {
     "pg": "^8.23.1",
@@ -27,6 +28,8 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/pg": "^8.23.1",
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6",
     "typescript": "~6.0.2"
   }
 }
