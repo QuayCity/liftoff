@@ -50,6 +50,9 @@ pub enum Level {
 pub type Log<'a> = &'a (dyn Fn(Level, &str) + Sync);
 
 pub fn compute(scripts: &[Script], rows: &[HistoryRow]) -> Vec<MigrationInfo> {
+    // Flyway's schema-creation marker is bookkeeping, not a migration.
+    let rows: Vec<HistoryRow> = rows.iter().filter(|r| r.kind != "SCHEMA").cloned().collect();
+    let rows = rows.as_slice();
     let ver = |r: &HistoryRow| r.version.as_deref().and_then(Version::parse);
     // One effective row per version, in rank order. A later DELETE row (repair forgot a missing
     // script) or UNDO_SQL row (undo ran) retires the version.

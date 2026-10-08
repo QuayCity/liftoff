@@ -6,7 +6,7 @@
 use liftoff_core::config::{self, Config, Environment, Role};
 use liftoff_core::runner::{self, Level, MigrateOptions, State};
 use liftoff_core::checks::{self, CheckOptions};
-use liftoff_core::{db, diff, Error};
+use liftoff_core::{db, diff, flyway, Error};
 use std::path::{Path, PathBuf};
 
 fn quiet(_: Level, _: &str) {}
@@ -198,6 +198,29 @@ async fn full_slice() {
     let r = runner::migrate(&cfg, Some("scratch"), MigrateOptions::default(), &quiet).await.unwrap();
     assert!(r.applied.iter().all(|a| a.script != "V1__orders.sql"), "{:?}", r.applied);
     assert_eq!(state_on(&runner::info(&cfg, Some("scratch")).await.unwrap(), "V1__orders.sql"), Some(State::BelowBaseline));
+
+    // 8. One-time import of a Flyway history table.
+    reset(&cfg, "test").await;
+    let mut fw = cfg.clone();
+    fw.project.history_table = "flyway_schema_history".into();
+    let tc = db::connect("test", cfg.env("test").unwrap()).await.unwrap();
+    db::ensure_history(&tc, "public", "flyway_schema_history").await.unwrap();
+    tc.batch_execute("insert into flyway_schema_history values (0, '0', '<< schema creation >>', 'SCHEMA', '\"public\"', null, 'me', now(), 0, true)").await.unwrap();
+    runner::migrate(&fw, Some("test"), MigrateOptions { out_of_order: true, ..Default::default() }, &quiet).await.unwrap();
+    let flyway_rows = db::read_history(&tc, "public", "flyway_schema_history").await.unwrap().len();
+
+    write(&dir, "V1__orders.sql", "-- edited after it ran\ncreate table orders (id serial, note text);\n");
+    let err = flyway::import_history(&cfg, Some("test"), "flyway_schema_history", false, &quiet).await.unwrap_err().to_string();
+    assert!(err.contains("V1__orders.sql") && err.contains("--accept-edited"), "{err}");
+    assert!(db::read_history(&tc, "public", &cfg.project.history_table).await.unwrap().is_empty(), "a refused import writes nothing");
+    write(&dir, "V1__orders.sql", "-- reformatted after it ran\ncreate table orders (id serial, note text);\n");
+
+    let imp = flyway::import_history(&cfg, Some("test"), "flyway_schema_history", false, &quiet).await.unwrap();
+    assert_eq!((imp.imported, imp.skipped.len()), (flyway_rows - 1, 1), "{imp:#?}");
+    runner::validate_env(&cfg, Some("test")).await.unwrap();
+    assert!(runner::migrate(&cfg, Some("test"), MigrateOptions::default(), &quiet).await.unwrap().applied.is_empty(), "nothing re-runs after an import");
+    assert_eq!(db::read_history(&tc, "public", "flyway_schema_history").await.unwrap().len(), flyway_rows, "Flyway's table is left alone");
+    assert!(flyway::import_history(&cfg, Some("test"), "flyway_schema_history", false, &quiet).await.is_err(), "runs once");
 
     // 7. Refuses to rebuild a non-scratch database.
     let err = diff::dev_vs_migrations(&cfg, Some("dev"), Some("test"), &quiet).await.unwrap_err();

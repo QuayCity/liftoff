@@ -31,6 +31,12 @@ fn tls() -> MakeRustlsConnect {
 
 pub async fn connect(env_name: &str, env: &Environment) -> Result<Client> {
     let fail = |msg: String| Error::Connect { env: env_name.to_string(), msg };
+    for v in [Some(&env.url), env.user.as_ref(), env.password.as_ref()].into_iter().flatten() {
+        if let Some(i) = v.find("${env.") {
+            let var = v[i + 6..].split('}').next().unwrap_or("");
+            return Err(fail(format!("environment variable {var} is not set")));
+        }
+    }
     let mut cfg = tokio_postgres::Config::from_str(&env.url).map_err(|e| fail(format!("bad url: {e}")))?;
     if let Some(u) = &env.user { cfg.user(u); }
     if let Some(p) = &env.password { cfg.password(p); }

@@ -5,6 +5,7 @@ pub mod config;
 pub mod db;
 pub mod diff;
 pub mod error;
+pub mod flyway;
 pub mod license;
 pub mod migration;
 pub mod runner;

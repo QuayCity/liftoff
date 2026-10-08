@@ -83,8 +83,10 @@ impl Config {
         let mut environments = file.environments;
         for (name, env) in environments.iter_mut() {
             apply_env_vars(name, env, |k| std::env::var(k).ok());
+            // Unset variables stay as `${env.X}` here and fail when this environment connects,
+            // so one missing variable does not stop the whole project from loading.
             for v in [Some(&mut env.url), env.user.as_mut(), env.password.as_mut()].into_iter().flatten() {
-                *v = interpolate(v, |k| std::env::var(k).ok())?;
+                *v = interpolate(v, |k| std::env::var(k).ok()).unwrap_or_else(|_| v.clone());
             }
             if env.password.is_none() {
                 env.password = keyring_get(root, name);
@@ -148,17 +150,26 @@ pub fn init(root: &Path, name: &str, engine: &str) -> Result<()> {
     if engine != "postgresql" {
         return config(format!("engine '{engine}' is not supported yet; use postgresql"));
     }
+    init_with(root, name, "migrations", &["public".to_string()])
+}
+
+/// `init` with a given migrations folder and schemas (used when converting a Flyway project).
+pub fn init_with(root: &Path, name: &str, migrations: &str, schemas: &[String]) -> Result<()> {
     let path = root.join(PROJECT_FILE);
     if path.exists() {
         return config(format!("{} already exists", path.display()));
     }
-    std::fs::create_dir_all(root.join("migrations"))?;
+    std::fs::create_dir_all(root.join(migrations))?;
     std::fs::create_dir_all(root.join("schema-model"))?;
-    let name = toml::Value::String(name.into());
-    std::fs::write(
-        &path,
-        format!("[project]\nname = {name}\nengine = \"{engine}\"\nmigrations = \"migrations\"\nschemas = [\"public\"]\nhistory_table = \"liftoff_schema_history\"\n"),
-    )?;
+    let mut project = toml::Table::new();
+    project.insert("name".into(), name.into());
+    project.insert("engine".into(), "postgresql".into());
+    project.insert("migrations".into(), migrations.into());
+    project.insert("schemas".into(), toml::Value::Array(schemas.iter().map(|s| s.as_str().into()).collect()));
+    project.insert("history_table".into(), "liftoff_schema_history".into());
+    let mut file = toml::Table::new();
+    file.insert("project".into(), project.into());
+    std::fs::write(&path, toml::to_string_pretty(&file).or_else(|e| config(e.to_string()))?)?;
     let gitignore = root.join(".gitignore");
     let existing = std::fs::read_to_string(&gitignore).unwrap_or_default();
     if !existing.lines().any(|l| l.trim() == USER_FILE) {
@@ -209,7 +220,7 @@ pub fn save_environment(root: &Path, name: &str, env: &Environment, shared: bool
     save_environment_with(root, name, env, shared, keyring_enabled())
 }
 
-fn save_environment_with(root: &Path, name: &str, env: &Environment, shared: bool, use_keychain: bool) -> Result<PasswordStore> {
+pub(crate) fn save_environment_with(root: &Path, name: &str, env: &Environment, shared: bool, use_keychain: bool) -> Result<PasswordStore> {
     let mut env = env.clone();
     let mut store = PasswordStore::None;
     if let Some(pw) = env.password.clone() {
