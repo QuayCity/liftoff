@@ -98,29 +98,55 @@ async fn full_slice() {
          create sequence invoice_no start 1000;
          create function tax(amount numeric) returns numeric language sql immutable as $$ select amount * 0.21 $$;
          create view order_totals as select id, total, tax(total) as vat from orders;
-         create view big_orders as select id from order_totals where total > 100;",
+         create view big_orders as select id from order_totals where total > 100;
+         create extension if not exists pgcrypto;
+         create domain email as text check (value like '%@%');
+         alter table customers add column contact email;
+         create table events (id bigint, at timestamptz not null, primary key (id, at)) partition by range (at);
+         create table events_2026 partition of events for values from ('2026-01-01') to ('2027-01-01');
+         create index events_at_idx on events (at);
+         create function touch() returns trigger language plpgsql as $$ begin new.created_at := now(); return new; end $$;
+         create trigger customers_touch before insert on customers for each row execute function touch();
+         create materialized view order_counts as select count(*) as n from orders;
+         create unique index order_counts_n on order_counts (n);
+         do $$ begin if not exists (select from pg_roles where rolname = 'liftoff_reader') then create role liftoff_reader; end if; end $$;
+         grant select on orders to liftoff_reader;
+         grant select on order_totals to liftoff_reader;
+         comment on table customers is 'People who buy';
+         comment on column orders.note is 'Free text';",
     )
     .await
     .unwrap();
-    let changes = diff::dev_vs_migrations(&cfg, None, None, &quiet).await.unwrap();
+    let changes = diff::dev_vs_migrations(&cfg, None, None, &quiet).await.unwrap().changes;
     let mut ids: Vec<&str> = changes.iter().map(|c| c.id.as_str()).collect();
     ids.sort();
     assert_eq!(ids, [
-        "function:public.tax(amount numeric)", "sequence:public.invoice_no", "table:public.customers", "table:public.orders",
-        "type:public.mood", "view:public.big_orders", "view:public.order_totals",
+        "comment:COLUMN public.orders.note", "comment:TABLE public.customers", "domain:public.email", "extension:pgcrypto",
+        "function:public.tax(amount numeric)", "function:public.touch()", "grant:TABLE public.orders",
+        "sequence:public.invoice_no", "table:public.customers", "table:public.events", "table:public.events_2026", "table:public.orders",
+        "trigger:public.customers.customers_touch", "type:public.mood", "view:public.big_orders", "view:public.order_counts", "view:public.order_totals",
     ], "{changes:#?}");
+    // The new view's grant travels with the view, not as a separate change.
+    assert!(changes.iter().find(|c| c.id == "view:public.order_totals").unwrap().sql.contains("GRANT SELECT ON TABLE public.order_totals TO liftoff_reader"));
     assert!(changes.iter().all(|c| c.after.is_some()), "every change carries its after-DDL");
     let g = diff::generate(&cfg, &changes, "customers and totals", true).unwrap();
     let u = g.undo.as_ref().unwrap();
-    assert!(u.file_name.starts_with('U') && u.sql.contains("DROP TABLE public.customers;"), "{}", u.sql);
+    assert!(u.file_name.starts_with('U') && u.sql.contains("DROP TABLE IF EXISTS public.customers;"), "{}", u.sql);
     diff::save(&cfg, &u.file_name, &u.sql).unwrap();
     assert!(g.file_name.starts_with('V') && g.file_name.ends_with("__customers_and_totals.sql"), "{}", g.file_name);
     diff::save(&cfg, &g.file_name, &g.sql).unwrap();
     assert!(diff::save(&cfg, &g.file_name, &g.sql).is_err(), "never overwrites");
     let r = runner::migrate(&cfg, Some("test"), MigrateOptions::default(), &quiet).await.unwrap();
     assert_eq!(r.applied.len(), 1);
-    let after = diff::dev_vs_migrations(&cfg, None, None, &quiet).await.unwrap();
+    let after = diff::dev_vs_migrations(&cfg, None, None, &quiet).await.unwrap().changes;
     assert!(after.is_empty(), "round trip left differences: {after:#?}\n--- script ---\n{}", g.sql);
+
+    // 6-nc. Objects the diff does not compare are reported, not silently skipped.
+    d.batch_execute("create policy everyone on orders using (true)").await.unwrap();
+    let cmp = diff::dev_vs_migrations(&cfg, None, None, &quiet).await.unwrap();
+    assert!(cmp.changes.is_empty(), "{:#?}", cmp.changes);
+    assert_eq!(cmp.not_compared, ["row-level security policies: 1 in dev, 0 in the scripts"]);
+    d.batch_execute("drop policy everyone on orders").await.unwrap();
 
     // 6a. Undo, dry run, changes report, redo, drift.
     let both = CheckOptions { drift: true, changes: true, dry_run: false };
@@ -134,7 +160,7 @@ async fn full_slice() {
     assert_eq!(state_of(&runner::info(&cfg, Some("test")).await.unwrap(), &g.file_name), Some(State::Pending));
     let report = checks::check(&cfg, Some("test"), None, CheckOptions { drift: true, changes: true, dry_run: true }, &quiet).await.unwrap();
     assert!(!report.has_drift(), "undo restores what the earlier scripts built: {:#?}", report.drift);
-    assert_eq!(report.changes.as_ref().unwrap().len(), 7, "the pending script changes 7 objects");
+    assert_eq!(report.changes.as_ref().unwrap().len(), changes.len(), "the pending script changes what dev changed");
     let dry = report.dry_run_sql.unwrap();
     assert!(dry.contains(&g.file_name) && dry.contains("BEGIN;") && dry.contains("INSERT INTO public.liftoff_schema_history"), "{dry}");
     assert_eq!(state_of(&runner::info(&cfg, Some("test")).await.unwrap(), &g.file_name), Some(State::Pending), "dry run changes nothing");

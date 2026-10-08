@@ -345,14 +345,15 @@ async fn run(cli: &Cli, adhoc: &Adhoc) -> Result<(Value, String)> {
         Command::Diff { source, scratch } => {
             let cfg = load(cli, adhoc)?;
             license::require("diff", cli.license.as_deref(), Some(root))?;
-            let changes = diff::dev_vs_migrations(&cfg, source.as_deref(), scratch.as_deref(), &log).await?;
+            let cmp = diff::dev_vs_migrations(&cfg, source.as_deref(), scratch.as_deref(), &log).await?;
+            let changes = &cmp.changes;
             let text = changes.iter().map(|c| format!("{:<8} {}{}", format!("{:?}", c.kind).to_lowercase(), c.name, if c.destructive { "  (may lose data)" } else { "" })).collect::<Vec<_>>().join("\n");
-            Ok((to(&changes)?, if text.is_empty() { "No differences".into() } else { text }))
+            Ok((to(&cmp)?, if text.is_empty() { "No differences".into() } else { text }))
         }
         Command::Generate { description, source, scratch, skip_destructive, dry_run, record_on_dev, undo } => {
             let cfg = load(cli, adhoc)?;
             license::require("generate", cli.license.as_deref(), Some(root))?;
-            let mut changes = diff::dev_vs_migrations(&cfg, source.as_deref(), scratch.as_deref(), &log).await?;
+            let mut changes = diff::dev_vs_migrations(&cfg, source.as_deref(), scratch.as_deref(), &log).await?.changes;
             if *skip_destructive {
                 changes.retain(|c| !c.destructive);
             } else if changes.iter().any(|c| c.destructive) {

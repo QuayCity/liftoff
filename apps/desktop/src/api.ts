@@ -28,7 +28,8 @@ export type Change = {
   sql: string; steps: Step[]; undo_steps: Step[]; before: string | null; after: string | null
 }
 export type Generated = { file_name: string; version: string; sql: string; undo: { file_name: string; sql: string } | null }
-export type CheckReport = { environment: string; applied_up_to: string | null; drift: Change[] | null; changes: Change[] | null; dry_run_sql: string | null }
+export type CheckReport = { environment: string; applied_up_to: string | null; drift: Change[] | null; changes: Change[] | null; dry_run_sql: string | null; not_compared: string[] }
+export type Comparison = { changes: Change[]; not_compared: string[] }
 export type LogEvent = { level: 'info' | 'warn'; message: string }
 export type ScriptView = { kind: 'versioned' | 'repeatable' | 'undo' | 'baseline'; version: string | null; description: string; file_name: string; sql: string }
 export type ConvertReport = { source: string; written: string; environments: string[]; migrations: string; schemas: string[]; flyway_table: string; not_converted: string[]; notes: string[] }
@@ -61,7 +62,7 @@ type Api = {
   scriptsList(path: string): Promise<ScriptView[]>
   scriptAdd(path: string, repeatable: boolean, description: string, sql: string): Promise<string>
   capture(path: string, env: string, description: string): Promise<Generated>
-  changesDiff(path: string): Promise<Change[]>
+  changesDiff(path: string): Promise<Comparison>
   migrationGenerate(path: string, changes: Change[], description: string, withUndo: boolean): Promise<Generated>
   undo(path: string, env: string): Promise<{ script: string; version: string | null }>
   check(path: string, env: string, opts: { drift: boolean; changes: boolean; dryRun: boolean }): Promise<CheckReport>
@@ -243,12 +244,12 @@ const fakeApi: Api = {
     const ordersAfter = 'CREATE TABLE public.orders (\n    id bigserial,\n    note text NOT NULL,\n    paid_at timestamp with time zone\n);\nALTER TABLE public.orders ADD CONSTRAINT orders_pkey PRIMARY KEY (id);\nCREATE INDEX orders_paid_idx ON public.orders USING btree (paid_at);'
     const cart = 'CREATE TABLE public.legacy_cart (\n    id integer NOT NULL\n);'
     const view = 'CREATE VIEW public.daily_totals AS\n SELECT date(paid_at) AS day, count(*) AS orders\n   FROM public.orders\n  GROUP BY (date(paid_at));'
-    return [
+    return { not_compared: ['row-level security policies: 2 in local, 0 in the scripts'], changes: [
       { id: 'table:public.customer', object_type: 'Tables', name: 'public.customer', kind: 'added', destructive: false, sql: customer, steps: [], undo_steps: [{ phase: 7, sql: 'DROP TABLE public.customer;' }], before: null, after: customer },
       { id: 'table:public.orders', object_type: 'Tables', name: 'public.orders', kind: 'changed', destructive: false, sql: 'ALTER TABLE public.orders ALTER COLUMN note SET NOT NULL;\nALTER TABLE public.orders ADD COLUMN paid_at timestamp with time zone;\nCREATE INDEX orders_paid_idx ON public.orders USING btree (paid_at);', steps: [], undo_steps: [], before: ordersBefore, after: ordersAfter },
       { id: 'table:public.legacy_cart', object_type: 'Tables', name: 'public.legacy_cart', kind: 'removed', destructive: true, sql: 'DROP TABLE public.legacy_cart;', steps: [], undo_steps: [], before: cart, after: null },
       { id: 'view:public.daily_totals', object_type: 'Views', name: 'public.daily_totals', kind: 'added', destructive: false, sql: `${view};`, steps: [], undo_steps: [], before: null, after: view },
-    ]
+    ] }
   },
   migrationGenerate: async (_p, changes, description, withUndo) => {
     const version = '20261008.1104'
@@ -273,6 +274,7 @@ const fakeApi: Api = {
       environment: env, applied_up_to: '20261003.1530',
       drift: o.drift ? (env === 'staging' ? [drifted] : []) : null,
       changes: o.changes ? fakeInfo(env).filter((i) => i.state === 'pending').map((i) => ({ ...drifted, id: `table:${i.description}`, name: `public.${i.description.replaceAll(' ', '_')}`, kind: 'added' as const, before: null })) : null,
+      not_compared: [],
       dry_run_sql: o.dryRun ? `-- Dry run for ${env}: nothing below has been executed.\n\n-- V20261007.1102__tax_function.sql\nBEGIN;\ncreate function tax(amount numeric) ...;\nCOMMIT;\n` : null,
     }
   },

@@ -6,6 +6,7 @@ import { Button, cx } from '../ui/controls'
 import { LogConsole, type LogLine } from '../ui/data'
 import { Badge, CodeBlock, InlineAlert } from '../ui/display'
 import { DiffView } from '../ui/diffview'
+import { NotCompared } from './Changes'
 
 type Which = 'drift' | 'changes' | 'dryRun'
 
@@ -63,6 +64,7 @@ export function Checks({ project, env, onDrift, onSettings }: {
       </p>
       {running && <LogConsole lines={log} status="streaming" />}
       {error && <InlineAlert tone="danger" title="Check failed">{error}</InlineAlert>}
+      {!running && report && report.r.not_compared.length > 0 && <NotCompared items={report.r.not_compared} />}
       {!running && report?.which === 'drift' && report.r.drift && (
         <ChangeReport
           changes={report.r.drift}

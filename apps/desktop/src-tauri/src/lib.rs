@@ -257,7 +257,7 @@ async fn mark_applied(app: AppHandle, path: String, env: String, script: String)
 /* ---------- F03: changes (Pro) ---------- */
 
 #[tauri::command]
-async fn changes_diff(app: AppHandle, path: String) -> R<Vec<diff::Change>> {
+async fn changes_diff(app: AppHandle, path: String) -> R<diff::Comparison> {
     let cfg = load(&path)?;
     license::require("diff", None, Some(&cfg.root)).map_err(rep)?;
     let log = emitter(app);

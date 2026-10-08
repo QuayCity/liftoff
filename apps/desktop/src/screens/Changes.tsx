@@ -14,6 +14,7 @@ export function Changes({ project, onSettings, onEnvironments }: { project: Proj
   const dev = project.environments.find((e) => e.role === 'dev')
   const scratch = project.environments.find((e) => e.role === 'scratch')
   const [changes, setChanges] = useState<Change[] | null>(null)
+  const [notCompared, setNotCompared] = useState<string[]>([])
   const [comparing, setComparing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -73,8 +74,9 @@ export function Changes({ project, onSettings, onEnvironments }: { project: Proj
     setLog([])
     listening.current = true
     try {
-      const c = await api.changesDiff(project.root)
+      const { changes: c, not_compared } = await api.changesDiff(project.root)
       setChanges(c)
+      setNotCompared(not_compared)
       // Destructive changes start unticked: they have to be chosen on purpose.
       setSelected(new Set(c.filter((x) => !x.destructive).map((x) => x.id)))
       setActive(c[0]?.id)
@@ -138,6 +140,7 @@ export function Changes({ project, onSettings, onEnvironments }: { project: Proj
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
         {error && <InlineAlert tone="danger" title="Comparison failed">{error}</InlineAlert>}
+        {!comparing && changes && notCompared.length > 0 && <NotCompared items={notCompared} />}
         {comparing && <LogConsole lines={log} status="streaming" />}
         {!comparing && changes === null && !error && (
           <Card><EmptyState icon={GitCompareArrows} text={`Compare to see which tables, views, functions and types in ${dev.name} differ from what your migration scripts create.`} /></Card>
@@ -210,5 +213,15 @@ function Preview({ change, devName }: { change: Change; devName: string }) {
         {undo ? <CodeBlock label={`Undo SQL for ${change.name}`} code={undo} /> : <p className="text-sm text-muted">No undo steps for this change.</p>}
       </Tabs.Content>
     </Tabs.Root>
+  )
+}
+
+/** Objects the comparison does not look at yet: shown, never silently skipped. */
+export function NotCompared({ items }: { items: string[] }) {
+  return (
+    <InlineAlert tone="warning" title="Some objects were not compared">
+      Write changes to these by hand:
+      <ul className="mt-1 list-disc pl-5">{items.map((i) => <li key={i}>{i}</li>)}</ul>
+    </InlineAlert>
   )
 }

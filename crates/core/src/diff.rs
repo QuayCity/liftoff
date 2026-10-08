@@ -1,7 +1,10 @@
 //! Schema diff (C11), migration and undo generation (C12), capture (F07).
-//! Objects: tables (columns, identity, serial, defaults), constraints (pk, unique, check, exclusion,
-//! foreign key), indexes, views, functions and procedures, enum types, standalone sequences.
-//! Not yet: materialized views, triggers, domains, composite types, grants, comments, rename detection.
+//! Objects: extensions, tables (columns, identity, serial, defaults, partitioning), constraints (pk,
+//! unique, check, exclusion, foreign key), indexes, views and materialized views, functions and
+//! procedures, triggers, enum types, domains, standalone sequences, grants and comments.
+//! Anything else in the managed schemas is counted and reported as "not compared", never silently
+//! skipped (row-level security, rules, composite and range types, aggregates, operators, foreign tables,
+//! column privileges). No rename detection.
 
 use crate::config::{role_name, Config, Role};
 use crate::db::{self, quote_ident as q};
@@ -38,6 +41,10 @@ pub struct Table {
     pub constraints: Vec<Constraint>,
     /// index name -> pg_get_indexdef (indexes that back a constraint are left out)
     pub indexes: BTreeMap<String, String>,
+    /// partitioned parent: `RANGE (created_at)`
+    pub partition_by: Option<String>,
+    /// partition: parent and bound, `FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')`
+    pub partition_of: Option<(Key, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +52,28 @@ pub struct View {
     /// creation order in the source database; views are created in this order
     pub oid: u32,
     pub def: String,
+    pub materialized: bool,
+    /// materialized views only: index name -> definition
+    pub indexes: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Domain {
+    pub base: String,
+    pub default: Option<String>,
+    pub not_null: bool,
+    /// constraint name -> `CHECK (...)`
+    pub checks: BTreeMap<String, String>,
+}
+
+/// One privilege: `GRANT privilege ON object TO grantee [WITH GRANT OPTION]`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Grant {
+    /// `TABLE public.orders`, `SEQUENCE …`, `FUNCTION public.tax(amount numeric)`
+    pub object: String,
+    pub grantee: String,
+    pub privilege: String,
+    pub grantable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +107,18 @@ pub struct Model {
     pub sequences: BTreeMap<Key, Sequence>,
     /// (view, relation it reads from): views on tables and on other views
     pub view_deps: Vec<(Key, Key)>,
+    /// extension name -> schema
+    pub extensions: BTreeMap<String, String>,
+    pub domains: BTreeMap<Key, Domain>,
+    /// (schema, table, trigger name) -> CREATE TRIGGER …
+    pub triggers: BTreeMap<(String, String, String), String>,
+    pub grants: BTreeSet<Grant>,
+    /// `TABLE public.orders`, `COLUMN public.orders.note`, … -> comment text
+    pub comments: BTreeMap<String, String>,
+    /// every object that can carry a grant or comment, by the same names
+    pub objects: BTreeSet<String>,
+    /// what exists but is not compared: (what, how many)
+    pub not_compared: Vec<(String, i64)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,16 +131,18 @@ pub enum ChangeKind {
 
 // Statements run phase by phase across all selected changes, so dependencies line up:
 // a foreign key after the table it points at, a view after the function it calls.
-const P_DROP: u8 = 0; // views (cascade), constraints, indexes
-const P_TYPES: u8 = 1; // enum types, sequences
-const P_TABLES: u8 = 2;
+const P_DROP: u8 = 0; // views (cascade), triggers, constraints, indexes
+const P_TYPES: u8 = 1; // extensions, enum types, domains, sequences
+const P_TABLES: u8 = 2; // parents before partitions (order)
 const P_KEYS: u8 = 3; // pk, unique, check, exclusion, indexes
 const P_FKS: u8 = 4;
 const P_FUNCS: u8 = 5;
-const P_VIEWS: u8 = 6;
-const P_DROP_TABLES: u8 = 7;
-const P_DROP_OTHER: u8 = 8; // functions, types, sequences
-const PHASES: u8 = 9;
+const P_VIEWS: u8 = 6; // views and materialized views, in creation order
+const P_TRIGGERS: u8 = 7;
+const P_GRANTS: u8 = 8; // grants and comments, once every object exists
+const P_DROP_TABLES: u8 = 9;
+const P_DROP_OTHER: u8 = 10; // functions, types, domains, sequences, extensions
+const PHASES: u8 = 11;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Step {
@@ -145,16 +188,30 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
 
     let rows = c.query(&format!(
         "select n.nspname::text, c.relname::text, a.attname::text, format_type(a.atttypid, a.atttypmod),
-                a.attnotnull, pg_get_expr(d.adbin, d.adrelid), a.attidentity::text
+                a.attnotnull, pg_get_expr(d.adbin, d.adrelid), a.attidentity::text,
+                case when c.relkind = 'p' then pg_get_partkeydef(c.oid) end,
+                pn.nspname::text, pc.relname::text, pg_get_expr(c.relpartbound, c.oid),
+                a.attislocal
          from pg_class c
          join pg_namespace n on n.oid = c.relnamespace
          left join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
          left join pg_attrdef d on d.adrelid = c.oid and d.adnum = a.attnum
-         where c.relkind in ('r', 'p') and not c.relispartition and n.nspname = any($1) and c.relname <> $2 and {}
+         left join pg_inherits i on i.inhrelid = c.oid and c.relispartition
+         left join pg_class pc on pc.oid = i.inhparent
+         left join pg_namespace pn on pn.oid = pc.relnamespace
+         where c.relkind in ('r', 'p') and n.nspname = any($1) and c.relname <> $2 and {}
          order by 1, 2, a.attnum", not_ext("c.oid")), &p).await?;
     for r in rows {
         let t = m.tables.entry((r.get(0), r.get(1))).or_default();
+        t.partition_by = r.get(7);
+        if let (Some(ps), Some(pt), Some(bound)) = (r.get::<_, Option<String>>(8), r.get::<_, Option<String>>(9), r.get::<_, Option<String>>(10)) {
+            t.partition_of = Some(((ps, pt), bound));
+        }
         let Some(name) = r.get::<_, Option<String>>(2) else { continue };
+        // A partition's inherited columns come from its parent.
+        if t.partition_of.is_some() && !r.get::<_, Option<bool>>(11).unwrap_or(true) {
+            continue;
+        }
         let identity = match r.get::<_, Option<String>>(6).as_deref() {
             Some("a") => Some("always".to_string()),
             Some("d") => Some("by default".to_string()),
@@ -185,22 +242,34 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
          join pg_class i on i.oid = x.indexrelid
          join pg_class t on t.oid = x.indrelid
          join pg_namespace n on n.oid = t.relnamespace
-         where t.relkind in ('r', 'p') and n.nspname = any($1) and t.relname <> $2
+         where t.relkind in ('r', 'p', 'm') and n.nspname = any($1) and t.relname <> $2
+           and not i.relispartition
            and not exists (select 1 from pg_constraint con
                            where con.conindid = x.indexrelid and con.conrelid = x.indrelid and con.contype in ('p', 'u', 'x'))
          order by 1, 2, 3", &p).await?;
+    let mut view_indexes: Vec<(Key, String, String)> = Vec::new();
     for r in rows {
-        if let Some(t) = m.tables.get_mut(&(r.get(0), r.get(1))) {
-            t.indexes.insert(r.get(2), r.get(3));
+        let key: Key = (r.get(0), r.get(1));
+        match m.tables.get_mut(&key) {
+            Some(t) => {
+                t.indexes.insert(r.get(2), r.get(3));
+            }
+            None => view_indexes.push((key, r.get(2), r.get(3))),
         }
     }
 
     let rows = c.query(&format!(
-        "select n.nspname::text, c.relname::text, c.oid::oid, pg_get_viewdef(c.oid, true)
+        "select n.nspname::text, c.relname::text, c.oid::oid, pg_get_viewdef(c.oid, true), c.relkind = 'm'
          from pg_class c join pg_namespace n on n.oid = c.relnamespace
-         where c.relkind = 'v' and n.nspname = any($1) and {}", not_ext("c.oid")), &p1).await?;
+         where c.relkind in ('v', 'm') and n.nspname = any($1) and {}", not_ext("c.oid")), &p1).await?;
     for r in rows {
-        m.views.insert((r.get(0), r.get(1)), View { oid: r.get(2), def: r.get::<_, String>(3).trim_end().trim_end_matches(';').to_string() });
+        let def = r.get::<_, String>(3).trim_end().trim_end_matches(';').to_string();
+        m.views.insert((r.get(0), r.get(1)), View { oid: r.get(2), def, materialized: r.get(4), indexes: BTreeMap::new() });
+    }
+    for (key, name, def) in view_indexes {
+        if let Some(v) = m.views.get_mut(&key) {
+            v.indexes.insert(name, def);
+        }
     }
 
     let rows = c.query(
@@ -212,7 +281,7 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
          join pg_class s on s.oid = d.refobjid
          join pg_namespace sn on sn.oid = s.relnamespace
          where d.classid = 'pg_rewrite'::regclass and d.refclassid = 'pg_class'::regclass
-           and v.oid <> s.oid and v.relkind = 'v' and vn.nspname = any($1)", &p1).await?;
+           and v.oid <> s.oid and v.relkind in ('v', 'm') and vn.nspname = any($1)", &p1).await?;
     for r in rows {
         m.view_deps.push(((r.get(0), r.get(1)), (r.get(2), r.get(3))));
     }
@@ -247,7 +316,115 @@ pub async fn introspect(c: &Client, schemas: &[String], exclude_table: &str) -> 
             data_type: r.get(2), start: r.get(3), increment: r.get(4), min: r.get(5), max: r.get(6), cache: r.get(7), cycle: r.get(8),
         });
     }
+
+    for r in c.query("select e.extname::text, n.nspname::text from pg_extension e join pg_namespace n on n.oid = e.extnamespace
+                      where e.extname <> 'plpgsql' and n.nspname = any($1)", &p1).await? {
+        m.extensions.insert(r.get(0), r.get(1));
+    }
+
+    let rows = c.query(&format!(
+        "select n.nspname::text, t.typname::text, format_type(t.typbasetype, t.typtypmod), t.typdefault, t.typnotnull
+         from pg_type t join pg_namespace n on n.oid = t.typnamespace
+         where t.typtype = 'd' and n.nspname = any($1) and {}", not_ext("t.oid")), &p1).await?;
+    for r in rows {
+        m.domains.insert((r.get(0), r.get(1)), Domain { base: r.get(2), default: r.get(3), not_null: r.get(4), checks: BTreeMap::new() });
+    }
+    for r in c.query(
+        "select n.nspname::text, t.typname::text, con.conname::text, pg_get_constraintdef(con.oid, true)
+         from pg_constraint con join pg_type t on t.oid = con.contypid join pg_namespace n on n.oid = t.typnamespace
+         where con.contype = 'c' and n.nspname = any($1)", &p1).await? {
+        if let Some(d) = m.domains.get_mut(&(r.get(0), r.get(1))) {
+            d.checks.insert(r.get(2), r.get(3));
+        }
+    }
+
+    // Triggers a partition inherits from its parent are created with the parent's.
+    for r in c.query(
+        "select n.nspname::text, c.relname::text, t.tgname::text, pg_get_triggerdef(t.oid, true)
+         from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
+         where not t.tgisinternal and t.tgparentid = 0 and n.nspname = any($1) and c.relname <> $2", &p).await? {
+        m.triggers.insert((r.get(0), r.get(1), r.get(2)), format!("{};", r.get::<_, String>(3)));
+    }
+
+    // Grants: owners' own privileges are implied, so they are left out.
+    let rows = c.query(&format!(
+        "select case c.relkind when 'S' then 'SEQUENCE ' else 'TABLE ' end || quote_ident(n.nspname) || '.' || quote_ident(c.relname),
+                case when a.grantee = 0 then 'PUBLIC' else a.grantee::regrole::text end, a.privilege_type::text, a.is_grantable
+         from pg_class c join pg_namespace n on n.oid = c.relnamespace, aclexplode(c.relacl) a
+         where c.relkind in ('r', 'p', 'v', 'm', 'S') and n.nspname = any($1) and c.relname <> $2 and a.grantee <> c.relowner and {}
+         union all
+         select case p.prokind when 'p' then 'PROCEDURE ' else 'FUNCTION ' end || quote_ident(n.nspname) || '.' || quote_ident(p.proname)
+                  || '(' || pg_get_function_identity_arguments(p.oid) || ')',
+                case when a.grantee = 0 then 'PUBLIC' else a.grantee::regrole::text end, a.privilege_type::text, a.is_grantable
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace, aclexplode(p.proacl) a
+         where p.prokind in ('f', 'p') and n.nspname = any($1) and a.grantee <> p.proowner and {}",
+        not_ext("c.oid"), not_ext("p.oid")), &p).await?;
+    for r in rows {
+        m.grants.insert(Grant { object: r.get(0), grantee: r.get(1), privilege: r.get(2), grantable: r.get(3) });
+    }
+
+    // Every object that can carry a comment, named the way COMMENT ON names it, with its comment.
+    let rows = c.query(&format!(
+        "select case c.relkind when 'v' then 'VIEW ' when 'm' then 'MATERIALIZED VIEW ' when 'S' then 'SEQUENCE ' else 'TABLE ' end
+                  || quote_ident(n.nspname) || '.' || quote_ident(c.relname), obj_description(c.oid, 'pg_class')
+         from pg_class c join pg_namespace n on n.oid = c.relnamespace
+         where c.relkind in ('r', 'p', 'v', 'm', 'S') and n.nspname = any($1) and c.relname <> $2 and {ext_c}
+         union all
+         select 'COLUMN ' || quote_ident(n.nspname) || '.' || quote_ident(c.relname) || '.' || quote_ident(a.attname), col_description(c.oid, a.attnum)
+         from pg_class c join pg_namespace n on n.oid = c.relnamespace join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+         where c.relkind in ('r', 'p', 'v', 'm') and n.nspname = any($1) and c.relname <> $2 and {ext_c}
+         union all
+         select case p.prokind when 'p' then 'PROCEDURE ' else 'FUNCTION ' end || quote_ident(n.nspname) || '.' || quote_ident(p.proname)
+                  || '(' || pg_get_function_identity_arguments(p.oid) || ')', obj_description(p.oid, 'pg_proc')
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where p.prokind in ('f', 'p') and n.nspname = any($1) and {ext_p}
+         union all
+         select case t.typtype when 'd' then 'DOMAIN ' else 'TYPE ' end || quote_ident(n.nspname) || '.' || quote_ident(t.typname), obj_description(t.oid, 'pg_type')
+         from pg_type t join pg_namespace n on n.oid = t.typnamespace
+         where t.typtype in ('e', 'd') and n.nspname = any($1) and {ext_t}",
+        ext_c = not_ext("c.oid"), ext_p = not_ext("p.oid"), ext_t = not_ext("t.oid")), &p).await?;
+    for r in rows {
+        let object: String = r.get(0);
+        if let Some(text) = r.get::<_, Option<String>>(1) {
+            m.comments.insert(object.clone(), text);
+        }
+        m.objects.insert(object);
+    }
+
+    let rows = c.query(&format!(
+        "select 'row-level security policies', count(*) from pg_policy p join pg_class c on c.oid = p.polrelid
+           join pg_namespace n on n.oid = c.relnamespace where n.nspname = any($1)
+         union all select 'tables with row-level security on', count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+           where c.relrowsecurity and n.nspname = any($1)
+         union all select 'rules', count(*) from pg_rewrite r join pg_class c on c.oid = r.ev_class
+           join pg_namespace n on n.oid = c.relnamespace where r.rulename <> '_RETURN' and n.nspname = any($1)
+         union all select 'composite types', count(*) from pg_type t join pg_class c on c.oid = t.typrelid
+           join pg_namespace n on n.oid = t.typnamespace where t.typtype = 'c' and c.relkind = 'c' and n.nspname = any($1) and {ext_t}
+         union all select 'range types', count(*) from pg_type t join pg_namespace n on n.oid = t.typnamespace
+           where t.typtype = 'r' and n.nspname = any($1) and {ext_t}
+         union all select 'aggregates', count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+           where p.prokind = 'a' and n.nspname = any($1) and {ext_p}
+         union all select 'operators', count(*) from pg_operator o join pg_namespace n on n.oid = o.oprnamespace
+           where n.nspname = any($1) and {ext_o}
+         union all select 'foreign tables', count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+           where c.relkind = 'f' and n.nspname = any($1)
+         union all select 'column-level privileges', count(*) from pg_attribute a join pg_class c on c.oid = a.attrelid
+           join pg_namespace n on n.oid = c.relnamespace where a.attacl is not null and n.nspname = any($1)",
+        ext_t = not_ext("t.oid"), ext_p = not_ext("p.oid"), ext_o = not_ext("o.oid")), &p1).await?;
+    m.not_compared = rows.iter().map(|r| (r.get::<_, String>(0), r.get::<_, i64>(1))).filter(|(_, n)| *n > 0).collect();
     Ok(m)
+}
+
+/// What either side has that the diff does not look at, for a visible warning.
+pub fn not_compared(source: &Model, target: &Model, source_name: &str, target_name: &str) -> Vec<String> {
+    let mut what: BTreeMap<&str, (i64, i64)> = BTreeMap::new();
+    for (w, n) in &source.not_compared {
+        what.entry(w).or_default().0 = *n;
+    }
+    for (w, n) in &target.not_compared {
+        what.entry(w).or_default().1 = *n;
+    }
+    what.into_iter().map(|(w, (a, b))| format!("{w}: {a} in {source_name}, {b} in {target_name}")).collect()
 }
 
 /// `integer DEFAULT nextval('t_id_seq'::regclass)` -> `serial`, so the owned sequence comes along.
@@ -290,8 +467,14 @@ fn col_def(c: &Column) -> String {
 }
 
 fn create_table(t: &str, tb: &Table) -> String {
+    if let Some((parent, bound)) = &tb.partition_of {
+        return format!("CREATE TABLE {t} PARTITION OF {} {bound};", qk(parent));
+    }
     let body = tb.columns.iter().map(|c| format!("    {}", col_def(c))).collect::<Vec<_>>().join(",\n");
-    format!("CREATE TABLE {t} (\n{body}\n);")
+    match &tb.partition_by {
+        Some(by) => format!("CREATE TABLE {t} (\n{body}\n) PARTITION BY {by};"),
+        None => format!("CREATE TABLE {t} (\n{body}\n);"),
+    }
 }
 
 fn add_constraint(t: &str, c: &Constraint) -> Step {
@@ -308,7 +491,52 @@ fn table_ddl(k: &Key, tb: &Table) -> String {
 }
 
 fn view_ddl(k: &Key, v: &View) -> String {
-    format!("CREATE VIEW {} AS\n{};", qk(k), v.def)
+    let mut s = format!("CREATE {}VIEW {} AS\n{};", if v.materialized { "MATERIALIZED " } else { "" }, qk(k), v.def);
+    for d in v.indexes.values() {
+        s.push_str(&format!("\n{d};"));
+    }
+    s
+}
+
+fn view_drop(k: &Key, v: &View) -> String {
+    format!("DROP {}VIEW IF EXISTS {} CASCADE;", if v.materialized { "MATERIALIZED " } else { "" }, qk(k))
+}
+
+fn domain_ddl(k: &Key, d: &Domain) -> String {
+    let mut s = format!("CREATE DOMAIN {} AS {}", qk(k), d.base);
+    if let Some(def) = &d.default {
+        s.push_str(&format!(" DEFAULT {def}"));
+    }
+    if d.not_null {
+        s.push_str(" NOT NULL");
+    }
+    for (name, check) in &d.checks {
+        s.push_str(&format!(" CONSTRAINT {} {check}", q(name)));
+    }
+    s + ";"
+}
+
+fn grant_sql(g: &Grant, revoke: bool) -> String {
+    if revoke {
+        format!("REVOKE {} ON {} FROM {};", g.privilege, g.object, g.grantee)
+    } else {
+        format!("GRANT {} ON {} TO {}{};", g.privilege, g.object, g.grantee, if g.grantable { " WITH GRANT OPTION" } else { "" })
+    }
+}
+
+fn comment_sql(object: &str, text: Option<&String>) -> String {
+    match text {
+        Some(t) => format!("COMMENT ON {object} IS {};", lit(t)),
+        None => format!("COMMENT ON {object} IS NULL;"),
+    }
+}
+
+/// Grants are named `TABLE x` for views too; comments use `VIEW x`. Same object either way.
+fn object_exists(m: &Model, object: &str) -> bool {
+    if m.objects.contains(object) {
+        return true;
+    }
+    object.strip_prefix("TABLE ").is_some_and(|rest| m.objects.contains(&format!("VIEW {rest}")) || m.objects.contains(&format!("MATERIALIZED VIEW {rest}")))
 }
 
 fn enum_ddl(k: &Key, labels: &[String]) -> String {
@@ -349,6 +577,64 @@ fn compare(source: &Model, target: &Model) -> Vec<Change> {
     let mut out: Vec<Change> = Vec::new();
     // Relations whose change breaks views reading from them: the views are dropped and recreated.
     let mut triggers: Vec<(usize, Key)> = Vec::new();
+
+    for (name, schema) in &source.extensions {
+        let ddl = format!("CREATE EXTENSION IF NOT EXISTS {} WITH SCHEMA {};", q(name), q(schema));
+        match target.extensions.get(name) {
+            None => out.push(change("extension", "Extensions", name, ChangeKind::Added, false, vec![step(P_TYPES, ddl.clone())], None, Some(ddl))),
+            Some(old) if old == schema => {}
+            Some(_) => {
+                let steps = vec![step(P_TYPES, format!("ALTER EXTENSION {} SET SCHEMA {};", q(name), q(schema)))];
+                out.push(change("extension", "Extensions", name, ChangeKind::Changed, false, steps, None, Some(ddl)));
+            }
+        }
+    }
+    for (name, schema) in target.extensions.iter().filter(|(n, _)| !source.extensions.contains_key(*n)) {
+        let steps = vec![step(P_DROP_OTHER, format!("DROP EXTENSION IF EXISTS {};", q(name)))];
+        let before = format!("CREATE EXTENSION IF NOT EXISTS {} WITH SCHEMA {};", q(name), q(schema));
+        out.push(change("extension", "Extensions", name, ChangeKind::Removed, true, steps, Some(before), None));
+    }
+
+    for (k, d) in &source.domains {
+        let name = format!("{}.{}", k.0, k.1);
+        let dk = qk(k);
+        match target.domains.get(k) {
+            None => out.push(change("domain", "Domains", &name, ChangeKind::Added, false, vec![step(P_TYPES, domain_ddl(k, d))], None, Some(domain_ddl(k, d)))),
+            Some(old) if old == d => {}
+            Some(old) => {
+                let mut steps = Vec::new();
+                let mut destructive = false;
+                if old.base != d.base {
+                    destructive = true;
+                    steps.push(step(P_TYPES, format!("-- {dk}: changing a domain's base type cannot be done in place; write it by hand.")));
+                }
+                if old.default != d.default {
+                    steps.push(step(P_TYPES, match &d.default {
+                        Some(v) => format!("ALTER DOMAIN {dk} SET DEFAULT {v};"),
+                        None => format!("ALTER DOMAIN {dk} DROP DEFAULT;"),
+                    }));
+                }
+                if old.not_null != d.not_null {
+                    steps.push(step(P_TYPES, format!("ALTER DOMAIN {dk} {} NOT NULL;", if d.not_null { "SET" } else { "DROP" })));
+                }
+                for (cname, check) in &old.checks {
+                    if d.checks.get(cname) != Some(check) {
+                        steps.push(step(P_TYPES, format!("ALTER DOMAIN {dk} DROP CONSTRAINT {};", q(cname))));
+                    }
+                }
+                for (cname, check) in &d.checks {
+                    if old.checks.get(cname) != Some(check) {
+                        steps.push(step(P_TYPES, format!("ALTER DOMAIN {dk} ADD CONSTRAINT {} {check};", q(cname))));
+                    }
+                }
+                out.push(change("domain", "Domains", &name, ChangeKind::Changed, destructive, steps, Some(domain_ddl(k, old)), Some(domain_ddl(k, d))));
+            }
+        }
+    }
+    for (k, d) in target.domains.iter().filter(|(k, _)| !source.domains.contains_key(*k)) {
+        let steps = vec![step(P_DROP_OTHER, format!("DROP DOMAIN {};", qk(k)))];
+        out.push(change("domain", "Domains", &format!("{}.{}", k.0, k.1), ChangeKind::Removed, true, steps, Some(domain_ddl(k, d)), None));
+    }
 
     for (k, labels) in &source.enums {
         let name = format!("{}.{}", k.0, k.1);
@@ -401,7 +687,12 @@ fn compare(source: &Model, target: &Model) -> Vec<Change> {
         let mut destructive = false;
         let old = target.tables.get(k);
         match old {
-            None => steps.push(step(P_TABLES, create_table(&t, new))),
+            // Parents before their partitions.
+            None => steps.push(Step { phase: P_TABLES, order: u32::from(new.partition_of.is_some()), sql: create_table(&t, new) }),
+            Some(old) if old.partition_by != new.partition_by || old.partition_of != new.partition_of => {
+                destructive = true;
+                steps.push(step(P_TABLES, format!("-- {t}: partitioning changed; this needs a hand-written migration (new table, copy, swap).")));
+            }
             Some(old) => {
                 for c in &new.columns {
                     match old.columns.iter().find(|o| o.name == c.name) {
@@ -449,7 +740,9 @@ fn compare(source: &Model, target: &Model) -> Vec<Change> {
     }
     for k in target.tables.keys().filter(|k| !source.tables.contains_key(*k)) {
         triggers.push((out.len(), k.clone()));
-        let steps = vec![step(P_DROP_TABLES, format!("DROP TABLE {};", qk(k)))];
+        // Partitions before their parent (dropping the parent would take them along).
+        let order = if target.tables[k].partition_of.is_some() { 0 } else { 1 };
+        let steps = vec![Step { phase: P_DROP_TABLES, order, sql: format!("DROP TABLE IF EXISTS {};", qk(k)) }];
         out.push(change("table", "Tables", &format!("{}.{}", k.0, k.1), ChangeKind::Removed, true, steps, Some(table_ddl(k, &target.tables[k])), None));
     }
 
@@ -467,25 +760,62 @@ fn compare(source: &Model, target: &Model) -> Vec<Change> {
         out.push(change("function", "Functions", &format!("{}.{}", k.0, k.1), ChangeKind::Removed, true, steps, Some(f.def.clone()), None));
     }
 
+    // Recreating a view also recreates what CASCADE took with it: its triggers, grants and comments.
     let create_view = |k: &Key| {
         let v = &source.views[k];
-        Step { phase: P_VIEWS, order: v.oid, sql: view_ddl(k, v) }
+        let mut steps = vec![Step { phase: P_VIEWS, order: v.oid, sql: view_ddl(k, v) }];
+        for ((s, t, _), def) in &source.triggers {
+            if *s == k.0 && *t == k.1 {
+                steps.push(step(P_TRIGGERS, def.clone()));
+            }
+        }
+        let names = [format!("TABLE {}", qk(k)), format!("VIEW {}", qk(k)), format!("MATERIALIZED VIEW {}", qk(k))];
+        for g in source.grants.iter().filter(|g| names.contains(&g.object)) {
+            steps.push(step(P_GRANTS, grant_sql(g, false)));
+        }
+        for (obj, text) in source.comments.iter().filter(|(o, _)| names.contains(o) || o.starts_with(&format!("COLUMN {}.", qk(k)))) {
+            steps.push(step(P_GRANTS, comment_sql(obj, Some(text))));
+        }
+        steps
     };
-    let drop_view = |k: &Key| step(P_DROP, format!("DROP VIEW IF EXISTS {} CASCADE;", qk(k)));
+    let drop_view = |k: &Key, v: &View| step(P_DROP, view_drop(k, v));
+    // Views this diff (re)creates; their triggers, grants and comments travel with them.
+    let mut rebuilt: BTreeSet<Key> = BTreeSet::new();
     for (k, v) in &source.views {
         let name = format!("{}.{}", k.0, k.1);
         match target.views.get(k) {
-            None => out.push(change("view", "Views", &name, ChangeKind::Added, false, vec![create_view(k)], None, Some(view_ddl(k, v)))),
-            Some(old) if old.def == v.def => {}
+            None => {
+                rebuilt.insert(k.clone());
+                out.push(change("view", "Views", &name, ChangeKind::Added, false, create_view(k), None, Some(view_ddl(k, v))));
+            }
+            Some(old) if old == v || (old.def == v.def && old.materialized == v.materialized && old.indexes == v.indexes) => {}
+            Some(old) if old.def == v.def && old.materialized == v.materialized => {
+                // Only a materialized view's indexes changed.
+                let mut steps = Vec::new();
+                for (iname, odef) in &old.indexes {
+                    if v.indexes.get(iname) != Some(odef) {
+                        steps.push(step(P_DROP, format!("DROP INDEX {}.{};", q(&k.0), q(iname))));
+                    }
+                }
+                for (iname, def) in &v.indexes {
+                    if old.indexes.get(iname) != Some(def) {
+                        steps.push(step(P_KEYS, format!("{def};")));
+                    }
+                }
+                out.push(change("view", "Views", &name, ChangeKind::Changed, false, steps, Some(view_ddl(k, old)), Some(view_ddl(k, v))));
+            }
             Some(old) => {
                 triggers.push((out.len(), k.clone()));
-                out.push(change("view", "Views", &name, ChangeKind::Changed, false, vec![drop_view(k), create_view(k)], Some(view_ddl(k, old)), Some(view_ddl(k, v))));
+                rebuilt.insert(k.clone());
+                let mut steps = vec![drop_view(k, old)];
+                steps.extend(create_view(k));
+                out.push(change("view", "Views", &name, ChangeKind::Changed, false, steps, Some(view_ddl(k, old)), Some(view_ddl(k, v))));
             }
         }
     }
     for (k, v) in target.views.iter().filter(|(k, _)| !source.views.contains_key(*k)) {
         triggers.push((out.len(), k.clone()));
-        out.push(change("view", "Views", &format!("{}.{}", k.0, k.1), ChangeKind::Removed, false, vec![drop_view(k)], Some(view_ddl(k, v)), None));
+        out.push(change("view", "Views", &format!("{}.{}", k.0, k.1), ChangeKind::Removed, false, vec![drop_view(k, v)], Some(view_ddl(k, v)), None));
     }
 
     // Views reading (directly or through other views) from a changed relation are dropped with
@@ -503,12 +833,89 @@ fn compare(source: &Model, target: &Model) -> Vec<Change> {
         for v in affected {
             let own_change = out.iter().any(|c| c.id == format!("view:{}.{}", v.0, v.1));
             if source.views.contains_key(&v) && !own_change {
-                out[i].steps.push(drop_view(&v));
-                out[i].steps.push(create_view(&v));
+                rebuilt.insert(v.clone());
+                out[i].steps.push(drop_view(&v, &target.views[&v]));
+                out[i].steps.extend(create_view(&v));
                 out[i].steps.sort_by_key(|s| (s.phase, s.order));
                 out[i].sql = joined(&out[i].steps);
             }
         }
+    }
+    let views_rebuilt = rebuilt;
+
+    for (key, def) in &source.triggers {
+        let (s, t, name) = key;
+        let on = format!("{}.{}", q(s), q(t));
+        let label = format!("{s}.{t}.{name}");
+        // A rebuilt view gets its triggers back with it.
+        if views_rebuilt.contains(&(s.clone(), t.clone())) {
+            continue;
+        }
+        match target.triggers.get(key) {
+            None => out.push(change("trigger", "Triggers", &label, ChangeKind::Added, false, vec![step(P_TRIGGERS, def.clone())], None, Some(def.clone()))),
+            Some(old) if old == def => {}
+            Some(old) => {
+                let steps = vec![step(P_DROP, format!("DROP TRIGGER IF EXISTS {} ON {on};", q(name))), step(P_TRIGGERS, def.clone())];
+                out.push(change("trigger", "Triggers", &label, ChangeKind::Changed, false, steps, Some(old.clone()), Some(def.clone())));
+            }
+        }
+    }
+    for (key, def) in target.triggers.iter().filter(|(k, _)| !source.triggers.contains_key(*k)) {
+        let (s, t, name) = key;
+        // Dropping the table or view drops its triggers.
+        if !source.tables.contains_key(&(s.clone(), t.clone())) && !source.views.contains_key(&(s.clone(), t.clone())) {
+            continue;
+        }
+        let steps = vec![step(P_DROP, format!("DROP TRIGGER IF EXISTS {} ON {}.{};", q(name), q(s), q(t)))];
+        out.push(change("trigger", "Triggers", &format!("{s}.{t}.{name}"), ChangeKind::Removed, false, steps, Some(def.clone()), None));
+    }
+
+    let is_rebuilt_view = |object: &str| {
+        views_rebuilt.iter().any(|k| {
+            let n = qk(k);
+            object == format!("TABLE {n}") || object == format!("VIEW {n}") || object == format!("MATERIALIZED VIEW {n}") || object.starts_with(&format!("COLUMN {n}."))
+        })
+    };
+    let mut grant_objects: BTreeSet<&String> = source.grants.iter().map(|g| &g.object).collect();
+    grant_objects.extend(target.grants.iter().map(|g| &g.object));
+    for object in grant_objects {
+        if is_rebuilt_view(object) {
+            continue;
+        }
+        let new: BTreeSet<&Grant> = source.grants.iter().filter(|g| &g.object == object).collect();
+        let old: BTreeSet<&Grant> = target.grants.iter().filter(|g| &g.object == object).collect();
+        if new == old {
+            continue;
+        }
+        let mut steps: Vec<Step> = Vec::new();
+        // Revokes only where the object stays; dropping it removes its grants.
+        if object_exists(source, object) {
+            steps.extend(old.difference(&new).map(|g| step(P_GRANTS, grant_sql(g, true))));
+        }
+        steps.extend(new.difference(&old).map(|g| step(P_GRANTS, grant_sql(g, false))));
+        if steps.is_empty() {
+            continue;
+        }
+        let show = |set: &BTreeSet<&Grant>| set.iter().map(|g| grant_sql(g, false)).collect::<Vec<_>>().join("\n");
+        let before = (!old.is_empty()).then(|| show(&old));
+        let after = (!new.is_empty()).then(|| show(&new));
+        out.push(change("grant", "Grants", object, ChangeKind::Changed, false, steps, before, after));
+    }
+
+    let mut comment_objects: BTreeSet<&String> = source.comments.keys().collect();
+    comment_objects.extend(target.comments.keys());
+    for object in comment_objects {
+        let (new, old) = (source.comments.get(object), target.comments.get(object));
+        if new == old || is_rebuilt_view(object) || (new.is_none() && !object_exists(source, object)) {
+            continue;
+        }
+        let steps = vec![step(P_GRANTS, comment_sql(object, new))];
+        let kind = match (old, new) {
+            (None, _) => ChangeKind::Added,
+            (_, None) => ChangeKind::Removed,
+            _ => ChangeKind::Changed,
+        };
+        out.push(change("comment", "Comments", object, kind, false, steps, old.map(|t| comment_sql(object, Some(t))), new.map(|t| comment_sql(object, Some(t)))));
     }
     out
 }
@@ -593,8 +1000,15 @@ pub(crate) async fn model_of(cfg: &Config, c: &Client) -> Result<Model> {
     introspect(c, &cfg.project.schemas, &cfg.project.history_table).await
 }
 
+#[derive(Debug, Serialize)]
+pub struct Comparison {
+    pub changes: Vec<Change>,
+    /// objects that exist but are not compared, e.g. "rules: 2 in dev, 0 in the scripts"
+    pub not_compared: Vec<String>,
+}
+
 /// Rebuilds the scratch database from the project's migrations, then diffs dev against it.
-pub async fn dev_vs_migrations(cfg: &Config, dev: Option<&str>, scratch: Option<&str>, log: Log<'_>) -> Result<Vec<Change>> {
+pub async fn dev_vs_migrations(cfg: &Config, dev: Option<&str>, scratch: Option<&str>, log: Log<'_>) -> Result<Comparison> {
     let (dev_name, dev_env) = cfg.pick_role(dev, Role::Dev)?;
     let (scratch_name, scratch_env) = scratch_env(cfg, scratch)?;
     if dev_name == scratch_name {
@@ -603,9 +1017,14 @@ pub async fn dev_vs_migrations(cfg: &Config, dev: Option<&str>, scratch: Option<
     let s = rebuild_scratch(cfg, &scratch_name, scratch_env, None, log).await?;
     log(Level::Info, &format!("Comparing '{dev_name}' with the migrations"));
     let d = db::connect(&dev_name, dev_env).await?;
-    let changes = diff(&model_of(cfg, &d).await?, &model_of(cfg, &s).await?);
+    let (source, target) = (model_of(cfg, &d).await?, model_of(cfg, &s).await?);
+    let changes = diff(&source, &target);
+    let not_compared = not_compared(&source, &target, &dev_name, "the scripts");
     log(Level::Info, &format!("{} difference(s)", changes.len()));
-    Ok(changes)
+    for n in &not_compared {
+        log(Level::Warn, &format!("not compared: {n}"));
+    }
+    Ok(Comparison { changes, not_compared })
 }
 
 /* ---------- generate ---------- */
@@ -813,7 +1232,7 @@ mod tests {
 
     #[test]
     fn views_are_rebuilt_when_what_they_read_changes() {
-        let v = |oid, def: &str| View { oid, def: def.into() };
+        let v = |oid, def: &str| View { oid, def: def.into(), materialized: false, indexes: BTreeMap::new() };
         let t_new = table(vec![col("id", "bigint", true, None), col("total", "numeric(12,2)", false, None)]);
         let t_old = table(vec![col("id", "bigint", true, None), col("total", "numeric(10,2)", false, None)]);
         let mut dev = tables(vec![("orders", t_new)]);
