@@ -113,15 +113,25 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-/// CRC32 over the script's lines without line terminators, BOM stripped, so CRLF and LF
-/// checkouts of the same file match. UNVERIFIED for Flyway compatibility: pin with
-/// black-box fixtures from the Apache-2.0 OSS CLI before compat mode ships.
+/// CRC32 over the script's lines without line terminators (`\n`, `\r\n` or a lone `\r`), BOM
+/// stripped, so checkouts with different line endings match. Matches the checksums Flyway stores:
+/// pinned by black-box fixtures in tests/fixtures/checksum (tests/checksum.rs).
 pub fn checksum(bytes: &[u8]) -> i32 {
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
     let mut h = crc32fast::Hasher::new();
-    for line in bytes.split(|b| *b == b'\n') {
-        h.update(line.strip_suffix(b"\r").unwrap_or(line));
+    let mut start = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\n' || bytes[i] == b'\r' {
+            h.update(&bytes[start..i]);
+            if bytes[i] == b'\r' && bytes.get(i + 1) == Some(&b'\n') {
+                i += 1;
+            }
+            start = i + 1;
+        }
+        i += 1;
     }
+    h.update(&bytes[start..]);
     h.finalize() as i32
 }
 

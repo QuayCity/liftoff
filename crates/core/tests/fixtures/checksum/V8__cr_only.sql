@@ -1,0 +1,1 @@
+create table t8 (id int);select 1;
