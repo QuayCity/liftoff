@@ -2,16 +2,18 @@ import '@fontsource-variable/inter'
 import '@fontsource-variable/jetbrains-mono'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import './index.css'
+import { App } from './App'
 import { DesignPage } from './design/DesignPage'
+import './index.css'
+import { OverlayProvider } from './ui/overlays'
 
-// ?theme=dark|light forces a theme (used for design screenshots).
-const forced = new URLSearchParams(location.search).get('theme')
+// ?theme=dark|light forces a theme (screenshots); ?design shows the component sheet.
+const params = new URLSearchParams(location.search)
+const forced = params.get('theme')
 if (forced) document.documentElement.dataset.theme = forced
 
-// ponytail: only the /design page exists until the app shell and routing are added.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <DesignPage />
+    {params.has('design') ? <DesignPage /> : <OverlayProvider><App /></OverlayProvider>}
   </StrictMode>,
 )

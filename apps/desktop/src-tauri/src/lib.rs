@@ -1,0 +1,268 @@
+//! Tauri commands: each maps 1:1 to a liftoff-core function and returns the same JSON
+//! shape as `liftoff --output-type=json` (architecture.md "API").
+
+use liftoff_core::config::{self, Config, Environment, Role};
+use liftoff_core::error::ErrorReport;
+use liftoff_core::runner::{self, Level, MigrateOptions};
+use liftoff_core::{db, diff, license, Error};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Emitter, Manager};
+
+type R<T> = Result<T, ErrorReport>;
+
+fn rep(e: Error) -> ErrorReport {
+    e.report()
+}
+
+#[derive(Serialize)]
+struct EnvView {
+    name: String,
+    role: Role,
+    /// the URL with any password removed
+    url: String,
+    user: Option<String>,
+    has_password: bool,
+    allow_clean: bool,
+}
+
+#[derive(Serialize)]
+struct ProjectView {
+    root: PathBuf,
+    name: String,
+    engine: String,
+    schemas: Vec<String>,
+    environments: Vec<EnvView>,
+    license: Option<license::Status>,
+    license_error: Option<String>,
+}
+
+fn redact(url: &str) -> String {
+    // postgres://user:secret@host -> postgres://user@host
+    match (url.find("://"), url.rfind('@')) {
+        (Some(s), Some(at)) if at > s => {
+            let creds = &url[s + 3..at];
+            let user = creds.split(':').next().unwrap_or("");
+            format!("{}{}{}", &url[..s + 3], user, &url[at..])
+        }
+        _ => url.to_string(),
+    }
+}
+
+fn view(cfg: &Config) -> ProjectView {
+    let (license, license_error) = match license::status(None, Some(&cfg.root)) {
+        Ok(s) => (s, None),
+        Err(e) => (None, Some(e.to_string())),
+    };
+    ProjectView {
+        root: cfg.root.clone(),
+        name: cfg.project.name.clone(),
+        engine: cfg.project.engine.clone(),
+        schemas: cfg.project.schemas.clone(),
+        environments: cfg
+            .environments
+            .iter()
+            .map(|(n, e)| EnvView {
+                name: n.clone(),
+                role: e.role,
+                url: redact(&e.url),
+                user: e.user.clone(),
+                has_password: e.password.is_some() || redact(&e.url) != e.url,
+                allow_clean: e.allow_clean,
+            })
+            .collect(),
+        license,
+        license_error,
+    }
+}
+
+fn load(path: &str) -> R<Config> {
+    Config::load(Path::new(path)).map_err(rep)
+}
+
+/* ---------- recent projects: one JSON file in the app config dir ---------- */
+
+#[derive(Serialize, Deserialize, Clone)]
+struct Recent {
+    name: String,
+    path: String,
+    exists: bool,
+}
+
+fn recent_file(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("recent.json"))
+}
+
+fn remember(app: &AppHandle, name: &str, path: &Path) {
+    let Some(file) = recent_file(app) else { return };
+    let mut list: Vec<Recent> = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let path = path.display().to_string();
+    list.retain(|r| r.path != path);
+    list.insert(0, Recent { name: name.into(), path, exists: true });
+    list.truncate(10);
+    let _ = std::fs::create_dir_all(file.parent().unwrap());
+    let _ = std::fs::write(&file, serde_json::to_vec_pretty(&list).unwrap());
+}
+
+#[tauri::command]
+fn recent_projects(app: AppHandle) -> Vec<Recent> {
+    let Some(file) = recent_file(&app) else { return vec![] };
+    let list: Vec<Recent> = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    list.into_iter().map(|r| Recent { exists: Path::new(&r.path).join(config::PROJECT_FILE).exists(), ..r }).collect()
+}
+
+#[tauri::command]
+fn recent_forget(app: AppHandle, path: String) {
+    let Some(file) = recent_file(&app) else { return };
+    let mut list: Vec<Recent> = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    list.retain(|r| r.path != path);
+    let _ = std::fs::write(&file, serde_json::to_vec_pretty(&list).unwrap());
+}
+
+/* ---------- F01: projects and environments ---------- */
+
+#[tauri::command]
+fn project_init(app: AppHandle, path: String, name: String) -> R<ProjectView> {
+    config::init(Path::new(&path), &name, "postgresql").map_err(rep)?;
+    project_open(app, path)
+}
+
+#[tauri::command]
+fn project_open(app: AppHandle, path: String) -> R<ProjectView> {
+    let cfg = load(&path)?;
+    remember(&app, &cfg.project.name, &cfg.root);
+    Ok(view(&cfg))
+}
+
+#[derive(Deserialize)]
+struct EnvInput {
+    url: String,
+    user: Option<String>,
+    password: Option<String>,
+    role: Role,
+    allow_clean: bool,
+}
+
+impl EnvInput {
+    fn into_env(self) -> Environment {
+        let blank = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
+        Environment { url: self.url.trim().to_string(), user: blank(self.user), password: blank(self.password), role: self.role, allow_clean: self.allow_clean }
+    }
+}
+
+#[tauri::command]
+fn env_save(path: String, name: String, env: EnvInput, shared: bool) -> R<ProjectView> {
+    let mut env = env.into_env();
+    if env.password.is_none() {
+        // Editing without retyping the password keeps the stored one.
+        if let Ok(cfg) = load(&path) && let Some(old) = cfg.environments.get(&name) {
+            env.password = old.password.clone();
+        }
+    }
+    config::save_environment(Path::new(&path), &name, &env, shared).map_err(rep)?;
+    Ok(view(&load(&path)?))
+}
+
+#[tauri::command]
+async fn env_test(path: String, name: String) -> R<db::ServerInfo> {
+    let cfg = load(&path)?;
+    let c = db::connect(&name, cfg.env(&name).map_err(rep)?).await.map_err(rep)?;
+    db::server_info(&c).await.map_err(rep)
+}
+
+/// Test from the connection dialog before anything is saved.
+#[tauri::command]
+async fn env_test_draft(env: EnvInput) -> R<db::ServerInfo> {
+    let c = db::connect("new environment", &env.into_env()).await.map_err(rep)?;
+    db::server_info(&c).await.map_err(rep)
+}
+
+/* ---------- F04: run ---------- */
+
+#[derive(Clone, Serialize)]
+struct LogEvent {
+    level: Level,
+    message: String,
+}
+
+#[tauri::command]
+async fn migrations_info(path: String, env: String) -> R<Vec<runner::MigrationInfo>> {
+    runner::info(&load(&path)?, Some(&env)).await.map_err(rep)
+}
+
+#[tauri::command]
+async fn migrate(app: AppHandle, path: String, env: String, out_of_order: bool) -> R<runner::MigrateResult> {
+    let cfg = load(&path)?;
+    let log = move |level: Level, msg: &str| {
+        let _ = app.emit("run-log", LogEvent { level, message: msg.to_string() });
+    };
+    runner::migrate(&cfg, Some(&env), MigrateOptions { out_of_order }, &log).await.map_err(rep)
+}
+
+/* ---------- F03: changes (Pro) ---------- */
+
+#[tauri::command]
+async fn changes_diff(app: AppHandle, path: String) -> R<Vec<diff::Change>> {
+    let cfg = load(&path)?;
+    license::require("diff", None, Some(&cfg.root)).map_err(rep)?;
+    let log = move |level: Level, msg: &str| {
+        let _ = app.emit("run-log", LogEvent { level, message: msg.to_string() });
+    };
+    diff::dev_vs_migrations(&cfg, None, None, &log).await.map_err(rep)
+}
+
+#[tauri::command]
+fn migration_generate(path: String, changes: Vec<diff::Change>, description: String) -> R<diff::Generated> {
+    let cfg = load(&path)?;
+    license::require("generate", None, Some(&cfg.root)).map_err(rep)?;
+    diff::generate(&cfg, &changes, &description).map_err(rep)
+}
+
+#[tauri::command]
+fn migration_save(path: String, file_name: String, sql: String) -> R<PathBuf> {
+    diff::save(&load(&path)?, &file_name, &sql).map_err(rep)
+}
+
+/* ---------- licence ---------- */
+
+#[tauri::command]
+fn license_activate(text: String) -> R<license::Status> {
+    let (lic, grace) = license::verify(&text, license::today()).map_err(rep)?;
+    let file = license::default_file().ok_or_else(|| ErrorReport { code: "LIFTOFF_LICENSE", exit_code: 20, message: "no config folder to store the licence in".into() })?;
+    std::fs::create_dir_all(file.parent().unwrap()).map_err(|e| rep(e.into()))?;
+    std::fs::write(&file, text.trim()).map_err(|e| rep(e.into()))?;
+    Ok(license::Status { license: lic, grace_days_left: grace, source: file.display().to_string() })
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            recent_projects,
+            recent_forget,
+            project_init,
+            project_open,
+            env_save,
+            env_test,
+            env_test_draft,
+            migrations_info,
+            migrate,
+            changes_diff,
+            migration_generate,
+            migration_save,
+            license_activate,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running LiftOff");
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn redacts_passwords() {
+        assert_eq!(super::redact("postgres://me:s3cret@db:5432/x"), "postgres://me@db:5432/x");
+        assert_eq!(super::redact("postgres://db/x"), "postgres://db/x");
+        assert_eq!(super::redact("host=db dbname=x"), "host=db dbname=x");
+    }
+}

@@ -159,9 +159,11 @@ export function CommandBar({ commands, licensed, env, running, onRun, onCancel }
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <Select aria-label="Command" value={id} onChange={(e) => setId(e.target.value)} className="w-48" disabled={running}>
-          {commands.map((c) => <option key={c.id} value={c.id}>{c.label}{c.paid ? ' (Pro)' : ''}</option>)}
-        </Select>
+        <div className="w-48">
+          <Select aria-label="Command" value={id} onChange={(e) => setId(e.target.value)} disabled={running}>
+            {commands.map((c) => <option key={c.id} value={c.id}>{c.label}{c.paid ? ' (Pro)' : ''}</option>)}
+          </Select>
+        </div>
         <Button variant={cmd.destructive ? 'danger' : 'primary'} icon={Play} loading={running} disabled={locked} onClick={() => onRun(cmd)}>
           {cmd.label}
         </Button>
@@ -235,7 +237,7 @@ export function EnvironmentColumn({ env, selected, onOpen, onRun }: { env: Env; 
   return (
     <section
       aria-label={`${env.name} environment`}
-      className={cx('flex w-64 shrink-0 flex-col gap-3 rounded-lg border bg-surface p-4 shadow-card', selected ? 'border-accent' : 'border-border')}
+      className={cx('flex w-60 shrink-0 flex-col gap-3 rounded-lg border bg-surface p-4 shadow-card', selected ? 'border-accent' : 'border-border')}
     >
       <header className="flex items-center justify-between">
         <button onClick={onOpen} className="text-lg hover:underline">{env.name}</button>
@@ -243,7 +245,7 @@ export function EnvironmentColumn({ env, selected, onOpen, onRun }: { env: Env; 
       </header>
       <p className="flex items-center gap-2 text-sm text-muted"><span aria-hidden className={cx('size-2 rounded-pill', dot)} />{statusWord}</p>
       {env.status === 'unreachable' ? (
-        <InlineAlert tone="danger" title="Can't connect">Check the host and credentials in Settings.</InlineAlert>
+        <InlineAlert tone="danger" title="Can't connect">Open it and use Edit to check the host and credentials.</InlineAlert>
       ) : (
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
           <dt className="text-muted">Pending</dt>

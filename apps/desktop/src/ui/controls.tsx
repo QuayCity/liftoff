@@ -158,14 +158,14 @@ export function Switch({ checked, onChange, label }: { checked: boolean; onChang
 
 export function RadioGroup<T extends string>({ name, value, onChange, options, legend }: {
   name: string; value: T; onChange: (v: T) => void; legend: string
-  options: { value: T; label: string; help?: string }[]
+  options: { value: T; label: string; help?: string; disabled?: boolean }[]
 }) {
   return (
     <fieldset className="flex flex-col gap-2">
       <legend className="mb-1 text-sm font-medium">{legend}</legend>
       {options.map((o) => (
-        <label key={o.value} className="flex cursor-pointer items-start gap-2 text-sm">
-          <input type="radio" name={name} value={o.value} checked={value === o.value} onChange={() => onChange(o.value)} className="mt-0.5 size-4 accent-accent" />
+        <label key={o.value} className={cx('flex items-start gap-2 text-sm', o.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer')}>
+          <input type="radio" name={name} value={o.value} checked={value === o.value} disabled={o.disabled} onChange={() => onChange(o.value)} className="mt-0.5 size-4 accent-accent" />
           <span>
             {o.label}
             {o.help && <span className="block text-xs font-normal text-muted">{o.help}</span>}

@@ -7,7 +7,7 @@ use crate::db::{self, quote_ident as q};
 use crate::error::{config, Result};
 use crate::migration;
 use crate::runner::{self, Level, Log, MigrateOptions};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tokio_postgres::Client;
 
@@ -23,7 +23,7 @@ pub struct Column {
 
 pub type Model = BTreeMap<(String, String), Vec<Column>>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChangeKind {
     Added,
@@ -31,7 +31,7 @@ pub enum ChangeKind {
     Removed,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Change {
     pub id: String,
     pub object_type: String,
