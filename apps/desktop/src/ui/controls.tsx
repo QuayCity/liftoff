@@ -118,11 +118,16 @@ export function Textarea({ className, ...p }: TextareaHTMLAttributes<HTMLTextAre
 
 type CheckState = boolean | 'indeterminate'
 
-export function Checkbox({ checked, onChange, label, disabled, id, tabIndex }: { checked: CheckState; onChange: (v: boolean) => void; label?: ReactNode; disabled?: boolean; id?: string; tabIndex?: number }) {
+export function Checkbox({ checked, onChange, label, disabled, id, tabIndex, ariaLabel }: {
+  checked: CheckState; onChange: (v: boolean) => void; label?: ReactNode; disabled?: boolean; id?: string; tabIndex?: number
+  /** name for a checkbox without a visible label */
+  ariaLabel?: string
+}) {
   const box = (
     <RCheckbox.Root
       id={id}
       tabIndex={tabIndex}
+      aria-label={ariaLabel}
       checked={checked}
       disabled={disabled}
       onCheckedChange={(v) => onChange(v === true)}

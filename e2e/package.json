@@ -1,0 +1,13 @@
+{
+  "name": "liftoff-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:ui": "playwright test --project=ui",
+    "test:app": "playwright test --project=app"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.64.0"
+  }
+}

@@ -1,5 +1,4 @@
 import { ChevronDown, GitBranch, Search, Settings } from 'lucide-react'
-import { Tabs } from 'radix-ui'
 import type { ReactNode } from 'react'
 import { IconButton, cx } from './controls'
 import { Kbd, Spinner } from './display'
@@ -19,19 +18,22 @@ export function TitleBar({ project, workspace, tabsActive = true, onWorkspace, o
         trigger={<button className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm font-semibold hover:bg-surface-sunken">{project}<ChevronDown aria-hidden className="size-3.5 text-muted" /></button>}
         items={[{ label: 'Close project', onSelect: () => onClose?.() }]}
       />
-      <Tabs.Root value={tabsActive ? workspace : ''} onValueChange={(v) => onWorkspace(v as Workspace)}>
-        <Tabs.List aria-label="Workspaces" className="flex h-10 items-stretch">
-          {workspaces.map((w) => (
-            <Tabs.Trigger
+      {/* Navigation, not tabs: each workspace is its own view, so there are no tab panels to point at. */}
+      <nav aria-label="Workspaces" className="flex h-10 items-stretch">
+        {workspaces.map((w) => {
+          const current = tabsActive && w === workspace
+          return (
+            <button
               key={w}
-              value={w}
-              className="border-b-2 border-transparent px-3 text-sm text-muted hover:text-fg data-[state=active]:border-accent data-[state=active]:text-fg"
+              aria-current={current ? 'page' : undefined}
+              onClick={() => onWorkspace(w)}
+              className={cx('border-b-2 px-3 text-sm hover:text-fg', current ? 'border-accent text-fg' : 'border-transparent text-muted')}
             >
               {w}
-            </Tabs.Trigger>
-          ))}
-        </Tabs.List>
-      </Tabs.Root>
+            </button>
+          )
+        })}
+      </nav>
       <div data-tauri-drag-region className="flex-1 self-stretch" />
       {onPalette && (
         <button onClick={onPalette} className="inline-flex h-7 items-center gap-2 rounded-md border border-border px-2 text-sm text-muted hover:bg-surface-sunken">

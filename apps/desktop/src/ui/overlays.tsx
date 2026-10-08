@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react'
 import { AlertDialog, Dialog as RDialog, DropdownMenu, Toast as RToast, Tooltip as RTooltip } from 'radix-ui'
-import { createContext, useCallback, useContext, useState, type ReactElement, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { Button, Input, cx } from './controls'
 
 export function Tooltip({ label, children }: { label: string; children: ReactElement }) {
@@ -16,6 +16,20 @@ export function Tooltip({ label, children }: { label: string; children: ReactEle
   )
 }
 
+/** Remembers the element focused when `open` turns true and hands focus back to it on close. */
+function useReturnFocus(open: boolean) {
+  const opener = useRef<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    if (open) opener.current = document.activeElement as HTMLElement | null
+  }, [open])
+  return (e: Event) => {
+    if (opener.current?.isConnected) {
+      e.preventDefault()
+      opener.current.focus()
+    }
+  }
+}
+
 const dialogWidth = { sm: 'w-[420px]', md: 'w-[560px]', lg: 'w-[760px]' }
 const overlay = 'fixed inset-0 z-40 bg-fg/40'
 const panel = 'fixed top-1/2 left-1/2 z-50 max-h-[85vh] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-lg border border-border bg-surface p-5 shadow-pop'
@@ -25,6 +39,7 @@ export function Dialog({ open, onOpenChange, title, description, size = 'md', di
   open: boolean; onOpenChange: (o: boolean) => void; title: string; description?: string
   size?: keyof typeof dialogWidth; dirty?: boolean; submitting?: boolean; footer: ReactNode; children: ReactNode
 }) {
+  const returnFocus = useReturnFocus(open)
   const close = (o: boolean) => {
     if (o) return onOpenChange(true)
     if (submitting) return
@@ -35,7 +50,7 @@ export function Dialog({ open, onOpenChange, title, description, size = 'md', di
     <RDialog.Root open={open} onOpenChange={close}>
       <RDialog.Portal>
         <RDialog.Overlay className={overlay} />
-        <RDialog.Content className={cx(panel, dialogWidth[size])} {...(!description && { 'aria-describedby': undefined })}>
+        <RDialog.Content className={cx(panel, dialogWidth[size])} onCloseAutoFocus={returnFocus} {...(!description && { 'aria-describedby': undefined })}>
           <div className="mb-4 flex items-start justify-between gap-4">
             <div>
               <RDialog.Title className="text-lg">{title}</RDialog.Title>
@@ -59,11 +74,12 @@ export function ConfirmDestructive({ open, onOpenChange, title, envName, consequ
   consequences: string[]; action: string; running?: boolean; onConfirm: () => void
 }) {
   const [typed, setTyped] = useState('')
+  const returnFocus = useReturnFocus(open)
   return (
     <AlertDialog.Root open={open} onOpenChange={(o) => { if (!running) { setTyped(''); onOpenChange(o) } }}>
       <AlertDialog.Portal>
         <AlertDialog.Overlay className={overlay} />
-        <AlertDialog.Content className={cx(panel, dialogWidth.sm)}>
+        <AlertDialog.Content className={cx(panel, dialogWidth.sm)} onCloseAutoFocus={returnFocus}>
           <AlertDialog.Title className="flex items-center gap-2 text-lg text-danger">
             <AlertTriangle aria-hidden className="size-5" />{title}
           </AlertDialog.Title>

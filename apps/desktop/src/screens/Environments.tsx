@@ -66,6 +66,8 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
 
   /** Runs one operation on an environment with the log streaming in place; errors land in the log. */
   const op = async (name: string, work: () => Promise<string | null>) => {
+    // A second click before React re-renders must not start a second run.
+    if (runningRef.current) return
     runningRef.current = name
     setRunning(name)
     setSelected(name)
@@ -151,7 +153,7 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
     <div className="flex flex-col gap-6 p-6">
       <div className="flex gap-4 overflow-x-auto pb-1">
         {envs.map((e) => (
-          <EnvironmentColumn key={e.name} env={column(e)} selected={e.name === selected} onOpen={() => setSelected(e.name)} onRun={() => run(e.name)} />
+          <EnvironmentColumn key={e.name} env={column(e)} selected={e.name === selected} busy={running !== null} onOpen={() => setSelected(e.name)} onRun={() => run(e.name)} />
         ))}
         <button
           onClick={() => setDialog({})}

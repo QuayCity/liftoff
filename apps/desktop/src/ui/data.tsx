@@ -116,10 +116,10 @@ export function ChangeList({ changes, selected, onSelectedChange, activeId, onAc
           const Chevron = open ? ChevronDown : ChevronRight
           const gs = groupState(items)
           return (
-            <div key={n.group} {...common} aria-expanded={open} aria-checked={gs === 'indeterminate' ? 'mixed' : gs}
+            <div key={n.group} {...common} aria-label={`${n.group}, ${items.length} change${items.length === 1 ? '' : 's'}`} aria-expanded={open} aria-checked={gs === 'indeterminate' ? 'mixed' : gs}
               className="flex h-8 items-center gap-2 bg-surface-sunken px-2 font-semibold">
               <button tabIndex={-1} aria-hidden onClick={() => setCollapse(n.group, open)} className="text-muted"><Chevron className="size-4" /></button>
-              <Checkbox tabIndex={-1} checked={gs} onChange={(on) => toggle(items.map((c) => c.id), on)} />
+              <Checkbox tabIndex={-1} ariaLabel={`Include all ${n.group}`} checked={gs} onChange={(on) => toggle(items.map((c) => c.id), on)} />
               {n.group}<span className="font-normal text-muted">{items.length}</span>
             </div>
           )
@@ -127,10 +127,10 @@ export function ChangeList({ changes, selected, onSelectedChange, activeId, onAc
         const c = n.change
         const [Icon, tone, word] = kindIcon[c.kind]
         return (
-          <div key={c.id} {...common} aria-selected={c.id === activeId} aria-checked={selected.has(c.id)}
+          <div key={c.id} {...common} aria-label={`${word} ${c.name}${c.destructive ? ', may lose data' : ''}`} aria-selected={c.id === activeId} aria-checked={selected.has(c.id)}
             onClick={() => onActivate(c)}
             className={cx('flex h-8 cursor-default items-center gap-2 pr-2 pl-8 hover:bg-surface-sunken', c.id === activeId && 'bg-accent-subtle hover:bg-accent-subtle')}>
-            <Checkbox tabIndex={-1} checked={selected.has(c.id)} onChange={(on) => toggle([c.id], on)} />
+            <Checkbox tabIndex={-1} ariaLabel={`Include ${c.name}`} checked={selected.has(c.id)} onChange={(on) => toggle([c.id], on)} />
             <Icon aria-label={word} className={cx('size-3.5 shrink-0', tone)} />
             <span className="truncate font-mono">{c.name}</span>
             {c.destructive && (
@@ -231,7 +231,7 @@ export type Env = {
   lastRun?: { when: string; at: string; failed?: boolean }; drift?: 'none' | 'detected'
 }
 
-export function EnvironmentColumn({ env, selected, onOpen, onRun }: { env: Env; selected?: boolean; onOpen: () => void; onRun: () => void }) {
+export function EnvironmentColumn({ env, selected, busy, onOpen, onRun }: { env: Env; selected?: boolean; busy?: boolean; onOpen: () => void; onRun: () => void }) {
   const dot = { ok: 'bg-success', unreachable: 'bg-danger', checking: 'bg-border-input' }[env.status]
   const statusWord = { ok: 'Connected', unreachable: 'Unreachable', checking: 'Checking…' }[env.status]
   return (
@@ -258,7 +258,7 @@ export function EnvironmentColumn({ env, selected, onOpen, onRun }: { env: Env; 
           <dd className={env.drift === 'detected' ? 'text-danger' : ''}>{env.drift === 'detected' ? 'Detected' : env.drift === 'none' ? 'None' : 'Not checked'}</dd>
         </dl>
       )}
-      <Button variant="primary" icon={Play} disabled={!env.pending || env.status !== 'ok'} onClick={onRun}>Run pending</Button>
+      <Button variant="primary" icon={Play} disabled={!env.pending || env.status !== 'ok' || busy} onClick={onRun}>Run pending</Button>
     </section>
   )
 }
