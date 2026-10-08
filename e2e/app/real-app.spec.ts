@@ -190,6 +190,25 @@ test('F07-N2 a database with tables but no history asks for a baseline instead o
   expect(psql('shop_test', "select type from liftoff_schema_history")).toBe('BASELINE')
 })
 
+test('F06-H1 commit the migration scripts with real git', async () => {
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: project, encoding: 'utf8' }).trim()
+  git('init', '-b', 'main')
+  git('config', 'user.name', 'E2E')
+  git('config', 'user.email', 'e2e@example.test')
+  git('config', 'commit.gpgsign', 'false')
+  fs.writeFileSync(path.join(project, 'scratch-notes.txt'), 'not for the commit\n')
+  await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Commit' }).click()
+  const files = page.getByRole('list', { name: 'Changed files' })
+  await expect(files.getByRole('checkbox', { name: 'Include migrations/V1__orders.sql' })).toBeChecked()
+  await expect(files.getByRole('checkbox', { name: 'Include scratch-notes.txt' })).not.toBeChecked()
+  await page.getByLabel('Commit message').fill('Add the first migrations')
+  await page.getByRole('button', { name: /^Commit \d+ files?$/ }).click()
+  await expect(page.getByText(/^Committed \d+ files? \([0-9a-f]+\)$/)).toBeVisible()
+  expect(git('log', '--format=%s')).toBe('Add the first migrations')
+  expect(git('show', '--name-only', '--format=', 'HEAD')).toContain('migrations/V1__orders.sql')
+  expect(git('status', '--porcelain')).toContain('scratch-notes.txt')
+})
+
 test('X-CONSOLE no console errors in the real app', async () => {
   checkConsole()
 })

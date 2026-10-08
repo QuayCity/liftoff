@@ -338,6 +338,33 @@ async fn scratch_create(path: String) -> R<ProjectView> {
     Ok(view(&load(&path)?))
 }
 
+/* ---------- S14: git ---------- */
+
+#[tauri::command]
+fn git_status(path: String) -> R<liftoff_core::git::Status> {
+    liftoff_core::git::status(Path::new(&path)).map_err(rep)
+}
+
+#[tauri::command]
+fn git_diff(path: String, file: String) -> R<String> {
+    liftoff_core::git::diff(Path::new(&path), &file).map_err(rep)
+}
+
+#[tauri::command]
+async fn git_commit(path: String, files: Vec<String>, message: String) -> R<String> {
+    liftoff_core::git::commit(Path::new(&path), &files, &message).map_err(rep)
+}
+
+#[tauri::command]
+async fn git_push(path: String) -> R<()> {
+    liftoff_core::git::push(Path::new(&path)).map_err(rep)
+}
+
+#[tauri::command]
+async fn git_pull(path: String) -> R<()> {
+    liftoff_core::git::pull(Path::new(&path)).map_err(rep)
+}
+
 /* ---------- licence ---------- */
 
 #[tauri::command]
@@ -377,6 +404,11 @@ pub fn run() {
             capture,
             scratch_create,
             report_save,
+            git_status,
+            git_diff,
+            git_commit,
+            git_push,
+            git_pull,
             changes_diff,
             migration_generate,
             migration_save,

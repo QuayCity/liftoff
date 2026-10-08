@@ -6,6 +6,7 @@ import { Home } from './screens/Home'
 import { Settings } from './screens/Settings'
 import { Later } from './screens/Later'
 import { Scripts } from './screens/Scripts'
+import { Commit } from './screens/Commit'
 import { StatusBar, TitleBar, workspaces, type Workspace } from './ui/shell'
 
 const params = new URLSearchParams(location.search)
@@ -60,7 +61,8 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
         {view === 'Changes' && <Changes project={project} onProject={onProject} onSettings={() => setView('Settings')} onEnvironments={() => setView('Environments')} />}
         {view === 'Settings' && <Settings project={project} onProject={onProject} />}
         {view === 'Scripts' && <Scripts project={project} />}
-        {(view === 'Commit' || view === 'Pipelines') && <Later what={view} />}
+        {view === 'Commit' && <Commit project={project} />}
+        {view === 'Pipelines' && <Later what={view} />}
       </main>
       <StatusBar path={project.root} engine={`PostgreSQL · ${project.schemas.join(', ')}`} licence={licence} />
     </div>

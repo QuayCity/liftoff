@@ -34,6 +34,7 @@ export type LogEvent = { level: 'info' | 'warn'; message: string }
 export type ScriptView = { kind: 'versioned' | 'repeatable' | 'undo' | 'baseline'; version: string | null; description: string; file_name: string; sql: string }
 export type ConvertReport = { source: string; written: string; environments: string[]; migrations: string; schemas: string[]; flyway_table: string; not_converted: string[]; notes: string[] }
 export type HistoryImport = { environment: string; imported: number; skipped: string[]; edited: string[]; attention: string[] }
+export type GitStatus = { branch: string | null; upstream: string | null; ahead: number; behind: number; files: { path: string; change: string }[] }
 export type RepairReport = { removed_failed: string[]; realigned: string[]; forgotten: string[] }
 
 export const inTauri = '__TAURI_INTERNALS__' in window
@@ -55,6 +56,11 @@ type Api = {
   migrationsInfo(path: string, env: string): Promise<MigrationInfo[]>
   migrate(path: string, env: string, outOfOrder: boolean, allowNonEmpty?: boolean): Promise<MigrateResult>
   saveReport(path: string, report: CheckReport): Promise<string | null>
+  gitStatus(path: string): Promise<GitStatus>
+  gitDiff(path: string, file: string): Promise<string>
+  gitCommit(path: string, files: string[], message: string): Promise<string>
+  gitPush(path: string): Promise<void>
+  gitPull(path: string): Promise<void>
   validate(path: string, env: string): Promise<MigrationInfo[]>
   baseline(path: string, env: string, version: string, description: string): Promise<void>
   repair(path: string, env: string): Promise<RepairReport>
@@ -89,6 +95,11 @@ const real: Api = {
   envTestDraft: (env) => invoke('env_test_draft', { env }),
   migrationsInfo: (path, env) => invoke('migrations_info', { path, env }),
   migrate: (path, env, outOfOrder, allowNonEmpty = false) => invoke('migrate', { path, env, outOfOrder, allowNonEmpty }),
+  gitStatus: (path) => invoke('git_status', { path }),
+  gitDiff: (path, file) => invoke('git_diff', { path, file }),
+  gitCommit: (path, files, message) => invoke('git_commit', { path, files, message }),
+  gitPush: (path) => invoke('git_push', { path }),
+  gitPull: (path) => invoke('git_pull', { path }),
   saveReport: async (path, report) => {
     const file = await saveDialog({ defaultPath: `liftoff-checks-${report.environment}.html`, filters: [{ name: 'HTML report', extensions: ['html'] }] })
     if (!file) return null
@@ -136,6 +147,13 @@ const fake = {
     ['20261001.0912', 'create orders'], ['20261003.1530', 'add order lines'], ['20261007.1102', 'tax function'], ['20261008.0840', 'daily totals view'],
   ] as [string, string][],
   applied: { local: 4, scratch: 0, staging: 2, production: 0 } as Record<string, number>,
+  gitFiles: [
+    { path: 'migrations/V20261008.1104__add_customers.sql', change: 'untracked' },
+    { path: 'liftoff.toml', change: 'modified' },
+    { path: 'notes/todo.md', change: 'untracked' },
+  ],
+  gitAhead: 0,
+  gitRejectPush: new URLSearchParams(location.search).has('rejectpush'),
 }
 const fakeProject = (): Project => ({ ...fake.project, license: fake.licensed ? demoLicense : null })
 const fakeInfo = (env: string): MigrationInfo[] =>
@@ -189,6 +207,26 @@ const fakeApi: Api = {
     await wait()
     if (env === 'production') throw fail('LIFTOFF_CONNECT', "could not connect to 'production': timed out", 10)
     return fakeInfo(env)
+  },
+  gitStatus: async () => {
+    await wait()
+    return { branch: 'main', upstream: 'origin/main', ahead: fake.gitAhead, behind: 0, files: fake.gitFiles }
+  },
+  gitDiff: async (_p, file) => (file.endsWith('.sql') ? `-- ${file}\ncreate table customer (id bigint primary key);\n` : '+ [environments.staging]\n+ url = "postgres://staging.internal/shop"\n'),
+  gitCommit: async (_p, files, message) => {
+    if (!message.trim()) throw fail('LIFTOFF_CONFIG', 'write a commit message', 2)
+    fake.gitFiles = fake.gitFiles.filter((f) => !files.includes(f.path))
+    fake.gitAhead += 1
+    return 'a1b2c3d'
+  },
+  gitPush: async () => {
+    await wait()
+    if (fake.gitRejectPush) throw fail('LIFTOFF_GIT_PUSH_REJECTED', '! [rejected] main -> main (fetch first)', 1)
+    fake.gitAhead = 0
+  },
+  gitPull: async () => {
+    await wait()
+    fake.gitRejectPush = false
   },
   saveReport: async (_p, report) => `C:/Users/me/liftoff-checks-${report.environment}.html`,
   migrate: async (_p, env) => {

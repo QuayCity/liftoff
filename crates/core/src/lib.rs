@@ -6,6 +6,7 @@ pub mod db;
 pub mod diff;
 pub mod error;
 pub mod flyway;
+pub mod git;
 pub mod license;
 pub mod migration;
 pub mod runner;

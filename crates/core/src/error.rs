@@ -19,6 +19,9 @@ pub enum Error {
     Drift(String),
     #[error("'{0}' already has tables but no migration history. Baseline it first (`liftoff baseline --version …`), or run the scripts anyway with --allow-non-empty")]
     NotBaselined(String),
+    /// a git failure: (kind for the app to act on, git's own message)
+    #[error("{1}")]
+    Git(&'static str, String),
     #[error("database error: {0}")]
     Db(#[from] tokio_postgres::Error),
     #[error("{0}")]
@@ -35,7 +38,7 @@ impl Error {
             Error::License(_) => 20,
             Error::Drift(_) => 13,
             Error::NotBaselined(_) => 12,
-            Error::Db(_) | Error::Io(_) => 1,
+            Error::Git(..) | Error::Db(_) | Error::Io(_) => 1,
         }
     }
 
@@ -48,6 +51,14 @@ impl Error {
             Error::License(_) => "LIFTOFF_LICENSE",
             Error::Drift(_) => "LIFTOFF_DRIFT",
             Error::NotBaselined(_) => "LIFTOFF_NOT_BASELINED",
+            Error::Git(kind, _) => match *kind {
+                "push_rejected" => "LIFTOFF_GIT_PUSH_REJECTED",
+                "not_a_repository" => "LIFTOFF_GIT_NOT_A_REPOSITORY",
+                "no_upstream" => "LIFTOFF_GIT_NO_UPSTREAM",
+                "diverged" => "LIFTOFF_GIT_DIVERGED",
+                "auth" => "LIFTOFF_GIT_AUTH",
+                _ => "LIFTOFF_GIT",
+            },
             Error::Db(_) => "LIFTOFF_DB",
             Error::Io(_) => "LIFTOFF_IO",
         }

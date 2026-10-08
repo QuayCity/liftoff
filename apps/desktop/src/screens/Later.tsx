@@ -3,7 +3,6 @@ import { Construction } from 'lucide-react'
 import { Card, EmptyState } from '../ui/display'
 
 const what = {
-  Commit: 'Commit and push from inside LiftOff. Until then, use your usual git client.',
   Pipelines: 'Generate a CI workflow that runs your migrations. Until then, call `liftoff migrate` from your pipeline.',
 }
 
