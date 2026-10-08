@@ -182,7 +182,7 @@ async fn full_slice() {
     assert!(runner::mark_applied(&cfg, Some("dev"), &g.file_name, &quiet).await.is_err(), "only pending scripts");
 
     // 6b2. Capture: the whole dev schema as one script; on an empty database it rebuilds dev exactly.
-    let cap = diff::capture(&cfg, Some("dev"), "existing schema").await.unwrap();
+    let cap = diff::capture(&cfg, Some("dev"), "existing schema", false).await.unwrap();
     assert!(cap.sql.contains("CREATE TABLE public.customers") && cap.sql.contains("FOREIGN KEY"), "{}", cap.sql);
     runner::clean(&cfg, Some("scratch"), &quiet).await.unwrap();
     let sc = db::connect("scratch", cfg.env("scratch").unwrap()).await.unwrap();
@@ -247,6 +247,33 @@ async fn full_slice() {
     assert!(runner::migrate(&cfg, Some("test"), MigrateOptions::default(), &quiet).await.unwrap().applied.is_empty(), "nothing re-runs after an import");
     assert_eq!(db::read_history(&tc, "public", "flyway_schema_history").await.unwrap().len(), flyway_rows, "Flyway's table is left alone");
     assert!(flyway::import_history(&cfg, Some("test"), "flyway_schema_history", false, &quiet).await.is_err(), "runs once");
+
+    // 9. B scripts: an empty database starts from the baseline script, then runs only later V scripts.
+    reset(&cfg, "test").await;
+    let b = diff::capture(&cfg, Some("dev"), "dev schema", true).await.unwrap();
+    assert!(b.file_name.starts_with('B'), "{}", b.file_name);
+    diff::save(&cfg, &b.file_name, &b.sql).unwrap();
+    let r = runner::migrate(&cfg, Some("test"), MigrateOptions::default(), &quiet).await.unwrap();
+    assert_eq!(r.applied[0].script, b.file_name, "{:?}", r.applied);
+    let infos = runner::info(&cfg, Some("test")).await.unwrap();
+    assert!(infos.iter().all(|i| i.state != State::Pending), "{infos:#?}");
+    assert!(infos.iter().any(|i| i.state == State::Baseline && i.script == b.file_name), "{infos:#?}");
+    let (dv, tv) = (db::connect("dev", cfg.env("dev").unwrap()).await.unwrap(), db::connect("test", cfg.env("test").unwrap()).await.unwrap());
+    let left = diff::diff(&diff::introspect(&dv, &cfg.project.schemas, table).await.unwrap(), &diff::introspect(&tv, &cfg.project.schemas, table).await.unwrap());
+    assert!(left.is_empty(), "the B script rebuilds dev: {left:#?}");
+    std::fs::remove_file(dir.join("migrations").join(&b.file_name)).unwrap();
+
+    // 10. Guided scratch: a new database next to dev, saved as a private environment; never reuses one.
+    let admin = db::connect("dev", cfg.env("dev").unwrap()).await.unwrap();
+    admin.batch_execute("DROP DATABASE IF EXISTS shop_dev_scratch").await.unwrap();
+    let mut solo = cfg.clone();
+    solo.environments.remove("scratch");
+    let created = diff::create_scratch(&solo, None, "scratch2").await.unwrap();
+    assert_eq!(created.database, "shop_dev_scratch");
+    let reloaded = Config::load(&dir).unwrap();
+    assert_eq!(reloaded.env("scratch2").unwrap().role, Role::Scratch);
+    assert!(diff::create_scratch(&solo, None, "scratch3").await.unwrap_err().to_string().contains("already exists"));
+    admin.batch_execute("DROP DATABASE shop_dev_scratch").await.unwrap();
 
     // 7. Refuses to rebuild a non-scratch database.
     let err = diff::dev_vs_migrations(&cfg, Some("dev"), Some("test"), &quiet).await.unwrap_err();

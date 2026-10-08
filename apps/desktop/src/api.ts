@@ -61,7 +61,8 @@ type Api = {
   markApplied(path: string, env: string, script: string): Promise<void>
   scriptsList(path: string): Promise<ScriptView[]>
   scriptAdd(path: string, repeatable: boolean, description: string, sql: string): Promise<string>
-  capture(path: string, env: string, description: string): Promise<Generated>
+  capture(path: string, env: string, description: string, asBaseline: boolean): Promise<Generated>
+  scratchCreate(path: string): Promise<Project>
   changesDiff(path: string): Promise<Comparison>
   migrationGenerate(path: string, changes: Change[], description: string, withUndo: boolean): Promise<Generated>
   undo(path: string, env: string): Promise<{ script: string; version: string | null }>
@@ -94,7 +95,8 @@ const real: Api = {
   markApplied: (path, env, script) => invoke('mark_applied', { path, env, script }),
   scriptsList: (path) => invoke('scripts_list', { path }),
   scriptAdd: (path, repeatable, description, sql) => invoke('script_add', { path, repeatable, description, sql }),
-  capture: (path, env, description) => invoke('capture', { path, env, description }),
+  capture: (path, env, description, asBaseline) => invoke('capture', { path, env, description, asBaseline }),
+  scratchCreate: (path) => invoke('scratch_create', { path }),
   changesDiff: (path) => invoke('changes_diff', { path }),
   migrationGenerate: (path, changes, description, withUndo) => invoke('migration_generate', { path, changes, description, withUndo }),
   undo: (path, env) => invoke('undo', { path, env }),
@@ -229,10 +231,14 @@ const fakeApi: Api = {
     if (!repeatable) fake.scripts.push(['20261008.1200', description])
     return `${path}/migrations/${name}`
   },
-  capture: async (_p, env, description) => {
+  scratchCreate: async () => {
+    await wait(400)
+    return fakeProject()
+  },
+  capture: async (_p, env, description, asBaseline) => {
     if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'generate' is part of LiftOff Pro.", 20)
     await wait(500)
-    return { file_name: `V20261008.1200__${description.replaceAll(' ', '_')}.sql`, version: '20261008.1200', sql: `-- ${description}\n-- captured from ${env}\n\nCREATE TABLE public.orders (\n    id bigserial\n);\n`, undo: null }
+    return { file_name: `${asBaseline ? 'B' : 'V'}20261008.1200__${description.replaceAll(' ', '_')}.sql`, version: '20261008.1200', sql: `-- ${description}\n-- captured from ${env}\n\nCREATE TABLE public.orders (\n    id bigserial\n);\n`, undo: null }
   },
   changesDiff: async () => {
     if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'diff' is part of LiftOff Pro. Set LIFTOFF_LICENSE (CI) or activate a licence in the desktop app.", 20)

@@ -128,6 +128,18 @@ enum Command {
         /// Print the script instead of writing it
         #[arg(long)]
         dry_run: bool,
+        /// Write a baseline script (B…) that empty databases start from, instead of a V script
+        #[arg(long)]
+        as_baseline_script: bool,
+    },
+    /// Create an empty scratch database next to the dev database and save it as an environment
+    CreateScratch {
+        /// Dev environment (default: the first with role "dev")
+        #[arg(long)]
+        from: Option<String>,
+        /// Name for the new environment
+        #[arg(long, default_value = "scratch")]
+        name: String,
     },
     /// Compare the dev database with what the migrations build (Pro)
     Diff {
@@ -327,10 +339,15 @@ async fn run(cli: &Cli, adhoc: &Adhoc) -> Result<(Value, String)> {
             let path = diff::add(&cfg, *repeatable, description, &sql)?;
             Ok((json!({ "written": path }), format!("Created {}", path.display())))
         }
-        Command::Capture { description, dry_run } => {
+        Command::CreateScratch { from, name } => {
+            let cfg = load(cli, adhoc)?;
+            let r = diff::create_scratch(&cfg, from.as_deref(), name).await?;
+            Ok((to(&r)?, format!("Created database {} and saved it as environment '{}' (role scratch, private)", r.database, r.environment)))
+        }
+        Command::Capture { description, dry_run, as_baseline_script } => {
             let cfg = load(cli, adhoc)?;
             license::require("generate", cli.license.as_deref(), Some(root))?;
-            let g = diff::capture(&cfg, env, description).await?;
+            let g = diff::capture(&cfg, env, description, *as_baseline_script).await?;
             if *dry_run {
                 return Ok((to(&g)?, g.sql.clone()));
             }

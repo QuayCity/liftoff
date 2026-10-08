@@ -51,6 +51,20 @@ pub async fn connect(env_name: &str, env: &Environment) -> Result<Client> {
     Ok(client)
 }
 
+/// The same connection URL, pointing at another database on the same server.
+pub fn with_database(url: &str, db: &str) -> String {
+    if let Some(i) = url.find("://") {
+        let (scheme, rest) = url.split_at(i + 3);
+        let (main, query) = rest.split_once('?').map(|(m, q)| (m, format!("?{q}"))).unwrap_or((rest, String::new()));
+        let host = main.split('/').next().unwrap_or(main);
+        return format!("{scheme}{host}/{db}{query}");
+    }
+    // key=value form
+    let mut parts: Vec<String> = url.split_whitespace().filter(|p| !p.starts_with("dbname=")).map(String::from).collect();
+    parts.push(format!("dbname={db}"));
+    parts.join(" ")
+}
+
 #[derive(Debug, Serialize)]
 pub struct ServerInfo {
     pub version: String,
@@ -201,6 +215,14 @@ pub fn quote_ident(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn database_swaps() {
+        use super::with_database as w;
+        assert_eq!(w("postgres://me:pw@db:5432/shop?sslmode=require", "shop_scratch"), "postgres://me:pw@db:5432/shop_scratch?sslmode=require");
+        assert_eq!(w("postgres://db", "x"), "postgres://db/x");
+        assert_eq!(w("host=db dbname=shop user=me", "x"), "host=db user=me dbname=x");
+    }
+
     #[test]
     fn quoting() {
         use super::quote_ident as q;

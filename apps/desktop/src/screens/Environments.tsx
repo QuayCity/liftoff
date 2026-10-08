@@ -113,7 +113,11 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
     if (id === 'baseline') return setBaselineFor(name)
     if (id === 'import-flyway') return setImportFor(name)
     if (id === 'capture') return op(name, async () => {
-      setCaptured({ env: name, g: await api.capture(project.root, name, 'existing schema') })
+      setCaptured({ env: name, g: await api.capture(project.root, name, 'existing schema', false) })
+      return null
+    })
+    if (id === 'capture-b') return op(name, async () => {
+      setCaptured({ env: name, g: await api.capture(project.root, name, 'baseline', true) })
       return null
     })
     if (id === 'clean') return setCleanFor(name)
@@ -221,6 +225,7 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
                   : []),
                   ...(sel.role === 'scratch' || sel.allow_clean ? [{ id: 'clean', label: 'Clean…', destructive: true }] : []),
                   { id: 'capture', label: 'Capture as script…', paid: true },
+                { id: 'capture-b', label: 'Capture as baseline script…', paid: true },
                 ]}
               />
             </Card>
@@ -273,6 +278,7 @@ function CaptureDialog({ captured, project, onClose, onDone }: {
   captured: { env: string; g: Generated } | null; project: Project; onClose: () => void
   onDone: (msg: string, tone: 'success' | 'warning') => void
 }) {
+  const isB = captured?.g.file_name.startsWith('B') ?? false
   const [baselineIt, setBaselineIt] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -289,8 +295,8 @@ function CaptureDialog({ captured, project, onClose, onDone }: {
       return
     }
     try {
-      if (baselineIt) await api.baseline(project.root, env, g.version, 'existing schema')
-      onDone(`Wrote ${g.file_name}${baselineIt ? ` and baselined ${env}` : ''}`, 'success')
+      if (baselineIt && !isB) await api.baseline(project.root, env, g.version, 'existing schema')
+      onDone(`Wrote ${g.file_name}${baselineIt && !isB ? ` and baselined ${env}` : ''}`, 'success')
     } catch (e) {
       onDone(`Wrote ${g.file_name}, but couldn't baseline ${env}: ${errorText(e)}`, 'warning')
     }
@@ -300,7 +306,9 @@ function CaptureDialog({ captured, project, onClose, onDone }: {
       footer={<><Button onClick={onClose} disabled={saving}>Cancel</Button><Button variant="primary" loading={saving} onClick={save}>Save to migrations</Button></>}>
       <div className="flex flex-col gap-3">
         <div className="max-h-[50vh] overflow-auto"><CodeBlock label="Captured schema" code={g.sql} /></div>
-        <Checkbox checked={baselineIt} onChange={setBaselineIt} label={`Baseline ${env} at ${g.version}, so this script never runs there`} />
+        {isB
+          ? <p className="text-sm text-muted">Empty databases will be built from this script; the versioned scripts up to {g.version} are skipped there. Databases with history are not affected.</p>
+          : <Checkbox checked={baselineIt} onChange={setBaselineIt} label={`Baseline ${env} at ${g.version}, so this script never runs there`} />}
         {error && <InlineAlert tone="danger" title="Not saved">{error}</InlineAlert>}
       </div>
     </Dialog>

@@ -57,7 +57,7 @@ pub fn compute(scripts: &[Script], rows: &[HistoryRow]) -> Vec<MigrationInfo> {
     // One effective row per version, in rank order. A later DELETE row (repair forgot a missing
     // script) or UNDO_SQL row (undo ran) retires the version.
     let mut latest: Vec<(Version, &HistoryRow)> = Vec::new();
-    for r in rows.iter().filter(|r| r.kind != "BASELINE") {
+    for r in rows.iter().filter(|r| r.kind != "BASELINE" && r.kind != "SQL_BASELINE") {
         let Some(v) = ver(r) else { continue };
         latest.retain(|(lv, _)| *lv != v);
         if r.kind != "DELETE" && r.kind != "UNDO_SQL" {
@@ -65,7 +65,9 @@ pub fn compute(scripts: &[Script], rows: &[HistoryRow]) -> Vec<MigrationInfo> {
         }
     }
     let applied_rows: Vec<&HistoryRow> = latest.iter().map(|(_, r)| *r).collect();
-    let baseline_rows: Vec<&HistoryRow> = rows.iter().filter(|r| r.kind == "BASELINE").collect();
+    // BASELINE: `liftoff baseline` marked the database. SQL_BASELINE: a B script built it.
+    let is_baseline = |r: &HistoryRow| r.kind == "BASELINE" || r.kind == "SQL_BASELINE";
+    let baseline_rows: Vec<&HistoryRow> = rows.iter().filter(|r| is_baseline(r)).collect();
     let baseline = baseline_rows.iter().filter_map(|r| ver(r)).max();
     let max_applied = applied_rows.iter().filter(|r| r.success).filter_map(|r| ver(r)).chain(baseline.clone()).max();
     let max_file = scripts.iter().filter(|s| s.kind == Kind::Versioned).filter_map(|s| s.version.clone()).max();
@@ -252,7 +254,22 @@ fn dry_run(cfg: &Config, name: &str, scripts: &[Script], rows: &[HistoryRow], op
     let (schema, table) = (db::quote_ident(cfg.history_schema()), db::quote_ident(&cfg.project.history_table));
     let mut sql = format!("-- Dry run for {name}: nothing below has been executed.\n-- History table: {schema}.{table}\n");
     let mut result = MigrateResult { environment: name.to_string(), ..Default::default() };
-    for i in plan(&infos, opts, target) {
+    if rows.is_empty()
+        && let Some(b) = baseline_script(scripts, target)
+    {
+        sql.push_str(&format!("\n-- {} (empty database: built from the baseline script)\nBEGIN;\n{}\nCOMMIT;\n", b.file_name, b.sql.trim_end()));
+        result.applied.push(Applied { script: b.file_name.clone(), version: b.version.as_ref().map(|v| v.text.clone()), execution_time_ms: 0, transactional: true });
+        // The V scripts it covers would then be below the baseline.
+        let covered = b.version.clone();
+        let infos: Vec<MigrationInfo> = infos.into_iter().filter(|i| i.kind != Kind::Versioned || i.version.as_deref().and_then(Version::parse) > covered).collect();
+        return finish_dry_run(cfg, scripts, &infos, opts, target, sql, result);
+    }
+    finish_dry_run(cfg, scripts, &infos, opts, target, sql, result)
+}
+
+fn finish_dry_run(cfg: &Config, scripts: &[Script], infos: &[MigrationInfo], opts: &MigrateOptions, target: Option<&Version>, mut sql: String, mut result: MigrateResult) -> Result<MigrateResult> {
+    let (schema, table) = (db::quote_ident(cfg.history_schema()), db::quote_ident(&cfg.project.history_table));
+    for i in plan(infos, opts, target) {
         let s = scripts.iter().find(|s| s.file_name == i.script).unwrap();
         let transactional = !migration::needs_no_transaction(&s.sql);
         let version = s.version.as_ref().map(|v| format!("'{}'", v.text)).unwrap_or_else(|| "NULL".into());
@@ -280,17 +297,35 @@ fn dry_run(cfg: &Config, name: &str, scripts: &[Script], rows: &[HistoryRow], op
 async fn migrate_locked(c: &tokio_postgres::Client, cfg: &Config, name: &str, scripts: &[Script], opts: &MigrateOptions, target: Option<&Version>, log: Log<'_>) -> Result<MigrateResult> {
     let (schema, table) = (cfg.history_schema(), cfg.project.history_table.as_str());
     db::ensure_history(c, schema, table).await?;
-    let rows = db::read_history(c, schema, table).await?;
+    let mut rows = db::read_history(c, schema, table).await?;
+    let mut result = MigrateResult { environment: name.to_string(), ..Default::default() };
+
+    // A database without any history starts from the latest B script, when there is one.
+    if rows.is_empty()
+        && let Some(b) = baseline_script(scripts, target)
+    {
+        log(Level::Info, &format!("Empty database: building it from {}", b.file_name));
+        let t = Instant::now();
+        if let Err(e) = run_script(c, b, !migration::needs_no_transaction(&b.sql), schema, table, "SQL_BASELINE").await {
+            let msg = match &e {
+                Error::Db(db) => db_message(db),
+                other => other.to_string(),
+            };
+            return Err(Error::Migration { script: b.file_name.clone(), msg });
+        }
+        let ms = t.elapsed().as_millis() as i32;
+        result.applied.push(Applied { script: b.file_name.clone(), version: b.version.as_ref().map(|v| v.text.clone()), execution_time_ms: ms, transactional: true });
+        rows = db::read_history(c, schema, table).await?;
+    }
     let infos = compute(scripts, &rows);
 
     validate(&infos, opts)?;
 
     let todo = plan(&infos, opts, target);
-    if todo.is_empty() {
+    if todo.is_empty() && result.applied.is_empty() {
         log(Level::Info, &format!("{name} is up to date"));
     }
 
-    let mut result = MigrateResult { environment: name.to_string(), ..Default::default() };
     for i in todo {
         let s = scripts.iter().find(|s| s.file_name == i.script).unwrap();
         let transactional = !migration::needs_no_transaction(&s.sql);
@@ -317,6 +352,14 @@ async fn migrate_locked(c: &tokio_postgres::Client, cfg: &Config, name: &str, sc
         result.applied.push(Applied { script: s.file_name.clone(), version: s.version.as_ref().map(|v| v.text.clone()), execution_time_ms: ms, transactional });
     }
     Ok(result)
+}
+
+/// The newest B script at or below `target`.
+fn baseline_script<'a>(scripts: &'a [Script], target: Option<&Version>) -> Option<&'a Script> {
+    scripts
+        .iter()
+        .filter(|s| s.kind == Kind::Baseline && target.is_none_or(|t| s.version.as_ref().is_some_and(|v| v <= t)))
+        .max_by(|a, b| a.version.cmp(&b.version))
 }
 
 /// Runs the U script of the latest applied version (C09) and records it; that version is pending again.

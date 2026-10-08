@@ -317,10 +317,17 @@ fn script_add(path: String, repeatable: bool, description: String, sql: String) 
 }
 
 #[tauri::command]
-async fn capture(path: String, env: String, description: String) -> R<diff::Generated> {
+async fn capture(path: String, env: String, description: String, as_baseline: bool) -> R<diff::Generated> {
     let cfg = load(&path)?;
     license::require("generate", None, Some(&cfg.root)).map_err(rep)?;
-    diff::capture(&cfg, Some(&env), &description).await.map_err(rep)
+    diff::capture(&cfg, Some(&env), &description, as_baseline).await.map_err(rep)
+}
+
+#[tauri::command]
+async fn scratch_create(path: String) -> R<ProjectView> {
+    let cfg = load(&path)?;
+    diff::create_scratch(&cfg, None, "scratch").await.map_err(rep)?;
+    Ok(view(&load(&path)?))
 }
 
 /* ---------- licence ---------- */
@@ -360,6 +367,7 @@ pub fn run() {
             scripts_list,
             script_add,
             capture,
+            scratch_create,
             changes_diff,
             migration_generate,
             migration_save,

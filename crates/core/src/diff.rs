@@ -986,6 +986,45 @@ pub(crate) fn scratch_env<'a>(cfg: &'a Config, scratch: Option<&str>) -> Result<
     Ok((name, env))
 }
 
+#[derive(Debug, Serialize)]
+pub struct ScratchCreated {
+    pub environment: String,
+    pub database: String,
+}
+
+/// Creates an empty database next to the dev database (`<dev db>_scratch`, same server and login)
+/// and saves it as a private scratch environment. Refuses to touch a database that already exists.
+pub async fn create_scratch(cfg: &Config, dev: Option<&str>, env_name: &str) -> Result<ScratchCreated> {
+    let (dev_name, dev_env) = cfg.pick_role(dev, Role::Dev)?;
+    if cfg.environments.contains_key(env_name) {
+        return config(format!("an environment named '{env_name}' already exists"));
+    }
+    let c = db::connect(&dev_name, dev_env).await?;
+    let dev_db: String = c.query_one("select current_database()::text", &[]).await?.get(0);
+    let database = format!("{dev_db}_scratch");
+    let exists: bool = c.query_one("select exists (select 1 from pg_database where datname = $1)", &[&database]).await?.get(0);
+    if exists {
+        return config(format!(
+            "a database named {database} already exists on {dev_name}'s server; if it may be erased, add it as the scratch environment yourself"
+        ));
+    }
+    c.batch_execute(&format!("CREATE DATABASE {}", q(&database))).await.map_err(|e| match e.as_db_error() {
+        Some(d) if d.code() == &tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE => crate::Error::Config(format!(
+            "{dev_name}'s login may not create databases (it needs CREATEDB); ask an admin to create {database}, then add it as the scratch environment"
+        )),
+        _ => e.into(),
+    })?;
+    let env = crate::config::Environment {
+        url: db::with_database(&dev_env.url, &database),
+        user: dev_env.user.clone(),
+        password: dev_env.password.clone(),
+        role: Role::Scratch,
+        allow_clean: true,
+    };
+    crate::config::save_environment(&cfg.root, env_name, &env, false)?;
+    Ok(ScratchCreated { environment: env_name.to_string(), database })
+}
+
 /// Erases the scratch database and runs the migrations into it (up to `target` when given).
 pub(crate) async fn rebuild_scratch(cfg: &Config, name: &str, env: &crate::config::Environment, target: Option<&str>, log: Log<'_>) -> Result<Client> {
     log(Level::Info, &format!("Rebuilding scratch database '{name}' from migrations{}", target.map(|t| format!(" up to {t}")).unwrap_or_default()));
@@ -1108,9 +1147,11 @@ pub fn add(cfg: &Config, repeatable: bool, description: &str, sql: &str) -> Resu
     save(cfg, &file_name, &body)
 }
 
-/// The whole schema of an existing database as one script (F07): run nothing, then
-/// `baseline` that database at the script's version so it never runs there.
-pub async fn capture(cfg: &Config, env_name: Option<&str>, description: &str) -> Result<Generated> {
+/// The whole schema of an existing database as one script (F07). As the next V script by default,
+/// then `baseline` that database at its version so it never runs there. With `as_baseline`, as a
+/// B script that empty databases start from: versioned at the database's latest applied version
+/// (the state it describes), or the next version when the database has no history.
+pub async fn capture(cfg: &Config, env_name: Option<&str>, description: &str, as_baseline: bool) -> Result<Generated> {
     let (name, env) = cfg.pick(env_name)?;
     let c = db::connect(&name, env).await?;
     let model = model_of(cfg, &c).await?;
@@ -1118,7 +1159,21 @@ pub async fn capture(cfg: &Config, env_name: Option<&str>, description: &str) ->
     if changes.is_empty() {
         return config(format!("'{name}' has nothing in {} to capture", cfg.project.schemas.join(", ")));
     }
-    generate(cfg, &changes, description, false)
+    let mut g = generate(cfg, &changes, description, false)?;
+    if as_baseline {
+        let applied = runner::info(cfg, Some(&name))
+            .await?
+            .into_iter()
+            .filter(|i| matches!(i.state, runner::State::Applied | runner::State::Baseline))
+            .filter_map(|i| i.version)
+            .max_by_key(|v| migration::Version::parse(v));
+        if let Some(v) = applied {
+            g.version = v;
+        }
+        let slug = check_description(description)?.replace([' ', '-'], "_");
+        g.file_name = format!("B{}__{slug}.sql", g.version);
+    }
+    Ok(g)
 }
 
 /// Writes a generated script into the migrations folder; never overwrites.

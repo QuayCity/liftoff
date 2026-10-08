@@ -9,12 +9,13 @@ import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
 import { DiffView } from '../ui/diffview'
 import { Dialog, useToast } from '../ui/overlays'
 
-export function Changes({ project, onSettings, onEnvironments }: { project: Project; onSettings: () => void; onEnvironments: () => void }) {
+export function Changes({ project, onSettings, onEnvironments, onProject }: { project: Project; onSettings: () => void; onEnvironments: () => void; onProject: (p: Project) => void }) {
   const toast = useToast()
   const dev = project.environments.find((e) => e.role === 'dev')
   const scratch = project.environments.find((e) => e.role === 'scratch')
   const [changes, setChanges] = useState<Change[] | null>(null)
   const [notCompared, setNotCompared] = useState<string[]>([])
+  const [creatingScratch, setCreatingScratch] = useState(false)
   const [comparing, setComparing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -55,15 +56,24 @@ export function Changes({ project, onSettings, onEnvironments }: { project: Proj
       </div>
     )
   }
-  if (!dev || !scratch) {
+  if (!dev) {
     return (
       <div className="p-8">
-        <InlineAlert tone="info" title={!dev ? 'Connect your dev database' : 'Add a scratch database'}
-          action={<Button size="sm" onClick={onEnvironments}>Go to Environments</Button>}>
-          {!dev
-            ? 'Changes are read from an environment with the Dev role.'
-            : 'LiftOff builds a throwaway copy from your migration scripts to see what is new. Add an empty database with the Scratch role; its contents will be erased.'}
+        <InlineAlert tone="info" title="Connect your dev database" action={<Button size="sm" onClick={onEnvironments}>Go to Environments</Button>}>
+          Changes are read from an environment with the Dev role.
         </InlineAlert>
+      </div>
+    )
+  }
+  if (!scratch) {
+    return (
+      <div className="p-8">
+        <InlineAlert tone="info" title="A scratch database is needed"
+          action={<Button size="sm" variant="primary" onClick={() => setCreatingScratch(true)}>Create one…</Button>}>
+          LiftOff builds a throwaway copy from your migration scripts to see what is new. It can create an empty database for
+          this next to {dev.name}, or you can add an existing empty one with the Scratch role in Environments.
+        </InlineAlert>
+        <CreateScratchDialog open={creatingScratch} onOpenChange={setCreatingScratch} project={project} devName={dev.name} onCreated={onProject} />
       </div>
     )
   }
@@ -223,5 +233,35 @@ export function NotCompared({ items }: { items: string[] }) {
       Write changes to these by hand:
       <ul className="mt-1 list-disc pl-5">{items.map((i) => <li key={i}>{i}</li>)}</ul>
     </InlineAlert>
+  )
+}
+
+function CreateScratchDialog({ open, onOpenChange, project, devName, onCreated }: {
+  open: boolean; onOpenChange: (o: boolean) => void; project: Project; devName: string; onCreated: (p: Project) => void
+}) {
+  const [eraseOk, setEraseOk] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const create = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      onCreated(await api.scratchCreate(project.root))
+      onOpenChange(false)
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange} size="sm" title="Create a scratch database" submitting={busy}
+      description={`A new, empty database on ${devName}'s server, named after its database with _scratch at the end. Saved as a private environment.`}
+      footer={<><Button onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button><Button variant="primary" disabled={!eraseOk} loading={busy} onClick={create}>Create</Button></>}>
+      <div className="flex flex-col gap-3">
+        <Checkbox checked={eraseOk} onChange={setEraseOk} label="I understand LiftOff erases and rebuilds it on every comparison" />
+        {error && <InlineAlert tone="danger" title="Not created">{error}</InlineAlert>}
+      </div>
+    </Dialog>
   )
 }
