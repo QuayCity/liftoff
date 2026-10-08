@@ -63,7 +63,7 @@ pub async fn connect(env_name: &str, env: &Environment) -> Result<Client> {
     check_vars(env_name, env)?;
     if crate::mssql::is_url(&env.url) {
         return Err(Error::Config(format!(
-            "'{env_name}' is SQL Server; comparisons, drift checks and the schema model support PostgreSQL only for now (migrate, info, validate, baseline, repair, undo and clean work)"
+            "'{env_name}' is SQL Server; this needs PostgreSQL"
         )));
     }
     let mut cfg = tokio_postgres::Config::from_str(&env.url).map_err(|e| fail(format!("bad url: {e}")))?;
@@ -82,6 +82,12 @@ pub async fn connect(env_name: &str, env: &Environment) -> Result<Client> {
 
 /// The same connection URL, pointing at another database on the same server.
 pub fn with_database(url: &str, db: &str) -> String {
+    if crate::mssql::is_url(url) {
+        let mut parts: Vec<&str> = url.split(';').filter(|p| !p.split('=').next().is_some_and(|k| k.trim().eq_ignore_ascii_case("databaseName") || k.trim().eq_ignore_ascii_case("database"))).collect();
+        let db = format!("databaseName={db}");
+        parts.push(&db);
+        return parts.join(";");
+    }
     if let Some(i) = url.find("://") {
         let (scheme, rest) = url.split_at(i + 3);
         let (main, query) = rest.split_once('?').map(|(m, q)| (m, format!("?{q}"))).unwrap_or((rest, String::new()));

@@ -131,9 +131,11 @@ async fn runner_on_sql_server() {
     let r = runner::migrate(&cfg, Some("dev"), MigrateOptions::default(), &quiet).await.unwrap();
     assert_eq!(r.applied.len(), 5, "a cleaned database takes every script again: {:?}", r.applied);
 
-    // 8. What is not built for SQL Server yet says so.
-    let err = diff::capture(&cfg, Some("dev"), "existing schema", false).await.unwrap_err().to_string();
-    assert!(err.contains("is SQL Server") && err.contains("PostgreSQL only"), "{err}");
+    // 8. Capture works; what is not built for SQL Server yet says so.
+    let cap = diff::capture(&cfg, Some("dev"), "existing schema", false).await.unwrap();
+    assert!(cap.sql.contains("CREATE TABLE [dbo].[orders]"), "{}", cap.sql);
+    let err = liftoff_core::flyway::import_history(&cfg, Some("dev"), "flyway_schema_history", false, &quiet).await.unwrap_err().to_string();
+    assert!(err.contains("PostgreSQL only"), "{err}");
 
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -80,7 +80,7 @@ impl Db {
         Ok(())
     }
 
-    async fn query(&self, sql: &str, params: &[&dyn ToSql]) -> Result<Vec<Row>> {
+    pub(crate) async fn query(&self, sql: &str, params: &[&dyn ToSql]) -> Result<Vec<Row>> {
         let mut c = self.0.lock().await;
         Ok(c.query(sql, params).await?.into_first_result().await?)
     }

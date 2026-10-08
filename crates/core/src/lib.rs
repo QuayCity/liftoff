@@ -11,6 +11,7 @@ pub mod git;
 pub mod license;
 pub mod migration;
 pub mod mssql;
+pub mod mssql_diff;
 pub mod model;
 pub mod runner;
 

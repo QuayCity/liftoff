@@ -25,7 +25,7 @@ pub struct ModelChange {
 }
 
 /// Windows and Unix safe file names; object names keep their readability.
-fn file_name(name: &str) -> String {
+pub(crate) fn file_name(name: &str) -> String {
     name.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c }).collect()
 }
 
@@ -126,9 +126,12 @@ pub fn compare_files(on_disk: &BTreeMap<String, String>, dev: &BTreeMap<String, 
 
 pub async fn status(cfg: &Config, dev: Option<&str>) -> Result<Vec<ModelChange>> {
     let (name, env) = cfg.pick_role(dev, crate::config::Role::Dev)?;
-    let c = db::connect(&name, env).await?;
-    let m = diff::model_of(cfg, &c).await?;
-    Ok(compare_files(&read_folder(&cfg.root)?, &files_from(&m)))
+    let c = db::Conn::open(&name, env).await?;
+    let files = match diff::model_of(cfg, &c).await? {
+        diff::Schema::Pg(m) => files_from(&m),
+        diff::Schema::Ms(m) => crate::mssql_diff::files(&m).into_iter().map(|(k, v)| (k, format!("{}\n", v.trim_end()))).collect(),
+    };
+    Ok(compare_files(&read_folder(&cfg.root)?, &files))
 }
 
 /// Writes (or deletes) exactly the given changes; files outside schema-model/ are refused.

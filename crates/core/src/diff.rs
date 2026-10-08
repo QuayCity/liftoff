@@ -7,7 +7,7 @@
 //! column privileges). No rename detection.
 
 use crate::config::{role_name, Config, Role};
-use crate::db::{self, quote_ident as q};
+use crate::db::{self, quote_ident as q, Conn};
 use crate::error::{config, Result};
 use crate::migration;
 use crate::runner::{self, Level, Log, MigrateOptions};
@@ -131,17 +131,17 @@ pub enum ChangeKind {
 
 // Statements run phase by phase across all selected changes, so dependencies line up:
 // a foreign key after the table it points at, a view after the function it calls.
-const P_DROP: u8 = 0; // views (cascade), triggers, constraints, indexes
-const P_TYPES: u8 = 1; // extensions, enum types, domains, sequences
-const P_TABLES: u8 = 2; // parents before partitions (order)
-const P_KEYS: u8 = 3; // pk, unique, check, exclusion, indexes
-const P_FKS: u8 = 4;
-const P_FUNCS: u8 = 5;
-const P_VIEWS: u8 = 6; // views and materialized views, in creation order
-const P_TRIGGERS: u8 = 7;
+pub(crate) const P_DROP: u8 = 0; // views (cascade), triggers, constraints, indexes
+pub(crate) const P_TYPES: u8 = 1; // extensions, enum types, domains, sequences
+pub(crate) const P_TABLES: u8 = 2; // parents before partitions (order)
+pub(crate) const P_KEYS: u8 = 3; // pk, unique, check, exclusion, indexes
+pub(crate) const P_FKS: u8 = 4;
+pub(crate) const P_FUNCS: u8 = 5;
+pub(crate) const P_VIEWS: u8 = 6; // views and materialized views, in creation order
+pub(crate) const P_TRIGGERS: u8 = 7; // (SQL Server: procedures, then triggers)
 const P_GRANTS: u8 = 8; // grants and comments, once every object exists
-const P_DROP_TABLES: u8 = 9;
-const P_DROP_OTHER: u8 = 10; // functions, types, domains, sequences, extensions
+pub(crate) const P_DROP_TABLES: u8 = 9;
+pub(crate) const P_DROP_OTHER: u8 = 10; // functions, types, domains, sequences, extensions
 const PHASES: u8 = 11;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -929,7 +929,7 @@ fn compare(source: &Model, target: &Model) -> Vec<Change> {
     out
 }
 
-fn step(phase: u8, sql: String) -> Step {
+pub(crate) fn step(phase: u8, sql: String) -> Step {
     Step { phase, order: 0, sql }
 }
 
@@ -968,7 +968,7 @@ fn alter_column(t: &str, o: &Column, c: &Column, steps: &mut Vec<Step>) -> bool 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn change(prefix: &str, object_type: &str, name: &str, kind: ChangeKind, destructive: bool, mut steps: Vec<Step>, before: Option<String>, after: Option<String>) -> Change {
+pub(crate) fn change(prefix: &str, object_type: &str, name: &str, kind: ChangeKind, destructive: bool, mut steps: Vec<Step>, before: Option<String>, after: Option<String>) -> Change {
     steps.sort_by_key(|s| (s.phase, s.order));
     Change {
         id: format!("{prefix}:{name}"),
@@ -1008,21 +1008,38 @@ pub async fn create_scratch(cfg: &Config, dev: Option<&str>, env_name: &str) -> 
     if cfg.environments.contains_key(env_name) {
         return config(format!("an environment named '{env_name}' already exists"));
     }
-    let c = db::connect(&dev_name, dev_env).await?;
-    let dev_db: String = db::row(&c, "select current_database()::text", &[]).await?.get(0);
-    let database = format!("{dev_db}_scratch");
-    let exists: bool = db::row(&c, "select exists (select 1 from pg_database where datname = $1)", &[(&database, tokio_postgres::types::Type::TEXT)]).await?.get(0);
-    if exists {
-        return config(format!(
-            "a database named {database} already exists on {dev_name}'s server; if it may be erased, add it as the scratch environment yourself"
-        ));
+    let conn = Conn::open(&dev_name, dev_env).await?;
+    let database = format!("{}_scratch", conn.server_info().await?.database);
+    let taken = || {
+        config(format!("a database named {database} already exists on {dev_name}'s server; if it may be erased, add it as the scratch environment yourself"))
+    };
+    let no_rights = |needs: &str| {
+        crate::Error::Config(format!(
+            "{dev_name}'s login may not create databases ({needs}); ask an admin to create {database}, then add it as the scratch environment"
+        ))
+    };
+    match &conn {
+        Conn::Pg(c) => {
+            let exists: bool = db::row(c, "select exists (select 1 from pg_database where datname = $1)", &[(&database, tokio_postgres::types::Type::TEXT)]).await?.get(0);
+            if exists {
+                return taken();
+            }
+            c.batch_execute(&format!("CREATE DATABASE {}", q(&database))).await.map_err(|e| match e.as_db_error() {
+                Some(d) if d.code() == &tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE => no_rights("it needs CREATEDB"),
+                _ => e.into(),
+            })?;
+        }
+        Conn::Ms(c) => {
+            let exists = c.query("SELECT DB_ID(@P1)", &[&database.as_str()]).await?.first().and_then(|r| r.get::<i16, _>(0)).is_some();
+            if exists {
+                return taken();
+            }
+            c.batch(&format!("CREATE DATABASE {}", crate::mssql::quote(&database))).await.map_err(|e| match e {
+                crate::Error::Sql(m) if m.contains("error 262") => no_rights("it needs CREATE ANY DATABASE or dbcreator"),
+                other => other,
+            })?;
+        }
     }
-    c.batch_execute(&format!("CREATE DATABASE {}", q(&database))).await.map_err(|e| match e.as_db_error() {
-        Some(d) if d.code() == &tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE => crate::Error::Config(format!(
-            "{dev_name}'s login may not create databases (it needs CREATEDB); ask an admin to create {database}, then add it as the scratch environment"
-        )),
-        _ => e.into(),
-    })?;
     let env = crate::config::Environment {
         url: db::with_database(&dev_env.url, &database),
         user: dev_env.user.clone(),
@@ -1036,19 +1053,28 @@ pub async fn create_scratch(cfg: &Config, dev: Option<&str>, env_name: &str) -> 
 }
 
 /// Erases the scratch database and runs the migrations into it (up to `target` when given).
-pub(crate) async fn rebuild_scratch(cfg: &Config, name: &str, env: &crate::config::Environment, target: Option<&str>, log: Log<'_>) -> Result<Client> {
+pub(crate) async fn rebuild_scratch(cfg: &Config, name: &str, env: &crate::config::Environment, target: Option<&str>, log: Log<'_>) -> Result<Conn> {
     log(Level::Info, &format!("Rebuilding scratch database '{name}' from migrations{}", target.map(|t| format!(" up to {t}")).unwrap_or_default()));
-    let s = db::connect(name, env).await?;
-    runner::reset_schemas(&s, &cfg.project.schemas).await?;
+    let s = Conn::open(name, env).await?;
+    s.reset_schemas(&cfg.project.schemas).await?;
     let opts = MigrateOptions { out_of_order: true, target: target.map(Into::into), allow_non_empty: true, ..Default::default() };
     runner::migrate(cfg, Some(name), opts, log).await?;
     Ok(s)
 }
 
-pub(crate) async fn model_of(cfg: &Config, c: &Client) -> Result<Model> {
-    let mut m = introspect(c, &cfg.project.schemas, &cfg.project.history_table).await?;
-    apply_filters(&mut m, &cfg.project);
-    Ok(m)
+pub(crate) async fn model_of(cfg: &Config, c: &Conn) -> Result<Schema> {
+    match c {
+        Conn::Pg(c) => {
+            let mut m = introspect(c, &cfg.project.schemas, &cfg.project.history_table).await?;
+            apply_filters(&mut m, &cfg.project);
+            Ok(Schema::Pg(m))
+        }
+        Conn::Ms(c) => {
+            let mut m = crate::mssql_diff::introspect(c, &cfg.project.schemas, &cfg.project.history_table).await?;
+            crate::mssql_diff::apply_filters(&mut m, &cfg.project);
+            Ok(Schema::Ms(m))
+        }
+    }
 }
 
 /// Removes what the project's comparison filters exclude, with the triggers, grants and
@@ -1087,6 +1113,43 @@ pub fn apply_filters(m: &mut Model, p: &crate::config::Project) {
     m.objects.retain(|o| !belongs(o));
 }
 
+/// A database's schema, read by the engine it runs on.
+pub enum Schema {
+    Pg(Model),
+    Ms(crate::mssql_diff::MsModel),
+}
+
+impl Schema {
+    /// Changes that turn `target` into `self`, with undo steps.
+    pub fn diff(&self, target: &Schema) -> Vec<Change> {
+        match (self, target) {
+            (Schema::Pg(a), Schema::Pg(b)) => diff(a, b),
+            (Schema::Ms(a), Schema::Ms(b)) => crate::mssql_diff::diff(a, b),
+            _ => vec![],
+        }
+    }
+
+    /// Everything, as changes against an empty database (capture, squash).
+    pub fn create_all(&self) -> Vec<Change> {
+        match self {
+            Schema::Pg(m) => compare(m, &Model::default()),
+            Schema::Ms(m) => crate::mssql_diff::create_all(m),
+        }
+    }
+
+    fn not_compared_list(&self) -> &[(String, i64)] {
+        match self {
+            Schema::Pg(m) => &m.not_compared,
+            Schema::Ms(m) => &m.not_compared,
+        }
+    }
+
+    pub fn not_compared(&self, target: &Schema, source_name: &str, target_name: &str) -> Vec<String> {
+        let (a, b) = (Model { not_compared: self.not_compared_list().to_vec(), ..Default::default() }, Model { not_compared: target.not_compared_list().to_vec(), ..Default::default() });
+        not_compared(&a, &b, source_name, target_name)
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct Comparison {
     pub changes: Vec<Change>,
@@ -1103,10 +1166,13 @@ pub async fn dev_vs_migrations(cfg: &Config, dev: Option<&str>, scratch: Option<
     }
     let s = rebuild_scratch(cfg, &scratch_name, scratch_env, None, log).await?;
     log(Level::Info, &format!("Comparing '{dev_name}' with the migrations"));
-    let d = db::connect(&dev_name, dev_env).await?;
+    let d = Conn::open(&dev_name, dev_env).await?;
+    if d.engine() != s.engine() {
+        return config(format!("'{dev_name}' and '{scratch_name}' are different database engines"));
+    }
     let (source, target) = (model_of(cfg, &d).await?, model_of(cfg, &s).await?);
-    let changes = diff(&source, &target);
-    let not_compared = not_compared(&source, &target, &dev_name, "the scripts");
+    let changes = source.diff(&target);
+    let not_compared = source.not_compared(&target, &dev_name, "the scripts");
     log(Level::Info, &format!("{} difference(s)", changes.len()));
     for n in &not_compared {
         log(Level::Warn, &format!("not compared: {n}"));
@@ -1201,9 +1267,8 @@ pub fn add(cfg: &Config, repeatable: bool, description: &str, sql: &str) -> Resu
 /// (the state it describes), or the next version when the database has no history.
 pub async fn capture(cfg: &Config, env_name: Option<&str>, description: &str, as_baseline: bool) -> Result<Generated> {
     let (name, env) = cfg.pick(env_name)?;
-    let c = db::connect(&name, env).await?;
-    let model = model_of(cfg, &c).await?;
-    let changes = compare(&model, &Model::default());
+    let c = Conn::open(&name, env).await?;
+    let changes = model_of(cfg, &c).await?.create_all();
     if changes.is_empty() {
         return config(format!("'{name}' has nothing in {} to capture", cfg.project.schemas.join(", ")));
     }
@@ -1235,8 +1300,8 @@ pub async fn squash(cfg: &Config, up_to: Option<&str>, description: &str, scratc
         log(Level::Warn, &format!("placeholders are written into the script with the values of '{name}'; check them before committing"));
     }
     log(Level::Info, &format!("Building '{name}' from the versioned scripts{}", up_to.map(|v| format!(" up to {v}")).unwrap_or_default()));
-    let s = db::connect(&name, env).await?;
-    runner::reset_schemas(&s, &cfg.project.schemas).await?;
+    let s = Conn::open(&name, env).await?;
+    s.reset_schemas(&cfg.project.schemas).await?;
     let opts = MigrateOptions { out_of_order: true, target: up_to.map(Into::into), allow_non_empty: true, skip_repeatables: true, ..Default::default() };
     let applied = runner::migrate(cfg, Some(&name), opts, log).await?;
     let version = runner::info(cfg, Some(&name))
@@ -1246,7 +1311,7 @@ pub async fn squash(cfg: &Config, up_to: Option<&str>, description: &str, scratc
         .filter_map(|i| i.version)
         .max_by_key(|v| migration::Version::parse(v))
         .ok_or_else(|| crate::Error::Config("there are no versioned scripts to squash".into()))?;
-    let changes = compare(&model_of(cfg, &s).await?, &Model::default());
+    let changes = model_of(cfg, &s).await?.create_all();
     let mut g = generate(cfg, &changes, description, false)?;
     g.file_name = format!("B{version}__{slug}.sql");
     g.version = version.clone();
@@ -1263,7 +1328,7 @@ pub async fn squash(cfg: &Config, up_to: Option<&str>, description: &str, scratc
     let before = model_of(cfg, &rebuild_scratch(cfg, &name, env, None, log).await?).await?;
     let path = save(cfg, &g.file_name, &g.sql)?;
     log(Level::Info, &format!("Checking: rebuilding '{name}' from {}", g.file_name));
-    let check = async { Ok::<_, crate::Error>(diff(&before, &model_of(cfg, &rebuild_scratch(cfg, &name, env, None, log).await?).await?)) }.await;
+    let check = async { Ok::<_, crate::Error>(before.diff(&model_of(cfg, &rebuild_scratch(cfg, &name, env, None, log).await?).await?)) }.await;
     match check {
         Ok(d) if d.is_empty() => Ok((g, Some(path))),
         other => {

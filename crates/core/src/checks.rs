@@ -116,10 +116,10 @@ pub async fn check(cfg: &Config, env_name: Option<&str>, scratch: Option<&str>, 
 
         if opts.drift {
             log(Level::Info, &format!("Comparing {name} with what its applied scripts build"));
-            let c = db::connect(&name, env).await?;
+            let c = db::Conn::open(&name, env).await?;
             let actual = diff::model_of(cfg, &c).await?;
-            let drift = diff::diff(&actual, &expected);
-            report.not_compared = diff::not_compared(&actual, &expected, &name, "its scripts");
+            let drift = actual.diff(&expected);
+            report.not_compared = actual.not_compared(&expected, &name, "its scripts");
             log(Level::Info, &if drift.is_empty() { format!("No drift on {name}") } else { format!("{} object(s) on {name} differ from the scripts", drift.len()) });
             report.drift = Some(drift);
         }
@@ -127,9 +127,9 @@ pub async fn check(cfg: &Config, env_name: Option<&str>, scratch: Option<&str>, 
             log(Level::Info, "Running the pending scripts on the scratch database");
             runner::migrate(cfg, Some(&scratch_name), MigrateOptions { out_of_order: true, ..Default::default() }, log).await?;
             let after = diff::model_of(cfg, &s).await?;
-            let changes = diff::diff(&after, &expected);
+            let changes = after.diff(&expected);
             if report.not_compared.is_empty() {
-                report.not_compared = diff::not_compared(&after, &expected, "after the scripts", "now");
+                report.not_compared = after.not_compared(&expected, "after the scripts", "now");
             }
             log(Level::Info, &format!("The pending scripts change {} object(s)", changes.len()));
             report.changes = Some(changes);
