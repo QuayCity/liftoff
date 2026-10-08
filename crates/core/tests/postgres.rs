@@ -114,6 +114,26 @@ async fn full_slice() {
     assert!(runner::migrate(&cfg, Some("dev"), MigrateOptions::default(), &quiet).await.unwrap().applied.is_empty());
     assert!(runner::mark_applied(&cfg, Some("dev"), &g.file_name, &quiet).await.is_err(), "only pending scripts");
 
+    // 6b2. Capture: the whole dev schema as one script; on an empty database it rebuilds dev exactly.
+    let cap = diff::capture(&cfg, Some("dev"), "existing schema").await.unwrap();
+    assert!(cap.sql.contains("CREATE TABLE public.customers") && cap.sql.contains("FOREIGN KEY"), "{}", cap.sql);
+    runner::clean(&cfg, Some("scratch"), &quiet).await.unwrap();
+    let sc = db::connect("scratch", cfg.env("scratch").unwrap()).await.unwrap();
+    sc.batch_execute(&cap.sql).await.unwrap();
+    let dv = db::connect("dev", cfg.env("dev").unwrap()).await.unwrap();
+    let table = &cfg.project.history_table;
+    let left = diff::compare(&diff::introspect(&dv, &cfg.project.schemas, table).await.unwrap(), &diff::introspect(&sc, &cfg.project.schemas, table).await.unwrap());
+    assert!(left.is_empty(), "capture round trip left differences: {left:#?}");
+
+    // 6b3. Hand-written scripts get the next version (or R__ for repeatables).
+    let added = diff::add(&cfg, false, "fix totals", "").unwrap();
+    let name = added.file_name().unwrap().to_string_lossy().to_string();
+    assert!(name.starts_with('V') && name.ends_with("__fix_totals.sql"), "{name}");
+    assert!(diff::add(&cfg, true, "totals view", "select 1;").unwrap().ends_with("R__totals_view.sql"));
+    assert!(diff::add(&cfg, true, "totals view", "select 1;").is_err(), "never overwrites");
+    std::fs::remove_file(&added).unwrap();
+    std::fs::remove_file(dir.join("migrations/R__totals_view.sql")).unwrap();
+
     // 6c. Repair: a failed non-transactional script, an edited file and a deleted file.
     write(&dir, "V900__bad_index.sql", "create index concurrently bad_idx on no_such_table (x);\n");
     assert!(runner::migrate(&cfg, Some("test"), MigrateOptions::default(), &quiet).await.is_err());

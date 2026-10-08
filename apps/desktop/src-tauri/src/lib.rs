@@ -193,10 +193,39 @@ async fn migrations_info(path: String, env: String) -> R<Vec<runner::MigrationIn
 #[tauri::command]
 async fn migrate(app: AppHandle, path: String, env: String, out_of_order: bool) -> R<runner::MigrateResult> {
     let cfg = load(&path)?;
-    let log = move |level: Level, msg: &str| {
-        let _ = app.emit("run-log", LogEvent { level, message: msg.to_string() });
-    };
+    let log = emitter(app);
     runner::migrate(&cfg, Some(&env), MigrateOptions { out_of_order }, &log).await.map_err(rep)
+}
+
+fn emitter(app: AppHandle) -> impl Fn(Level, &str) + Sync {
+    move |level: Level, msg: &str| {
+        let _ = app.emit("run-log", LogEvent { level, message: msg.to_string() });
+    }
+}
+
+#[tauri::command]
+async fn validate(path: String, env: String) -> R<Vec<runner::MigrationInfo>> {
+    runner::validate_env(&load(&path)?, Some(&env)).await.map_err(rep)
+}
+
+#[tauri::command]
+async fn baseline(app: AppHandle, path: String, env: String, version: String, description: String) -> R<()> {
+    runner::baseline(&load(&path)?, Some(&env), &version, &description, &emitter(app)).await.map_err(rep)
+}
+
+#[tauri::command]
+async fn repair(app: AppHandle, path: String, env: String) -> R<runner::RepairReport> {
+    runner::repair(&load(&path)?, Some(&env), &emitter(app)).await.map_err(rep)
+}
+
+#[tauri::command]
+async fn clean(app: AppHandle, path: String, env: String) -> R<Vec<String>> {
+    runner::clean(&load(&path)?, Some(&env), &emitter(app)).await.map_err(rep)
+}
+
+#[tauri::command]
+async fn mark_applied(app: AppHandle, path: String, env: String, script: String) -> R<()> {
+    runner::mark_applied(&load(&path)?, Some(&env), &script, &emitter(app)).await.map_err(rep)
 }
 
 /* ---------- F03: changes (Pro) ---------- */
@@ -205,9 +234,7 @@ async fn migrate(app: AppHandle, path: String, env: String, out_of_order: bool) 
 async fn changes_diff(app: AppHandle, path: String) -> R<Vec<diff::Change>> {
     let cfg = load(&path)?;
     license::require("diff", None, Some(&cfg.root)).map_err(rep)?;
-    let log = move |level: Level, msg: &str| {
-        let _ = app.emit("run-log", LogEvent { level, message: msg.to_string() });
-    };
+    let log = emitter(app);
     diff::dev_vs_migrations(&cfg, None, None, &log).await.map_err(rep)
 }
 
@@ -221,6 +248,39 @@ fn migration_generate(path: String, changes: Vec<diff::Change>, description: Str
 #[tauri::command]
 fn migration_save(path: String, file_name: String, sql: String) -> R<PathBuf> {
     diff::save(&load(&path)?, &file_name, &sql).map_err(rep)
+}
+
+/* ---------- S09: scripts ---------- */
+
+#[derive(Serialize)]
+struct ScriptView {
+    kind: liftoff_core::migration::Kind,
+    version: Option<String>,
+    description: String,
+    file_name: String,
+    sql: String,
+}
+
+#[tauri::command]
+fn scripts_list(path: String) -> R<Vec<ScriptView>> {
+    let cfg = load(&path)?;
+    let scripts = liftoff_core::migration::scan(&cfg.migrations_dir()).map_err(rep)?;
+    Ok(scripts
+        .into_iter()
+        .map(|s| ScriptView { kind: s.kind, version: s.version.map(|v| v.text), description: s.description, file_name: s.file_name, sql: s.sql })
+        .collect())
+}
+
+#[tauri::command]
+fn script_add(path: String, repeatable: bool, description: String, sql: String) -> R<PathBuf> {
+    diff::add(&load(&path)?, repeatable, &description, &sql).map_err(rep)
+}
+
+#[tauri::command]
+async fn capture(path: String, env: String, description: String) -> R<diff::Generated> {
+    let cfg = load(&path)?;
+    license::require("generate", None, Some(&cfg.root)).map_err(rep)?;
+    diff::capture(&cfg, Some(&env), &description).await.map_err(rep)
 }
 
 /* ---------- licence ---------- */
@@ -248,6 +308,14 @@ pub fn run() {
             env_test_draft,
             migrations_info,
             migrate,
+            validate,
+            baseline,
+            repair,
+            clean,
+            mark_applied,
+            scripts_list,
+            script_add,
+            capture,
             changes_diff,
             migration_generate,
             migration_save,

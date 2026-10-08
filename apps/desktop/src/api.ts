@@ -22,9 +22,11 @@ export type MigrationInfo = {
   state: State; installed_on: string | null; execution_time_ms: number | null; checksum_mismatch: boolean
 }
 export type MigrateResult = { environment: string; applied: { script: string; version: string | null; execution_time_ms: number; transactional: boolean }[]; execution_time_ms: number }
-export type Change = { id: string; object_type: string; name: string; kind: 'added' | 'changed' | 'removed'; destructive: boolean; sql: string }
+export type Change = { id: string; object_type: string; name: string; kind: 'added' | 'changed' | 'removed'; destructive: boolean; sql: string; steps: { phase: number; sql: string }[] }
 export type Generated = { file_name: string; version: string; sql: string }
 export type LogEvent = { level: 'info' | 'warn'; message: string }
+export type ScriptView = { kind: 'versioned' | 'repeatable' | 'undo' | 'baseline'; version: string | null; description: string; file_name: string; sql: string }
+export type RepairReport = { removed_failed: string[]; realigned: string[]; forgotten: string[] }
 
 export const inTauri = '__TAURI_INTERNALS__' in window
 
@@ -42,6 +44,14 @@ type Api = {
   envTestDraft(env: EnvInput): Promise<ServerInfo>
   migrationsInfo(path: string, env: string): Promise<MigrationInfo[]>
   migrate(path: string, env: string, outOfOrder: boolean): Promise<MigrateResult>
+  validate(path: string, env: string): Promise<MigrationInfo[]>
+  baseline(path: string, env: string, version: string, description: string): Promise<void>
+  repair(path: string, env: string): Promise<RepairReport>
+  clean(path: string, env: string): Promise<string[]>
+  markApplied(path: string, env: string, script: string): Promise<void>
+  scriptsList(path: string): Promise<ScriptView[]>
+  scriptAdd(path: string, repeatable: boolean, description: string, sql: string): Promise<string>
+  capture(path: string, env: string, description: string): Promise<Generated>
   changesDiff(path: string): Promise<Change[]>
   migrationGenerate(path: string, changes: Change[], description: string): Promise<Generated>
   migrationSave(path: string, fileName: string, sql: string): Promise<string>
@@ -63,6 +73,14 @@ const real: Api = {
   envTestDraft: (env) => invoke('env_test_draft', { env }),
   migrationsInfo: (path, env) => invoke('migrations_info', { path, env }),
   migrate: (path, env, outOfOrder) => invoke('migrate', { path, env, outOfOrder }),
+  validate: (path, env) => invoke('validate', { path, env }),
+  baseline: (path, env, version, description) => invoke('baseline', { path, env, version, description }),
+  repair: (path, env) => invoke('repair', { path, env }),
+  clean: (path, env) => invoke('clean', { path, env }),
+  markApplied: (path, env, script) => invoke('mark_applied', { path, env, script }),
+  scriptsList: (path) => invoke('scripts_list', { path }),
+  scriptAdd: (path, repeatable, description, sql) => invoke('script_add', { path, repeatable, description, sql }),
+  capture: (path, env, description) => invoke('capture', { path, env, description }),
   changesDiff: (path) => invoke('changes_diff', { path }),
   migrationGenerate: (path, changes, description) => invoke('migration_generate', { path, changes, description }),
   migrationSave: (path, fileName, sql) => invoke('migration_save', { path, fileName, sql }),
@@ -143,15 +161,56 @@ const fakeApi: Api = {
     fake.applied[env] = fake.scripts.length
     return { environment: env, applied: pending.map((p) => ({ script: p.script, version: p.version, execution_time_ms: 52, transactional: true })), execution_time_ms: 300 * pending.length }
   },
+  validate: async (_p, env) => {
+    await wait()
+    if (env === 'staging') throw fail('LIFTOFF_VALIDATE', 'V20261003.1530__add_order_lines.sql changed after it was applied (checksum mismatch)', 12)
+    return fakeInfo(env)
+  },
+  baseline: async (_p, env, version) => {
+    await wait()
+    emit('info', `${env} is now at baseline ${version}`)
+  },
+  repair: async () => {
+    await wait()
+    emit('info', 'Repair: 0 failed row(s) removed, 1 checksum(s) updated, 0 missing script(s) forgotten')
+    return { removed_failed: [], realigned: ['V20261003.1530__add_order_lines.sql'], forgotten: [] }
+  },
+  clean: async (_p, env) => {
+    await wait()
+    fake.applied[env] = 0
+    emit('info', `Cleaned ${env}: public`)
+    return ['public']
+  },
+  markApplied: async (_p, env, script) => {
+    emit('info', `Recorded ${script} as applied on ${env} without running it`)
+  },
+  scriptsList: async () => {
+    await wait()
+    return fake.scripts.map(([version, description]) => ({
+      kind: 'versioned' as const, version, description,
+      file_name: `V${version}__${description.replaceAll(' ', '_')}.sql`,
+      sql: `-- ${description}\ncreate table if not exists ${description.split(' ').pop()} (id bigint primary key);\n`,
+    }))
+  },
+  scriptAdd: async (path, repeatable, description) => {
+    const name = repeatable ? `R__${description.replaceAll(' ', '_')}.sql` : `V20261008.1200__${description.replaceAll(' ', '_')}.sql`
+    if (!repeatable) fake.scripts.push(['20261008.1200', description])
+    return `${path}/migrations/${name}`
+  },
+  capture: async (_p, env, description) => {
+    if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'generate' is part of LiftOff Pro.", 20)
+    await wait(500)
+    return { file_name: `V20261008.1200__${description.replaceAll(' ', '_')}.sql`, version: '20261008.1200', sql: `-- ${description}\n-- captured from ${env}\n\nCREATE TABLE public.orders (\n    id bigserial\n);\n` }
+  },
   changesDiff: async () => {
     if (!fake.licensed) throw fail('LIFTOFF_LICENSE', "'diff' is part of LiftOff Pro. Set LIFTOFF_LICENSE (CI) or activate a licence in the desktop app.", 20)
     emit('info', "Rebuilding scratch database 'scratch' from migrations")
     await wait(600)
     emit('info', "Comparing 'local' with the migrations")
     return [
-      { id: 'table:public.customer', object_type: 'Tables', name: 'public.customer', kind: 'added', destructive: false, sql: 'CREATE TABLE public.customer (\n    id bigint GENERATED ALWAYS AS IDENTITY,\n    email text NOT NULL\n);' },
-      { id: 'table:public.orders', object_type: 'Tables', name: 'public.orders', kind: 'changed', destructive: false, sql: 'ALTER TABLE public.orders ADD COLUMN paid_at timestamp with time zone;' },
-      { id: 'table:public.legacy_cart', object_type: 'Tables', name: 'public.legacy_cart', kind: 'removed', destructive: true, sql: 'DROP TABLE public.legacy_cart;' },
+      { id: 'table:public.customer', object_type: 'Tables', name: 'public.customer', kind: 'added', destructive: false, sql: 'CREATE TABLE public.customer (\n    id bigint GENERATED ALWAYS AS IDENTITY,\n    email text NOT NULL\n);', steps: [] },
+      { id: 'table:public.orders', object_type: 'Tables', name: 'public.orders', kind: 'changed', destructive: false, sql: 'ALTER TABLE public.orders ADD COLUMN paid_at timestamp with time zone;', steps: [] },
+      { id: 'table:public.legacy_cart', object_type: 'Tables', name: 'public.legacy_cart', kind: 'removed', destructive: true, sql: 'DROP TABLE public.legacy_cart;', steps: [] },
     ]
   },
   migrationGenerate: async (_p, changes, description) => {

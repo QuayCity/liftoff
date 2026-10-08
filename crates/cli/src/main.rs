@@ -54,6 +54,43 @@ enum Command {
         #[arg(long)]
         out_of_order: bool,
     },
+    /// Check applied scripts against the files: failures, edits, missing files, out-of-order scripts
+    Validate,
+    /// Mark an existing database as already at a version, so older scripts never run there
+    Baseline {
+        #[arg(long, default_value = "1")]
+        version: String,
+        #[arg(long, default_value = "baseline")]
+        description: String,
+    },
+    /// Remove failed runs, accept edited scripts, forget scripts whose files were deleted
+    Repair,
+    /// Erase every object in the project's schemas (only where allow_clean = true, or a scratch database)
+    Clean,
+    /// Record a pending script as applied without running it (the dev database it was written from)
+    MarkApplied {
+        /// File name in the migrations folder, e.g. V20261008.1104__add_customers.sql
+        script: String,
+    },
+    /// Create the next migration file to write by hand
+    Add {
+        #[arg(long)]
+        description: String,
+        /// A repeatable script (R__), re-run whenever it changes
+        #[arg(long)]
+        repeatable: bool,
+        /// Read the SQL from this file instead of starting empty
+        #[arg(long)]
+        from_file: Option<PathBuf>,
+    },
+    /// Write the whole schema of an existing database as the next migration (Pro)
+    Capture {
+        #[arg(long, default_value = "existing schema")]
+        description: String,
+        /// Print the script instead of writing it
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Compare the dev database with what the migrations build (Pro)
     Diff {
         /// Dev environment (default: the first with role "dev")
@@ -77,6 +114,9 @@ enum Command {
         /// Print the script instead of writing it
         #[arg(long)]
         dry_run: bool,
+        /// Also record the new script as applied on the dev database (it already has the change)
+        #[arg(long)]
+        record_on_dev: bool,
     },
     /// Show the licence in use
     License,
@@ -135,6 +175,55 @@ async fn run(cli: &Cli) -> Result<(Value, String)> {
             let text = format!("Applied {} migration(s) to {} in {} ms", r.applied.len(), r.environment, r.execution_time_ms);
             Ok((to(&r)?, text))
         }
+        Command::Validate => {
+            let cfg = Config::load(root)?;
+            let infos = runner::validate_env(&cfg, env).await?;
+            Ok((to(&infos)?, format!("{} script(s) checked; no problems", infos.len())))
+        }
+        Command::Baseline { version, description } => {
+            let cfg = Config::load(root)?;
+            runner::baseline(&cfg, env, version, description, &log).await?;
+            Ok((json!({ "baseline": version }), String::new()))
+        }
+        Command::Repair => {
+            let cfg = Config::load(root)?;
+            let r = runner::repair(&cfg, env, &log).await?;
+            Ok((to(&r)?, String::new()))
+        }
+        Command::Clean => {
+            let cfg = Config::load(root)?;
+            let schemas = runner::clean(&cfg, env, &log).await?;
+            Ok((json!({ "cleaned": schemas }), String::new()))
+        }
+        Command::MarkApplied { script } => {
+            let cfg = Config::load(root)?;
+            runner::mark_applied(&cfg, env, script, &log).await?;
+            Ok((json!({ "recorded": script }), String::new()))
+        }
+        Command::Add { description, repeatable, from_file } => {
+            let cfg = Config::load(root)?;
+            let sql = match from_file {
+                Some(f) => std::fs::read_to_string(f)?,
+                None => String::new(),
+            };
+            let path = diff::add(&cfg, *repeatable, description, &sql)?;
+            Ok((json!({ "written": path }), format!("Created {}", path.display())))
+        }
+        Command::Capture { description, dry_run } => {
+            let cfg = Config::load(root)?;
+            license::require("generate", cli.license.as_deref(), Some(root))?;
+            let g = diff::capture(&cfg, env, description).await?;
+            if *dry_run {
+                return Ok((to(&g)?, g.sql.clone()));
+            }
+            let path = diff::save(&cfg, &g.file_name, &g.sql)?;
+            let hint = format!(
+                "Wrote {}\nThe database it came from already has this schema: run `liftoff baseline --version {}` on it so the script never runs there.",
+                path.display(),
+                g.version
+            );
+            Ok((json!({ "written": path, "version": g.version }), hint))
+        }
         Command::Diff { source, scratch } => {
             let cfg = Config::load(root)?;
             license::require("diff", cli.license.as_deref(), Some(root))?;
@@ -142,7 +231,7 @@ async fn run(cli: &Cli) -> Result<(Value, String)> {
             let text = changes.iter().map(|c| format!("{:<8} {}{}", format!("{:?}", c.kind).to_lowercase(), c.name, if c.destructive { "  (may lose data)" } else { "" })).collect::<Vec<_>>().join("\n");
             Ok((to(&changes)?, if text.is_empty() { "No differences".into() } else { text }))
         }
-        Command::Generate { description, source, scratch, skip_destructive, dry_run } => {
+        Command::Generate { description, source, scratch, skip_destructive, dry_run, record_on_dev } => {
             let cfg = Config::load(root)?;
             license::require("generate", cli.license.as_deref(), Some(root))?;
             let mut changes = diff::dev_vs_migrations(&cfg, source.as_deref(), scratch.as_deref(), &log).await?;
@@ -159,6 +248,10 @@ async fn run(cli: &Cli) -> Result<(Value, String)> {
                 return Ok((to(&g)?, g.sql.clone()));
             }
             let path = diff::save(&cfg, &g.file_name, &g.sql)?;
+            if *record_on_dev {
+                let (dev, _) = cfg.pick_role(source.as_deref(), config::Role::Dev)?;
+                runner::mark_applied(&cfg, Some(&dev), &g.file_name, &log).await?;
+            }
             Ok((json!({ "written": path, "version": g.version, "changes": changes.len() }), format!("Wrote {}", path.display())))
         }
         Command::License => {

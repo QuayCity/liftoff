@@ -2,7 +2,7 @@
 import { CheckCircle2, GitCompareArrows, Lock } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api, errorText, inTauri, type Change, type Generated, type Project } from '../api'
-import { Button, Field, Input } from '../ui/controls'
+import { Button, Checkbox, Field, Input } from '../ui/controls'
 import { ChangeList, LogConsole, type LogLine } from '../ui/data'
 import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
 import { Dialog, useToast } from '../ui/overlays'
@@ -20,6 +20,7 @@ export function Changes({ project, onSettings, onEnvironments }: { project: Proj
   const [touched, setTouched] = useState(false)
   const [draft, setDraft] = useState<Generated | null>(null)
   const [saving, setSaving] = useState(false)
+  const [recordOnDev, setRecordOnDev] = useState(true)
   const [log, setLog] = useState<LogLine[]>([])
   const listening = useRef(false)
   const auto = useRef(!inTauri && new URLSearchParams(location.search).has('autocompare'))
@@ -98,7 +99,13 @@ export function Changes({ project, onSettings, onEnvironments }: { project: Proj
     setSaving(true)
     try {
       await api.migrationSave(project.root, draft.file_name, draft.sql)
-      toast({ tone: 'success', title: `Wrote ${draft.file_name}` })
+      try {
+        if (recordOnDev) await api.markApplied(project.root, dev.name, draft.file_name)
+        toast({ tone: 'success', title: `Wrote ${draft.file_name}` })
+      } catch (e) {
+        // The file is saved either way; only the bookkeeping on dev failed.
+        toast({ tone: 'warning', title: `Wrote ${draft.file_name}, but couldn't record it on ${dev.name}: ${errorText(e)}` })
+      }
       setDraft(null)
       setDescription('')
       setTouched(false)
@@ -165,9 +172,8 @@ export function Changes({ project, onSettings, onEnvironments }: { project: Proj
         {draft && (
           <div className="flex flex-col gap-3">
             <div className="max-h-[50vh] overflow-auto"><CodeBlock label="Generated script" code={draft.sql} /></div>
-            <InlineAlert tone="info" title={`${dev.name} already has these changes`}>
-              Recording the script as applied on {dev.name} is not built yet; for now, run it on other environments only.
-            </InlineAlert>
+            <Checkbox checked={recordOnDev} onChange={setRecordOnDev}
+              label={`Record it as applied on ${dev.name}, which already has these changes`} />
           </div>
         )}
       </Dialog>

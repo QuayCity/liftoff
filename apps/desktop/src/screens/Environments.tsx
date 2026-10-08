@@ -1,11 +1,11 @@
 // Environments workspace: S08 (migrations per target) + S12 (manage targets) + S10 (run log, in place).
 import { Database, Pencil, Plus, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, errorText, type EnvView, type MigrationInfo, type Project, type State } from '../api'
-import { Button, IconButton, cx } from '../ui/controls'
+import { api, errorText, type EnvView, type Generated, type MigrationInfo, type Project, type State } from '../api'
+import { Button, Checkbox, Field, IconButton, Input, cx } from '../ui/controls'
 import { CommandBar, DataTable, EnvironmentColumn, LogConsole, type Env, type LogLine } from '../ui/data'
-import { Badge, Card, EmptyState, InlineAlert, StatePill, type MigrationState } from '../ui/display'
-import { useToast } from '../ui/overlays'
+import { Badge, Card, CodeBlock, EmptyState, InlineAlert, StatePill, type MigrationState } from '../ui/display'
+import { ConfirmDestructive, Dialog, useToast } from '../ui/overlays'
 import { ConnectionDialog } from './ConnectionDialog'
 
 type EnvStatus = { info?: MigrationInfo[]; error?: string; loading: boolean }
@@ -31,6 +31,9 @@ export function Environments({ project, onProject }: { project: Project; onProje
   const [log, setLog] = useState<LogLine[]>([])
   const [logStatus, setLogStatus] = useState<'streaming' | 'done' | 'failed'>('done')
   const runningRef = useRef<string | null>(null)
+  const [baselineFor, setBaselineFor] = useState<string | null>(null)
+  const [cleanFor, setCleanFor] = useState<string | null>(null)
+  const [captured, setCaptured] = useState<{ env: string; g: Generated } | null>(null)
 
   const load = useCallback(async (name: string) => {
     setStatus((s) => ({ ...s, [name]: { ...s[name], loading: true } }))
@@ -54,25 +57,52 @@ export function Environments({ project, onProject }: { project: Project; onProje
     return () => off?.()
   }, [])
 
-  const run = async (name: string) => {
+  /** Runs one operation on an environment with the log streaming in place; errors land in the log. */
+  const op = async (name: string, work: () => Promise<string | null>) => {
     runningRef.current = name
     setRunning(name)
     setSelected(name)
     setLog([])
     setLogStatus('streaming')
+    const stamp = () => new Date().toLocaleTimeString(undefined, { hour12: false })
     try {
-      const r = await api.migrate(project.root, name, false)
+      const done = await work()
       setLogStatus('done')
-      toast({ tone: 'success', title: r.applied.length ? `Ran ${r.applied.length} script${r.applied.length > 1 ? 's' : ''} on ${name}` : `${name} was already up to date` })
+      if (done) toast({ tone: 'success', title: done })
     } catch (e) {
-      const t = new Date().toLocaleTimeString(undefined, { hour12: false })
-      setLog((l) => [...l, { t, level: 'error', text: errorText(e) }])
+      // Validation errors list one problem per line.
+      setLog((l) => [...l, ...errorText(e).split('\n').map((text) => ({ t: stamp(), level: 'error' as const, text }))])
       setLogStatus('failed')
     } finally {
       runningRef.current = null
       setRunning(null)
       load(name)
     }
+  }
+
+  const run = (name: string) => op(name, async () => {
+    const r = await api.migrate(project.root, name, false)
+    return r.applied.length ? `Ran ${r.applied.length} script${r.applied.length > 1 ? 's' : ''} on ${name}` : `${name} was already up to date`
+  })
+
+  const command = (name: string, id: string) => {
+    if (id === 'info') return load(name)
+    if (id === 'migrate') return run(name)
+    if (id === 'validate') return op(name, async () => {
+      const infos = await api.validate(project.root, name)
+      return `${infos.length} scripts checked on ${name}: no problems`
+    })
+    if (id === 'repair') return op(name, async () => {
+      const r = await api.repair(project.root, name)
+      const n = r.removed_failed.length + r.realigned.length + r.forgotten.length
+      return n ? `Repaired ${name}` : `${name} needed no repair`
+    })
+    if (id === 'baseline') return setBaselineFor(name)
+    if (id === 'capture') return op(name, async () => {
+      setCaptured({ env: name, g: await api.capture(project.root, name, 'existing schema') })
+      return null
+    })
+    if (id === 'clean') return setCleanFor(name)
   }
 
   const column = (e: EnvView): Env => {
@@ -158,8 +188,16 @@ export function Environments({ project, onProject }: { project: Project; onProje
               env={sel.name}
               licensed={!!project.license}
               running={running === sel.name}
-              onRun={(c) => (c.id === 'info' ? load(sel.name) : run(sel.name))}
-              commands={[{ id: 'migrate', label: 'Run pending' }, { id: 'info', label: 'Refresh status' }]}
+              onRun={(c) => command(sel.name, c.id)}
+              commands={[
+                { id: 'migrate', label: 'Run pending' },
+                { id: 'info', label: 'Refresh status' },
+                { id: 'validate', label: 'Validate' },
+                { id: 'repair', label: 'Repair history' },
+                ...(selStatus?.info?.length === 0 || selStatus?.info?.every((i) => !i.installed_on) ? [{ id: 'baseline', label: 'Baseline…' }] : []),
+                ...(sel.role === 'scratch' || sel.allow_clean ? [{ id: 'clean', label: 'Clean…', destructive: true }] : []),
+                { id: 'capture', label: 'Capture as script…', paid: true },
+              ]}
             />
           </Card>
 
@@ -168,6 +206,84 @@ export function Environments({ project, onProject }: { project: Project; onProje
       )}
 
       <ConnectionDialog key={dialog ? dialog.editing?.name ?? 'new' : 'closed'} open={!!dialog} onOpenChange={(o) => !o && setDialog(null)} project={project} editing={dialog?.editing} onSaved={onProject} />
+      <CaptureDialog key={captured?.g.file_name ?? 'none'} captured={captured} project={project} onClose={() => setCaptured(null)}
+        onDone={(msg, tone) => { setCaptured(null); toast({ tone, title: msg }); if (captured) load(captured.env) }} />
+      <BaselineDialog key={baselineFor ?? 'none'} env={baselineFor} onClose={() => setBaselineFor(null)}
+        onConfirm={(name, version, description) => {
+          setBaselineFor(null)
+          op(name, async () => {
+            await api.baseline(project.root, name, version, description)
+            return `${name} marked as being at version ${version}`
+          })
+        }} />
+      <ConfirmDestructive open={!!cleanFor} onOpenChange={(o) => !o && setCleanFor(null)} title={`Clean ${cleanFor ?? ''}`} envName={cleanFor ?? ''}
+        action="Erase everything"
+        consequences={[`Drops every table, view and function in: ${project.schemas.join(', ')}.`, 'Deletes the migration history there too.', 'There is no undo.']}
+        onConfirm={() => {
+          const name = cleanFor!
+          setCleanFor(null)
+          op(name, async () => {
+            await api.clean(project.root, name)
+            return `${name} is empty`
+          })
+        }} />
     </div>
+  )
+}
+
+/** Review a captured schema script; save it and, by default, baseline the source database at its version. */
+function CaptureDialog({ captured, project, onClose, onDone }: {
+  captured: { env: string; g: Generated } | null; project: Project; onClose: () => void
+  onDone: (msg: string, tone: 'success' | 'warning') => void
+}) {
+  const [baselineIt, setBaselineIt] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  if (!captured) return null
+  const { env, g } = captured
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      await api.migrationSave(project.root, g.file_name, g.sql)
+    } catch (e) {
+      setError(errorText(e))
+      setSaving(false)
+      return
+    }
+    try {
+      if (baselineIt) await api.baseline(project.root, env, g.version, 'existing schema')
+      onDone(`Wrote ${g.file_name}${baselineIt ? ` and baselined ${env}` : ''}`, 'success')
+    } catch (e) {
+      onDone(`Wrote ${g.file_name}, but couldn't baseline ${env}: ${errorText(e)}`, 'warning')
+    }
+  }
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()} size="lg" title={`Schema of ${env} as a script`} description={g.file_name} submitting={saving}
+      footer={<><Button onClick={onClose} disabled={saving}>Cancel</Button><Button variant="primary" loading={saving} onClick={save}>Save to migrations</Button></>}>
+      <div className="flex flex-col gap-3">
+        <div className="max-h-[50vh] overflow-auto"><CodeBlock label="Captured schema" code={g.sql} /></div>
+        <Checkbox checked={baselineIt} onChange={setBaselineIt} label={`Baseline ${env} at ${g.version}, so this script never runs there`} />
+        {error && <InlineAlert tone="danger" title="Not saved">{error}</InlineAlert>}
+      </div>
+    </Dialog>
+  )
+}
+
+function BaselineDialog({ env, onClose, onConfirm }: { env: string | null; onClose: () => void; onConfirm: (env: string, version: string, description: string) => void }) {
+  const [version, setVersion] = useState('1')
+  const [description, setDescription] = useState('existing schema')
+  const valid = /^\d+([._]\d+)*$/.test(version)
+  return (
+    <Dialog open={!!env} onOpenChange={(o) => !o && onClose()} size="sm" title={`Baseline ${env ?? ''}`}
+      description="For a database that already has your schema: scripts up to this version will never run on it."
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" disabled={!valid} onClick={() => onConfirm(env!, version, description)}>Set baseline</Button></>}>
+      <div className="flex flex-col gap-3">
+        <Field label="Version" error={valid ? undefined : 'Numbers separated by . or _'} help="The last script whose changes this database already has.">
+          {(a) => <Input {...a} mono value={version} onChange={(e) => setVersion(e.target.value)} />}
+        </Field>
+        <Field label="Description">{(a) => <Input {...a} value={description} onChange={(e) => setDescription(e.target.value)} />}</Field>
+      </div>
+    </Dialog>
   )
 }

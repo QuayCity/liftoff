@@ -317,10 +317,7 @@ pub fn generate(cfg: &Config, changes: &[Change], description: &str) -> Result<G
     if changes.is_empty() {
         return config("nothing selected to put in the migration");
     }
-    let desc = description.trim();
-    if desc.is_empty() || !desc.chars().all(|c| c.is_alphanumeric() || c == ' ' || c == '_' || c == '-') {
-        return config("describe the migration with letters, digits, spaces, - or _");
-    }
+    let desc = check_description(description)?;
     let existing = migration::scan(&cfg.migrations_dir())?;
     let version = migration::next_version(&existing, time::OffsetDateTime::now_utc());
     let mut sql = format!("-- {desc}\n-- Written by LiftOff. Review before committing.\n");
@@ -338,6 +335,40 @@ pub fn generate(cfg: &Config, changes: &[Change], description: &str) -> Result<G
     }
     let file_name = format!("V{version}__{}.sql", desc.replace([' ', '-'], "_"));
     Ok(Generated { file_name, version, sql })
+}
+
+fn check_description(description: &str) -> Result<&str> {
+    let desc = description.trim();
+    if desc.is_empty() || desc.len() > 120 || !desc.chars().all(|c| c.is_alphanumeric() || c == ' ' || c == '_' || c == '-') {
+        return config("describe the migration in up to 120 letters, digits, spaces, - or _");
+    }
+    Ok(desc)
+}
+
+/// A hand-written script (C20): versioned gets the next version, repeatable gets `R__`.
+pub fn add(cfg: &Config, repeatable: bool, description: &str, sql: &str) -> Result<std::path::PathBuf> {
+    let desc = check_description(description)?.replace([' ', '-'], "_");
+    let file_name = if repeatable {
+        format!("R__{desc}.sql")
+    } else {
+        let existing = migration::scan(&cfg.migrations_dir())?;
+        format!("V{}__{desc}.sql", migration::next_version(&existing, time::OffsetDateTime::now_utc()))
+    };
+    let body = if sql.trim().is_empty() { format!("-- {}\n", description.trim()) } else { sql.to_string() };
+    save(cfg, &file_name, &body)
+}
+
+/// The whole schema of an existing database as one script (F07): run nothing, then
+/// `baseline` that database at the script's version so it never runs there.
+pub async fn capture(cfg: &Config, env_name: Option<&str>, description: &str) -> Result<Generated> {
+    let (name, env) = cfg.pick(env_name)?;
+    let c = db::connect(&name, env).await?;
+    let model = introspect(&c, &cfg.project.schemas, &cfg.project.history_table).await?;
+    let changes = compare(&model, &Model::new());
+    if changes.is_empty() {
+        return config(format!("'{name}' has no tables in {} to capture", cfg.project.schemas.join(", ")));
+    }
+    generate(cfg, &changes, description)
 }
 
 /// Writes a generated script into the migrations folder; never overwrites.
