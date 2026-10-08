@@ -200,6 +200,8 @@ pub struct MigrateOptions {
     pub target: Option<String>,
     /// write the SQL that would run instead of running it (C10); takes no lock and changes nothing
     pub dry_run: bool,
+    /// run every script on a database that already has tables but no history (normally refused)
+    pub allow_non_empty: bool,
 }
 
 /// Validates, then applies pending versioned scripts in order, then new or changed repeatables.
@@ -299,6 +301,22 @@ async fn migrate_locked(c: &tokio_postgres::Client, cfg: &Config, name: &str, sc
     db::ensure_history(c, schema, table).await?;
     let mut rows = db::read_history(c, schema, table).await?;
     let mut result = MigrateResult { environment: name.to_string(), ..Default::default() };
+
+    // Scripts that create what already exists fail half-way; ask for a baseline instead.
+    if rows.is_empty() && !opts.allow_non_empty && baseline_script(scripts, target).is_none() {
+        let objects: i64 = c
+            .query_one(
+                "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                 where n.nspname = any($1) and c.relkind in ('r', 'p', 'v', 'm', 'S') and c.relname <> $2
+                   and not exists (select 1 from pg_depend d where d.objid = c.oid and d.deptype in ('a', 'i', 'e'))",
+                &[&cfg.project.schemas, &table],
+            )
+            .await?
+            .get(0);
+        if objects > 0 {
+            return Err(Error::NotBaselined(name.to_string()));
+        }
+    }
 
     // A database without any history starts from the latest B script, when there is one.
     if rows.is_empty()

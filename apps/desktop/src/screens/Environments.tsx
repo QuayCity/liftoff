@@ -1,7 +1,7 @@
 // Environments workspace: S08 (migrations per target) + S12 (manage targets) + S10 (run log, in place).
 import { Database, Pencil, Plus, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, errorText, type EnvView, type Generated, type MigrationInfo, type Project, type State } from '../api'
+import { api, errorText, isErrorReport, type EnvView, type Generated, type MigrationInfo, type Project, type State } from '../api'
 import { Button, Checkbox, Field, IconButton, Input, cx } from '../ui/controls'
 import { CommandBar, DataTable, EnvironmentColumn, LogConsole, type Env, type LogLine } from '../ui/data'
 import { Badge, Card, CodeBlock, EmptyState, InlineAlert, StatePill, type MigrationState } from '../ui/display'
@@ -41,6 +41,7 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
   // Drift results from the Checks tab, shown on the board until the next check.
   const [drift, setDrift] = useState<Record<string, boolean>>({})
   const [importFor, setImportFor] = useState<string | null>(null)
+  const [notBaselined, setNotBaselined] = useState<string | null>(null)
 
   const load = useCallback(async (name: string) => {
     setStatus((s) => ({ ...s, [name]: { ...s[name], loading: true } }))
@@ -89,9 +90,18 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
     }
   }
 
-  const run = (name: string) => op(name, async () => {
-    const r = await api.migrate(project.root, name, false)
-    return r.applied.length ? `Ran ${r.applied.length} script${r.applied.length > 1 ? 's' : ''} on ${name}` : `${name} was already up to date`
+  const run = (name: string, allowNonEmpty = false) => op(name, async () => {
+    try {
+      const r = await api.migrate(project.root, name, false, allowNonEmpty)
+      return r.applied.length ? `Ran ${r.applied.length} script${r.applied.length > 1 ? 's' : ''} on ${name}` : `${name} was already up to date`
+    } catch (e) {
+      // A database that has tables but no history: ask instead of failing half-way through the scripts.
+      if (isErrorReport(e) && e.code === 'LIFTOFF_NOT_BASELINED') {
+        setNotBaselined(name)
+        return null
+      }
+      throw e
+    }
   })
 
   const command = (name: string, id: string) => {
@@ -242,6 +252,15 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
       <ConnectionDialog key={dialog ? dialog.editing?.name ?? 'new' : 'closed'} open={!!dialog} onOpenChange={(o) => !o && setDialog(null)} project={project} editing={dialog?.editing} onSaved={onProject} />
       <CaptureDialog key={`capture:${captured?.g.file_name ?? ''}`} captured={captured} project={project} onClose={() => setCaptured(null)}
         onDone={(msg, tone) => { setCaptured(null); toast({ tone, title: msg }); if (captured) load(captured.env) }} />
+      <Dialog open={!!notBaselined} onOpenChange={(o) => !o && setNotBaselined(null)} size="sm" title={`${notBaselined ?? ''} already has tables`}
+        description="It has no migration history, so running every script would try to create what is already there."
+        footer={<>
+          <Button onClick={() => setNotBaselined(null)}>Cancel</Button>
+          <Button variant="danger" onClick={() => { const n = notBaselined!; setNotBaselined(null); run(n, true) }}>Run them anyway</Button>
+          <Button variant="primary" onClick={() => { const n = notBaselined!; setNotBaselined(null); setBaselineFor(n) }}>Baseline…</Button>
+        </>}>
+        <p className="text-sm">Baseline it at the version it already matches, or import its Flyway history if it came from Flyway.</p>
+      </Dialog>
       <ImportDialog key={`import:${importFor ?? ''}`} env={importFor} onClose={() => setImportFor(null)}
         onConfirm={(name, table, acceptEdited) => {
           setImportFor(null)

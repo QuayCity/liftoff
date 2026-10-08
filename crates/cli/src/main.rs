@@ -76,6 +76,9 @@ enum Command {
         /// Print the SQL that would run instead of running it (Pro)
         #[arg(long)]
         dry_run: bool,
+        /// Run every script on a database that has tables but no history (normally refused)
+        #[arg(long)]
+        allow_non_empty: bool,
     },
     /// Undo the latest applied migration with its U script (Pro)
     Undo,
@@ -91,6 +94,9 @@ enum Command {
         /// Scratch environment rebuilt for the comparison (default: the first with role "scratch")
         #[arg(long)]
         scratch: Option<String>,
+        /// Also write a self-contained HTML report to this file
+        #[arg(long)]
+        report: Option<PathBuf>,
     },
     /// Check applied scripts against the files: failures, edits, missing files, out-of-order scripts
     Validate,
@@ -250,12 +256,12 @@ async fn run(cli: &Cli, adhoc: &Adhoc) -> Result<(Value, String)> {
             let infos = runner::info(&cfg, env).await?;
             Ok((to(&infos)?, info_table(&infos)))
         }
-        Command::Migrate { out_of_order, target, dry_run } => {
+        Command::Migrate { out_of_order, target, dry_run, allow_non_empty } => {
             let cfg = load(cli, adhoc)?;
             if *dry_run {
                 license::require("dry-run", cli.license.as_deref(), Some(root))?;
             }
-            let opts = MigrateOptions { out_of_order: *out_of_order, target: target.clone(), dry_run: *dry_run };
+            let opts = MigrateOptions { out_of_order: *out_of_order, target: target.clone(), dry_run: *dry_run, allow_non_empty: *allow_non_empty };
             let r = runner::migrate(&cfg, env, opts, &log).await?;
             let text = match &r.dry_run_sql {
                 Some(sql) => sql.clone(),
@@ -269,12 +275,17 @@ async fn run(cli: &Cli, adhoc: &Adhoc) -> Result<(Value, String)> {
             let r = runner::undo(&cfg, env, &log).await?;
             Ok((to(&r)?, String::new()))
         }
-        Command::Check { drift, changes, dry_run, scratch } => {
+        Command::Check { drift, changes, dry_run, scratch, report } => {
             let cfg = load(cli, adhoc)?;
             license::require("check", cli.license.as_deref(), Some(root))?;
             let all = !(*drift || *changes || *dry_run);
             let opts = CheckOptions { drift: all || *drift, changes: all || *changes, dry_run: all || *dry_run };
             let r = checks::check(&cfg, env, scratch.as_deref(), opts, &log).await?;
+            if let Some(file) = report {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                std::fs::write(file, checks::report_html(&r, &cfg.project.name, &format!("unix time {now}")))?;
+                log(Level::Info, &format!("Report written to {}", file.display()));
+            }
             let mut text = Vec::new();
             for (title, list) in [("Drift", &r.drift), ("Pending changes", &r.changes)] {
                 if let Some(list) = list {

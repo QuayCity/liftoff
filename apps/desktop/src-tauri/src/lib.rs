@@ -217,10 +217,10 @@ async fn migrations_info(path: String, env: String) -> R<Vec<runner::MigrationIn
 }
 
 #[tauri::command]
-async fn migrate(app: AppHandle, path: String, env: String, out_of_order: bool) -> R<runner::MigrateResult> {
+async fn migrate(app: AppHandle, path: String, env: String, out_of_order: bool, allow_non_empty: bool) -> R<runner::MigrateResult> {
     let cfg = load(&path)?;
     let log = emitter(app);
-    runner::migrate(&cfg, Some(&env), MigrateOptions { out_of_order, ..Default::default() }, &log).await.map_err(rep)
+    runner::migrate(&cfg, Some(&env), MigrateOptions { out_of_order, allow_non_empty, ..Default::default() }, &log).await.map_err(rep)
 }
 
 fn emitter(app: AppHandle) -> impl Fn(Level, &str) + Sync {
@@ -323,6 +323,14 @@ async fn capture(path: String, env: String, description: String, as_baseline: bo
     diff::capture(&cfg, Some(&env), &description, as_baseline).await.map_err(rep)
 }
 
+/// Writes the HTML report of a check to a file the user picked.
+#[tauri::command]
+fn report_save(path: String, report: checks::CheckReport, file: String) -> R<()> {
+    let cfg = load(&path)?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    std::fs::write(&file, checks::report_html(&report, &cfg.project.name, &format!("unix time {now}"))).map_err(|e| rep(e.into()))
+}
+
 #[tauri::command]
 async fn scratch_create(path: String) -> R<ProjectView> {
     let cfg = load(&path)?;
@@ -368,6 +376,7 @@ pub fn run() {
             script_add,
             capture,
             scratch_create,
+            report_save,
             changes_diff,
             migration_generate,
             migration_save,

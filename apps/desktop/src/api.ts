@@ -2,7 +2,7 @@
 // Outside Tauri (plain browser: screenshots, UI tests) the same signatures run against seeded fake data.
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
 
 export type Role = 'dev' | 'scratch' | 'test' | 'prod'
 export type ErrorReport = { code: string; exit_code: number; message: string }
@@ -53,7 +53,8 @@ type Api = {
   envTest(path: string, name: string): Promise<ServerInfo>
   envTestDraft(env: EnvInput): Promise<ServerInfo>
   migrationsInfo(path: string, env: string): Promise<MigrationInfo[]>
-  migrate(path: string, env: string, outOfOrder: boolean): Promise<MigrateResult>
+  migrate(path: string, env: string, outOfOrder: boolean, allowNonEmpty?: boolean): Promise<MigrateResult>
+  saveReport(path: string, report: CheckReport): Promise<string | null>
   validate(path: string, env: string): Promise<MigrationInfo[]>
   baseline(path: string, env: string, version: string, description: string): Promise<void>
   repair(path: string, env: string): Promise<RepairReport>
@@ -87,7 +88,13 @@ const real: Api = {
   envTest: (path, name) => invoke('env_test', { path, name }),
   envTestDraft: (env) => invoke('env_test_draft', { env }),
   migrationsInfo: (path, env) => invoke('migrations_info', { path, env }),
-  migrate: (path, env, outOfOrder) => invoke('migrate', { path, env, outOfOrder }),
+  migrate: (path, env, outOfOrder, allowNonEmpty = false) => invoke('migrate', { path, env, outOfOrder, allowNonEmpty }),
+  saveReport: async (path, report) => {
+    const file = await saveDialog({ defaultPath: `liftoff-checks-${report.environment}.html`, filters: [{ name: 'HTML report', extensions: ['html'] }] })
+    if (!file) return null
+    await invoke('report_save', { path, report, file })
+    return file
+  },
   validate: (path, env) => invoke('validate', { path, env }),
   baseline: (path, env, version, description) => invoke('baseline', { path, env, version, description }),
   repair: (path, env) => invoke('repair', { path, env }),
@@ -183,6 +190,7 @@ const fakeApi: Api = {
     if (env === 'production') throw fail('LIFTOFF_CONNECT', "could not connect to 'production': timed out", 10)
     return fakeInfo(env)
   },
+  saveReport: async (_p, report) => `C:/Users/me/liftoff-checks-${report.environment}.html`,
   migrate: async (_p, env) => {
     const pending = fakeInfo(env).filter((i) => i.state === 'pending')
     emit('info', `Connected to ${env} (shop as me, PostgreSQL 16.4)`)

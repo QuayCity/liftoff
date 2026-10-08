@@ -1030,7 +1030,7 @@ pub(crate) async fn rebuild_scratch(cfg: &Config, name: &str, env: &crate::confi
     log(Level::Info, &format!("Rebuilding scratch database '{name}' from migrations{}", target.map(|t| format!(" up to {t}")).unwrap_or_default()));
     let s = db::connect(name, env).await?;
     runner::reset_schemas(&s, &cfg.project.schemas).await?;
-    let opts = MigrateOptions { out_of_order: true, target: target.map(Into::into), ..Default::default() };
+    let opts = MigrateOptions { out_of_order: true, target: target.map(Into::into), allow_non_empty: true, ..Default::default() };
     runner::migrate(cfg, Some(name), opts, log).await?;
     Ok(s)
 }

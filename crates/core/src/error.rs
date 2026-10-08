@@ -17,6 +17,8 @@ pub enum Error {
     License(String),
     #[error("drift found on '{0}': it has changes the migration scripts did not make")]
     Drift(String),
+    #[error("'{0}' already has tables but no migration history. Baseline it first (`liftoff baseline --version …`), or run the scripts anyway with --allow-non-empty")]
+    NotBaselined(String),
     #[error("database error: {0}")]
     Db(#[from] tokio_postgres::Error),
     #[error("{0}")]
@@ -32,6 +34,7 @@ impl Error {
             Error::Validate(_) => 12,
             Error::License(_) => 20,
             Error::Drift(_) => 13,
+            Error::NotBaselined(_) => 12,
             Error::Db(_) | Error::Io(_) => 1,
         }
     }
@@ -44,6 +47,7 @@ impl Error {
             Error::Validate(_) => "LIFTOFF_VALIDATE",
             Error::License(_) => "LIFTOFF_LICENSE",
             Error::Drift(_) => "LIFTOFF_DRIFT",
+            Error::NotBaselined(_) => "LIFTOFF_NOT_BASELINED",
             Error::Db(_) => "LIFTOFF_DB",
             Error::Io(_) => "LIFTOFF_IO",
         }

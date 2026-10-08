@@ -110,13 +110,28 @@ fn ci_contract() {
                 let env = liftoff_core::config::Environment { url: format!("{base}/shop_test"), user: None, password: None, role: liftoff_core::config::Role::Test, allow_clean: false };
                 liftoff_core::db::connect("t", &env).await.unwrap().batch_execute("alter table orders add column hotfix int").await.unwrap();
             });
-            let r = liftoff(&dir, &["-e", "test", "check", "--drift", "--output-type", "json"], Some(l));
+            let report = dir.join("checks.html");
+            let r = liftoff(&dir, &["-e", "test", "check", "--drift", "--output-type", "json", "--report", report.to_str().unwrap()], Some(l));
             assert_eq!(r.code, 13, "{}\n{}", r.stdout, r.stderr);
+            let html = std::fs::read_to_string(&report).unwrap();
+            assert!(html.contains("Drift (1)") && html.contains("hotfix"), "{html}");
             let v = json(&r);
             assert_eq!(v["error"]["code"], "LIFTOFF_DRIFT");
             assert_eq!(v["result"]["drift"][0]["id"], "table:public.orders");
         }
         None => eprintln!("skipped the paid drift case: no ~/.liftoff/dev-license.txt"),
     }
+
+    // F07-N2: a database with tables but no history is not migrated blindly.
+    reset(&base, "shop_test");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let env = liftoff_core::config::Environment { url: format!("{base}/shop_test"), user: None, password: None, role: liftoff_core::config::Role::Test, allow_clean: false };
+        liftoff_core::db::connect("t", &env).await.unwrap().batch_execute("create table legacy (id int)").await.unwrap();
+    });
+    let r = liftoff(&dir, &["-e", "test", "migrate", "--output-type", "json"], None);
+    assert_eq!((r.code, json(&r)["error"]["code"].as_str()), (12, Some("LIFTOFF_NOT_BASELINED")), "{}", r.stderr);
+    let r = liftoff(&dir, &["-e", "test", "migrate", "--allow-non-empty"], None);
+    assert_eq!(r.code, 0, "{}", r.stderr);
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -175,6 +175,21 @@ test('F09-H1 clean the scratch database after typing its name', async () => {
   expect(psql('shop_scratch', "select count(*) from pg_tables where schemaname = 'public'")).toBe('0')
 })
 
+test('F07-N2 a database with tables but no history asks for a baseline instead of failing', async () => {
+  psql('shop_test', 'drop schema public cascade; create schema public; create table orders (id int primary key, note text);')
+  await column('test').getByRole('button', { name: 'test' }).click()
+  await details('test').getByRole('tab', { name: 'Migrations' }).click()
+  await details('test').getByRole('button', { name: 'Refresh' }).click()
+  await column('test').getByRole('button', { name: 'Run pending' }).click()
+  const ask = page.getByRole('dialog', { name: 'test already has tables' })
+  await expect(ask).toBeVisible()
+  await ask.getByRole('button', { name: 'Baseline…' }).click()
+  const baseline = page.getByRole('dialog', { name: 'Baseline test' })
+  await baseline.getByRole('button', { name: 'Set baseline' }).click()
+  await expect(page.getByText('test marked as being at version 1', { exact: true })).toBeVisible()
+  expect(psql('shop_test', "select type from liftoff_schema_history")).toBe('BASELINE')
+})
+
 test('X-CONSOLE no console errors in the real app', async () => {
   checkConsole()
 })

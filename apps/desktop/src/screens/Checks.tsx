@@ -6,6 +6,7 @@ import { Button, cx } from '../ui/controls'
 import { LogConsole, type LogLine } from '../ui/data'
 import { Badge, CodeBlock, InlineAlert } from '../ui/display'
 import { DiffView } from '../ui/diffview'
+import { useToast } from '../ui/overlays'
 import { NotCompared } from './Changes'
 
 type Which = 'drift' | 'changes' | 'dryRun'
@@ -13,6 +14,7 @@ type Which = 'drift' | 'changes' | 'dryRun'
 export function Checks({ project, env, onDrift, onSettings }: {
   project: Project; env: string; onDrift: (env: string, drifted: boolean) => void; onSettings?: () => void
 }) {
+  const toast = useToast()
   const [running, setRunning] = useState<Which | null>(null)
   const [report, setReport] = useState<{ which: Which; r: CheckReport } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -82,6 +84,18 @@ export function Checks({ project, env, onDrift, onSettings }: {
         />
       )}
       {!running && report?.which === 'dryRun' && report.r.dry_run_sql && <CodeBlock label={`Dry-run script for ${env}`} code={report.r.dry_run_sql} />}
+      {!running && report && (
+        <div>
+          <Button size="sm" onClick={async () => {
+            try {
+              const file = await api.saveReport(project.root, report.r)
+              if (file) toast({ tone: 'success', title: `Report saved to ${file}` })
+            } catch (e) {
+              setError(errorText(e))
+            }
+          }}>Save report…</Button>
+        </div>
+      )}
     </div>
   )
 }

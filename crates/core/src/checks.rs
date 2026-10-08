@@ -5,7 +5,7 @@ use crate::diff::{self, Change};
 use crate::error::Result;
 use crate::runner::{self, Level, Log, MigrateOptions, State};
 use crate::{db, migration::Version};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct CheckOptions {
@@ -14,7 +14,7 @@ pub struct CheckOptions {
     pub dry_run: bool,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CheckReport {
     pub environment: String,
     /// the latest version applied on the environment (what drift is measured against)
@@ -25,6 +25,7 @@ pub struct CheckReport {
     pub changes: Option<Vec<Change>>,
     pub dry_run_sql: Option<String>,
     /// objects that exist but were not compared (row-level security, rules, …)
+    #[serde(default)]
     pub not_compared: Vec<String>,
 }
 
@@ -32,6 +33,60 @@ impl CheckReport {
     pub fn has_drift(&self) -> bool {
         self.drift.as_ref().is_some_and(|d| !d.is_empty())
     }
+}
+
+fn esc(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// A self-contained HTML record of a check (no scripts, no external files), for audits and reviews.
+pub fn report_html(r: &CheckReport, project: &str, generated_at: &str) -> String {
+    let section = |title: &str, changes: &Option<Vec<Change>>, none: &str| -> String {
+        let Some(list) = changes else { return String::new() };
+        let mut h = format!("<h2>{} ({})</h2>", esc(title), list.len());
+        if list.is_empty() {
+            h.push_str(&format!("<p class=ok>{}</p>", esc(none)));
+        }
+        for c in list {
+            h.push_str(&format!(
+                "<details><summary><b>{}</b> {} {}</summary><div class=cols><div><h3>Before</h3><pre>{}</pre></div><div><h3>After</h3><pre>{}</pre></div></div><h3>SQL</h3><pre>{}</pre></details>",
+                esc(&format!("{:?}", c.kind).to_lowercase()),
+                esc(&c.name),
+                if c.destructive { "<span class=warn>may lose data</span>" } else { "" },
+                esc(c.before.as_deref().unwrap_or("(does not exist)")),
+                esc(c.after.as_deref().unwrap_or("(does not exist)")),
+                esc(&c.sql),
+            ));
+        }
+        h
+    };
+    let mut body = format!(
+        "<h1>Checks for {}</h1><p>Project {} &middot; generated {} &middot; applied up to {}</p>",
+        esc(&r.environment),
+        esc(project),
+        esc(generated_at),
+        esc(r.applied_up_to.as_deref().unwrap_or("nothing"))
+    );
+    if !r.not_compared.is_empty() {
+        body.push_str("<h2>Not compared</h2><ul>");
+        for n in &r.not_compared {
+            body.push_str(&format!("<li>{}</li>", esc(n)));
+        }
+        body.push_str("</ul>");
+    }
+    body.push_str(&section("Drift", &r.drift, "No drift: the database matches its applied scripts."));
+    body.push_str(&section("Pending changes", &r.changes, "The pending scripts change nothing."));
+    if let Some(sql) = &r.dry_run_sql {
+        body.push_str(&format!("<h2>Dry-run script</h2><pre>{}</pre>", esc(sql)));
+    }
+    format!(
+        "<!doctype html><html lang=en><head><meta charset=utf-8><title>Checks for {}</title><style>\
+         body{{font:14px system-ui,sans-serif;margin:2rem;max-width:72rem;color:#15181c}}\
+         pre{{background:#eef0f3;padding:.75rem;overflow:auto;white-space:pre-wrap}}\
+         .cols{{display:grid;grid-template-columns:1fr 1fr;gap:1rem}}.ok{{color:#17734a}}.warn{{color:#b42d25;margin-left:.5rem}}\
+         summary{{cursor:pointer;padding:.25rem 0}}</style></head><body>{body}</body></html>",
+        esc(&r.environment)
+    )
 }
 
 /// ponytail: the expected state is rebuilt by running every script up to the environment's latest
@@ -56,6 +111,7 @@ pub async fn check(cfg: &Config, env_name: Option<&str>, scratch: Option<&str>, 
         // "0" builds nothing: an environment without history should match an empty database.
         let target = applied.unwrap_or_else(|| "0".into());
         let s = diff::rebuild_scratch(cfg, &scratch_name, scratch_env, Some(&target), log).await?;
+        // (rebuild_scratch runs with allow_non_empty: it has just erased the database itself)
         let expected = diff::model_of(cfg, &s).await?;
 
         if opts.drift {
@@ -84,4 +140,24 @@ pub async fn check(cfg: &Config, env_name: Option<&str>, scratch: Option<&str>, 
         report.dry_run_sql = r.dry_run_sql;
     }
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report_escapes_and_is_self_contained() {
+        let r = CheckReport {
+            environment: "prod <eu>".into(),
+            drift: Some(vec![]),
+            dry_run_sql: Some("select '<script>';".into()),
+            not_compared: vec!["rules: 1 in prod, 0 in its scripts".into()],
+            ..Default::default()
+        };
+        let html = report_html(&r, "shop", "2026-10-08T12:00:00Z");
+        assert!(html.contains("Checks for prod &lt;eu&gt;") && html.contains("&lt;script&gt;") && !html.contains("<script>"));
+        assert!(html.contains("No drift") && html.contains("Not compared"));
+        assert!(!html.contains("http"), "no external resources");
+    }
 }
