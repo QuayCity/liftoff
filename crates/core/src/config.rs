@@ -86,6 +86,9 @@ impl Config {
             for v in [Some(&mut env.url), env.user.as_mut(), env.password.as_mut()].into_iter().flatten() {
                 *v = interpolate(v, |k| std::env::var(k).ok())?;
             }
+            if env.password.is_none() {
+                env.password = keyring_get(root, name);
+            }
         }
         Ok(Config { root: root.to_path_buf(), project: file.project, environments })
     }
@@ -165,9 +168,60 @@ pub fn init(root: &Path, name: &str, engine: &str) -> Result<()> {
     Ok(())
 }
 
+const KEYRING_SERVICE: &str = "liftoff";
+
+fn keyring_enabled() -> bool {
+    std::env::var_os("LIFTOFF_NO_KEYRING").is_none()
+}
+
+/// One keychain entry per project folder + environment.
+fn keyring_account(root: &Path, env: &str) -> String {
+    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    format!("{}#{env}", root.display())
+}
+
+fn keyring_get(root: &Path, env: &str) -> Option<String> {
+    if !keyring_enabled() {
+        return None;
+    }
+    keyring::Entry::new(KEYRING_SERVICE, &keyring_account(root, env)).ok()?.get_password().ok()
+}
+
+fn keyring_set(root: &Path, env: &str, password: &str) -> bool {
+    keyring_enabled()
+        && keyring::Entry::new(KEYRING_SERVICE, &keyring_account(root, env)).is_ok_and(|e| e.set_password(password).is_ok())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PasswordStore {
+    None,
+    /// OS keychain: Windows Credential Manager, macOS Keychain or Secret Service
+    Keychain,
+    /// fallback when no keychain is available: plain text in the git-ignored user file
+    UserFile,
+}
+
 /// Writes one environment into the project file (shared) or the user file (private).
-/// ponytail: passwords go to the git-ignored user file in plain text; OS keyring comes in milestone 2.
-pub fn save_environment(root: &Path, name: &str, env: &Environment, shared: bool) -> Result<()> {
+/// A password goes to the OS keychain when there is one, else to the git-ignored user file;
+/// it never goes to the shared project file.
+pub fn save_environment(root: &Path, name: &str, env: &Environment, shared: bool) -> Result<PasswordStore> {
+    save_environment_with(root, name, env, shared, keyring_enabled())
+}
+
+fn save_environment_with(root: &Path, name: &str, env: &Environment, shared: bool, use_keychain: bool) -> Result<PasswordStore> {
+    let mut env = env.clone();
+    let mut store = PasswordStore::None;
+    if let Some(pw) = env.password.clone() {
+        if use_keychain && keyring_set(root, name, &pw) {
+            env.password = None;
+            store = PasswordStore::Keychain;
+            remove_user_password(root, name)?;
+        } else {
+            store = PasswordStore::UserFile;
+        }
+    }
+    let env = &env;
     if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
         return config("environment names use letters, digits, - and _ only");
     }
@@ -196,6 +250,25 @@ pub fn save_environment(root: &Path, name: &str, env: &Environment, shared: bool
         patch.insert("environments".into(), envs.into());
         merge(&mut user, patch);
         std::fs::write(&user_path, toml::to_string_pretty(&user).or_else(|e| config(e.to_string()))?)?;
+    }
+    Ok(store)
+}
+
+/// Drops a plain-text password left in the user file once the keychain holds it.
+fn remove_user_password(root: &Path, name: &str) -> Result<()> {
+    let path = root.join(USER_FILE);
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut table = read_table(&path)?;
+    let removed = table
+        .get_mut("environments")
+        .and_then(|e| e.as_table_mut())
+        .and_then(|e| e.get_mut(name))
+        .and_then(|e| e.as_table_mut())
+        .is_some_and(|e| e.remove("password").is_some());
+    if removed {
+        std::fs::write(&path, toml::to_string_pretty(&table).or_else(|e| config(e.to_string()))?)?;
     }
     Ok(())
 }
@@ -258,6 +331,22 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "writes to the real OS keychain; run with --include-ignored"]
+    fn keychain_round_trip() {
+        let dir = std::env::temp_dir().join(format!("liftoff-kc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        init(&dir, "kc", "postgresql").unwrap();
+        let env = Environment { url: "postgres://h/db".into(), user: None, password: Some("kc-secret".into()), role: Role::Dev, allow_clean: false };
+        assert_eq!(save_environment_with(&dir, "dev", &env, false, true).unwrap(), PasswordStore::Keychain);
+        let user = std::fs::read_to_string(dir.join(USER_FILE)).unwrap();
+        assert!(!user.contains("kc-secret"), "password must not touch disk: {user}");
+        assert_eq!(Config::load(&dir).unwrap().env("dev").unwrap().password.as_deref(), Some("kc-secret"));
+        keyring::Entry::new(KEYRING_SERVICE, &keyring_account(&dir, "dev")).unwrap().delete_credential().unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn init_load_and_user_overrides() {
         let dir = std::env::temp_dir().join(format!("liftoff-cfg-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -265,7 +354,7 @@ mod tests {
         init(&dir, "shop", "postgresql").unwrap();
         assert!(init(&dir, "shop", "postgresql").is_err(), "second init must refuse");
         let env = Environment { url: "postgres://h/db".into(), user: Some("u".into()), password: Some("pw".into()), role: Role::Test, allow_clean: false };
-        save_environment(&dir, "staging", &env, true).unwrap();
+        assert_eq!(save_environment_with(&dir, "staging", &env, true, false).unwrap(), PasswordStore::UserFile);
         let shared = std::fs::read_to_string(dir.join(PROJECT_FILE)).unwrap();
         assert!(!shared.contains("pw"), "password leaked into the shared file");
         let cfg = Config::load(&dir).unwrap();

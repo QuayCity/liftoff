@@ -4,9 +4,31 @@ use crate::config::Environment;
 use crate::error::{Error, Result};
 use serde::Serialize;
 use std::str::FromStr;
-use tokio_postgres::{Client, NoTls};
+use std::sync::{Arc, OnceLock};
+use tokio_postgres::Client;
+use tokio_postgres_rustls::MakeRustlsConnect;
 
-/// ponytail: NoTls only; add rustls before connecting to anything outside localhost/private networks.
+/// TLS via rustls, trusting the operating system's certificate store. `sslmode` in the URL decides:
+/// `disable` never, `prefer` (default) when the server offers it, `require` always.
+/// Certificates are always verified when TLS is used; there is no "trust anything" mode.
+fn tls() -> MakeRustlsConnect {
+    static CONFIG: OnceLock<Arc<rustls::ClientConfig>> = OnceLock::new();
+    let config = CONFIG.get_or_init(|| {
+        let mut roots = rustls::RootCertStore::empty();
+        for cert in rustls_native_certs::load_native_certs().certs {
+            let _ = roots.add(cert);
+        }
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let config = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .expect("ring supports the default TLS versions")
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        Arc::new(config)
+    });
+    MakeRustlsConnect::new((**config).clone())
+}
+
 pub async fn connect(env_name: &str, env: &Environment) -> Result<Client> {
     let fail = |msg: String| Error::Connect { env: env_name.to_string(), msg };
     let mut cfg = tokio_postgres::Config::from_str(&env.url).map_err(|e| fail(format!("bad url: {e}")))?;
@@ -14,7 +36,7 @@ pub async fn connect(env_name: &str, env: &Environment) -> Result<Client> {
     if let Some(p) = &env.password { cfg.password(p); }
     cfg.application_name("liftoff");
     cfg.connect_timeout(std::time::Duration::from_secs(10));
-    let (client, conn) = cfg.connect(NoTls).await.map_err(|e| fail(e.to_string()))?;
+    let (client, conn) = cfg.connect(tls()).await.map_err(|e| fail(e.to_string()))?;
     tokio::spawn(async move {
         let _ = conn.await;
     });
