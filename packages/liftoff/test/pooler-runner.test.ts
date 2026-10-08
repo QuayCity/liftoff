@@ -6,6 +6,9 @@ import * as fs from 'node:fs'
 import { test } from 'node:test'
 import { saveProject } from '../src/core/config.ts'
 import * as runner from '../src/core/runner.ts'
+import { open } from '../src/core/db.ts'
+import * as diff from '../src/core/diff.ts'
+import type { PgConn } from '../src/core/postgres.ts'
 import { pgSchemaReset, project, sql } from './helpers.ts'
 
 const base = process.env.LIFTOFF_TEST_PGBOUNCER
@@ -40,4 +43,34 @@ test('the runner through PgBouncer transaction pooling', { skip: !base && 'set L
   const [r] = await Promise.all([runner.migrate(cfg, 'test'), release])
   assert.equal(r.applied.length, 1)
   assert.ok(Date.now() - started >= 2000, 'it waited for the live lease')
+})
+
+test('the diff loop through PgBouncer, without leaking session settings', { skip: !base && 'set LIFTOFF_TEST_PGBOUNCER' }, async () => {
+  const p = project('postgresql', [
+    ['dev', `${base}/shop_dev`, 'dev'],
+    ['scratch', `${base}/shop_scratch`, 'scratch'],
+    ['test', `${base}/shop_test`, 'test'],
+  ])
+  saveProject(p.dir, { ...p.cfg().project, lock: 'table' })
+  const cfg = p.cfg()
+  for (const e of ['dev', 'scratch', 'test']) await sql(cfg, e, pgSchemaReset)
+  p.write('V1__orders.sql', 'create table orders (id bigint primary key, note text);\n')
+  await runner.migrate(cfg, 'dev')
+  await runner.migrate(cfg, 'test')
+  await sql(cfg, 'dev', 'create table customers (id bigint generated always as identity primary key, email text not null);')
+  const cmp = await diff.devVsMigrations(cfg, undefined, undefined)
+  assert.deepEqual(cmp.changes.map((c) => c.id), ['table:public.customers'])
+  const g = diff.generate(cfg, cmp.changes, 'customers', false)
+  diff.save(cfg, g.file_name, g.sql)
+  await runner.migrate(cfg, 'test')
+  await runner.markApplied(cfg, 'dev', g.file_name)
+  assert.deepEqual((await diff.devVsMigrations(cfg, undefined, undefined)).changes, [])
+
+  // Introspection's SET LOCAL must not leak to whoever gets the pooled connection next.
+  for (let i = 0; i < 10; i++) {
+    const c = (await open('test', cfg.env('test'))) as PgConn
+    const [sp] = await c.row("select current_setting('search_path')")
+    await c.close()
+    assert.ok(!String(sp).includes('pg_catalog'), `search_path leaked: ${sp}`)
+  }
 })
