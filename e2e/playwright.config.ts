@@ -2,8 +2,8 @@ import { defineConfig } from '@playwright/test'
 
 // Two projects:
 //   ui  - the built frontend in browser-preview mode (seeded fake data layer, same API signatures)
-//   app - the real Tauri window over WebView2's debugging port, with the Rust core and Postgres
-//         (see app/real-app.spec.ts; needs LIFTOFF_TEST_PG and a built liftoff-desktop)
+//   app - the real Electron app with the TypeScript core and Postgres
+//         (see app/real-app.spec.ts; needs LIFTOFF_TEST_PG and a built apps/desktop)
 export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 10_000 },

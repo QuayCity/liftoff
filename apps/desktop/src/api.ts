@@ -1,8 +1,6 @@
-// Typed wrappers over the Tauri commands in src-tauri/src/lib.rs.
-// Outside Tauri (plain browser: screenshots, UI tests) the same signatures run against seeded fake data.
-import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
-import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog'
+// Typed wrappers over the desktop app's commands (electron/commands.ts), reached through the
+// bridge in electron/preload.ts. Outside the app (plain browser: screenshots, UI tests) the same
+// signatures run against seeded fake data.
 
 export type Role = 'dev' | 'scratch' | 'test' | 'prod'
 export type ErrorReport = { code: string; exit_code: number; message: string }
@@ -46,7 +44,24 @@ export type ModelChange = { path: string; object_type: string; kind: 'added' | '
 export type CiOptions = { stages: string[]; branch: string; checks: boolean; install: string }
 export type RepairReport = { removed_failed: string[]; realigned: string[]; forgotten: string[] }
 
-export const inTauri = '__TAURI_INTERNALS__' in window
+/** The bridge electron/preload.ts puts on the window. */
+type Bridge = {
+  invoke(name: string, args?: Record<string, unknown>): Promise<{ ok: true; value: unknown } | { ok: false; error: ErrorReport }>
+  pickFolder(): Promise<string | null>
+  saveFile(defaultPath: string, filterName: string, extensions: string[]): Promise<string | null>
+  onLog(cb: (e: LogEvent) => void): () => void
+}
+const bridge = (window as unknown as { liftoff?: Bridge }).liftoff
+
+/** True inside the desktop app, false in a plain browser. */
+export const inDesktop = bridge !== undefined
+
+/** Calls a command; a failure rejects with its ErrorReport (code, exit_code, message). */
+async function invoke<T>(name: string, args?: Record<string, unknown>): Promise<T> {
+  const r = await bridge!.invoke(name, args)
+  if (!r.ok) throw r.error
+  return r.value as T
+}
 
 export const isErrorReport = (e: unknown): e is ErrorReport => typeof e === 'object' && e !== null && 'message' in e && 'code' in e
 export const errorText = (e: unknown) => (isErrorReport(e) ? e.message : String(e))
@@ -97,10 +112,7 @@ type Api = {
 const real: Api = {
   recentProjects: () => invoke('recent_projects'),
   recentForget: (path) => invoke('recent_forget', { path }),
-  pickFolder: async () => {
-    const r = await openDialog({ directory: true, multiple: false })
-    return typeof r === 'string' ? r : null
-  },
+  pickFolder: () => bridge!.pickFolder(),
   projectInit: (path, name, engine) => invoke('project_init', { path, name, engine }),
   projectOpen: (path) => invoke('project_open', { path }),
   convertFlyway: (path) => invoke('project_convert_flyway', { path }),
@@ -121,7 +133,7 @@ const real: Api = {
   gitPush: (path) => invoke('git_push', { path }),
   gitPull: (path) => invoke('git_pull', { path }),
   saveReport: async (path, report) => {
-    const file = await saveDialog({ defaultPath: `liftoff-checks-${report.environment}.html`, filters: [{ name: 'HTML report', extensions: ['html'] }] })
+    const file = await bridge!.saveFile(`liftoff-checks-${report.environment}.html`, 'HTML report', ['html'])
     if (!file) return null
     await invoke('report_save', { path, report, file })
     return file
@@ -142,7 +154,7 @@ const real: Api = {
   check: (path, env, o) => invoke('check', { path, env, drift: o.drift, changes: o.changes, dryRun: o.dryRun }),
   migrationSave: (path, fileName, sql) => invoke('migration_save', { path, fileName, sql }),
   licenseActivate: (text) => invoke('license_activate', { text }),
-  onLog: (cb) => listen<LogEvent>('run-log', (e) => cb(e.payload)),
+  onLog: async (cb) => bridge!.onLog(cb),
 }
 
 /* ---------- fake: seeded, in memory, same behaviour shape ---------- */
@@ -389,4 +401,4 @@ const fakeApi: Api = {
   },
 }
 
-export const api: Api = inTauri ? real : fakeApi
+export const api: Api = inDesktop ? real : fakeApi

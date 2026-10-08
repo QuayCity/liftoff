@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, engineName, inTauri, type Project } from './api'
+import { api, engineName, inDesktop, type Project } from './api'
 import { Changes } from './screens/Changes'
 import { Environments } from './screens/Environments'
 import { Home } from './screens/Home'
@@ -16,7 +16,7 @@ export function App() {
 
   // Browser preview only: ?open=1 jumps straight into the seeded demo project (screenshots, UI tests).
   useEffect(() => {
-    if (!inTauri && params.get('open')) api.projectOpen('C:/repos/shop-db').then(setProject)
+    if (!inDesktop && params.get('open')) api.projectOpen('C:/repos/shop-db').then(setProject)
   }, [])
 
   return project ? <ProjectShell project={project} onProject={setProject} onClose={() => setProject(null)} /> : <Home onOpen={setProject} />

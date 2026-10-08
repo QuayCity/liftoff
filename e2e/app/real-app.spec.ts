@@ -1,10 +1,10 @@
-// The real desktop app: Tauri window + Rust core + Postgres, driven over WebView2's debugging port.
+// The real desktop app: the Electron window + the TypeScript core + Postgres, launched by Playwright.
 // Needs: LIFTOFF_TEST_PG (e.g. postgres://postgres:liftoff@localhost:55432) with databases shop_dev,
 // shop_scratch and shop_test in the Docker container named by LIFTOFF_TEST_PG_CONTAINER (default
-// liftoff-pg), and a built debug app: `cargo build -p liftoff-desktop`.
+// liftoff-pg), and a built app: `npm run build && npm run build:electron` in apps/desktop.
 // It backs up and restores the app's recent-projects file and the licence file it touches.
-import { chromium, expect, test, type Browser, type Page } from '@playwright/test'
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { _electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -14,14 +14,16 @@ import { expectNoA11yViolations, watchConsole } from '../helpers'
 const base = process.env.LIFTOFF_TEST_PG
 const container = process.env.LIFTOFF_TEST_PG_CONTAINER ?? 'liftoff-pg'
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const exe = path.join(repo, 'target/debug/liftoff-desktop.exe')
+const desktop = path.join(repo, 'apps/desktop')
+const electron = path.join(desktop, 'node_modules/electron/dist', process.platform === 'win32' ? 'electron.exe' : 'electron')
+const built = path.join(desktop, 'dist-electron/main.mjs')
 const appData = process.env.APPDATA ?? path.join(os.homedir(), 'AppData/Roaming')
 const recentFile = path.join(appData, 'app.liftoff.desktop/recent.json')
 const licenseFile = path.join(appData, 'liftoff/license.txt')
 const devLicense = path.join(os.homedir(), '.liftoff/dev-license.txt')
 const hasLicense = fs.existsSync(devLicense)
 
-test.skip(!base || process.platform !== 'win32' || !fs.existsSync(exe), 'needs LIFTOFF_TEST_PG, Windows and a built liftoff-desktop')
+test.skip(!base || process.platform !== 'win32' || !fs.existsSync(built), 'needs LIFTOFF_TEST_PG, Windows and a built desktop app')
 test.describe.configure({ mode: 'serial' })
 
 const psql = (db: string, sql: string) =>
@@ -40,25 +42,8 @@ function restoreAll() {
   }
 }
 
-async function waitFor(url: string, ms: number) {
-  const until = Date.now() + ms
-  while (Date.now() < until) {
-    try {
-      if ((await fetch(url)).ok) return
-    } catch {
-      /* not up yet */
-    }
-    await new Promise((r) => setTimeout(r, 500))
-  }
-  throw new Error(`${url} did not come up`)
-}
-
-const kill = (p?: ChildProcess) => p?.pid && spawn('taskkill', ['/PID', String(p.pid), '/T', '/F'])
-
 let project: string
-let vite: ChildProcess | undefined
-let app: ChildProcess | undefined
-let browser: Browser
+let app: ElectronApplication
 let page: Page
 let checkConsole: () => void
 
@@ -78,20 +63,14 @@ test.beforeAll(async () => {
   if (hasLicense) replace(licenseFile, fs.readFileSync(devLicense, 'utf8'))
   else replace(licenseFile, '')
 
-  vite = spawn('npm', ['run', 'dev', '--', '--port', '5173', '--strictPort'], { cwd: path.join(repo, 'apps/desktop'), shell: true, stdio: 'ignore' })
-  await waitFor('http://localhost:5173', 60_000)
-  app = spawn(exe, [], { env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9333' }, stdio: 'ignore' })
-  await waitFor('http://127.0.0.1:9333/json/version', 60_000)
-  browser = await chromium.connectOverCDP('http://127.0.0.1:9333')
-  page = browser.contexts()[0].pages()[0]
+  app = await _electron.launch({ executablePath: electron, args: [desktop], cwd: desktop })
+  page = await app.firstWindow()
   checkConsole = watchConsole(page)
   await expect(page.getByRole('heading', { name: 'LiftOff' })).toBeVisible({ timeout: 30_000 })
 })
 
 test.afterAll(async () => {
-  await browser?.close().catch(() => {})
-  kill(app)
-  kill(vite)
+  await app?.close().catch(() => {})
   restoreAll()
   if (project) fs.rmSync(project, { recursive: true, force: true })
 })

@@ -13,7 +13,9 @@ export function watchConsole(page: Page) {
 
 /** axe scan; failures list rule id, impact and the first offending element. */
 export async function expectNoA11yViolations(page: Page, label: string) {
-  const r = await new AxeBuilder({ page }).analyze()
+  // Legacy mode runs entirely in this page: the desktop app (Electron) cannot open the extra page
+  // axe otherwise uses, and LiftOff has no iframes for it to combine.
+  const r = await new AxeBuilder({ page }).setLegacyMode(true).analyze()
   const found = r.violations.map((v) => `${v.id} (${v.impact}): ${v.nodes[0]?.target.join(' ')} - ${v.help}`)
   expect(found, `axe violations on ${label}`).toEqual([])
 }

@@ -13,7 +13,7 @@ export function TitleBar({ project, workspace, tabsActive = true, onWorkspace, o
   onPalette?: () => void; onSettings: () => void; onClose?: () => void
 }) {
   return (
-    <header data-tauri-drag-region className="flex h-10 shrink-0 items-center gap-3 border-b border-border bg-surface px-2">
+    <header className="flex h-10 shrink-0 items-center gap-3 border-b border-border bg-surface px-2">
       <Menu
         trigger={<button className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm font-semibold hover:bg-surface-sunken">{project}<ChevronDown aria-hidden className="size-3.5 text-muted" /></button>}
         items={[{ label: 'Close project', onSelect: () => onClose?.() }]}
@@ -34,7 +34,7 @@ export function TitleBar({ project, workspace, tabsActive = true, onWorkspace, o
           )
         })}
       </nav>
-      <div data-tauri-drag-region className="flex-1 self-stretch" />
+      <div className="flex-1 self-stretch" />
       {onPalette && (
         <button onClick={onPalette} className="inline-flex h-7 items-center gap-2 rounded-md border border-border px-2 text-sm text-muted hover:bg-surface-sunken">
           <Search aria-hidden className="size-3.5" />Commands<Kbd>Ctrl K</Kbd>

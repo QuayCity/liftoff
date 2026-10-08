@@ -3,6 +3,8 @@
 
 export type ErrorCode =
   | 'LIFTOFF_CONFIG'
+  /** the desktop app: the folder has a Flyway project to convert */
+  | 'LIFTOFF_FLYWAY_PROJECT'
   | 'LIFTOFF_CONNECT'
   | 'LIFTOFF_MIGRATION_FAILED'
   | 'LIFTOFF_VALIDATE'

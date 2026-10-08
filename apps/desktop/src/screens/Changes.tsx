@@ -2,7 +2,7 @@
 import { CheckCircle2, GitCompareArrows, Lock } from 'lucide-react'
 import { Tabs } from 'radix-ui'
 import { useEffect, useRef, useState } from 'react'
-import { api, errorText, inTauri, type Change, type Generated, type ModelChange, type Project } from '../api'
+import { api, errorText, inDesktop, type Change, type Generated, type ModelChange, type Project } from '../api'
 import { Button, Checkbox, Field, Input } from '../ui/controls'
 import { ChangeList, LogConsole, type LogLine } from '../ui/data'
 import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
@@ -29,7 +29,7 @@ export function Changes({ project, onSettings, onEnvironments, onProject }: { pr
   const [withUndo, setWithUndo] = useState(false)
   const [log, setLog] = useState<LogLine[]>([])
   const listening = useRef(false)
-  const auto = useRef(!inTauri && new URLSearchParams(location.search).has('autocompare'))
+  const auto = useRef(!inDesktop && new URLSearchParams(location.search).has('autocompare'))
 
   useEffect(() => {
     let off: (() => void) | undefined
