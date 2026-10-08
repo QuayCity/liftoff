@@ -5,6 +5,7 @@
 
 use liftoff_core::config::{self, Config, Environment, Role};
 use liftoff_core::runner::{self, Level, MigrateOptions, State};
+use liftoff_core::checks::{self, CheckOptions};
 use liftoff_core::{db, diff, Error};
 use std::path::{Path, PathBuf};
 
@@ -91,14 +92,28 @@ async fn full_slice() {
                                  created_at timestamptz default now(), check (length(\"Name\") > 0));
          alter table orders add column customer_id bigint references customers(id);
          alter table orders add primary key (id);
-         create index orders_customer_idx on orders (customer_id) where customer_id is not null;",
+         create index orders_customer_idx on orders (customer_id) where customer_id is not null;
+         create type mood as enum ('sad', 'ok', 'happy');
+         alter table customers add column mood mood not null default 'ok';
+         create sequence invoice_no start 1000;
+         create function tax(amount numeric) returns numeric language sql immutable as $$ select amount * 0.21 $$;
+         create view order_totals as select id, total, tax(total) as vat from orders;
+         create view big_orders as select id from order_totals where total > 100;",
     )
     .await
     .unwrap();
     let changes = diff::dev_vs_migrations(&cfg, None, None, &quiet).await.unwrap();
-    let names: Vec<&str> = changes.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, ["public.customers", "public.orders"], "{changes:#?}");
-    let g = diff::generate(&cfg, &changes, "customers and totals").unwrap();
+    let mut ids: Vec<&str> = changes.iter().map(|c| c.id.as_str()).collect();
+    ids.sort();
+    assert_eq!(ids, [
+        "function:public.tax(amount numeric)", "sequence:public.invoice_no", "table:public.customers", "table:public.orders",
+        "type:public.mood", "view:public.big_orders", "view:public.order_totals",
+    ], "{changes:#?}");
+    assert!(changes.iter().all(|c| c.after.is_some()), "every change carries its after-DDL");
+    let g = diff::generate(&cfg, &changes, "customers and totals", true).unwrap();
+    let u = g.undo.as_ref().unwrap();
+    assert!(u.file_name.starts_with('U') && u.sql.contains("DROP TABLE public.customers;"), "{}", u.sql);
+    diff::save(&cfg, &u.file_name, &u.sql).unwrap();
     assert!(g.file_name.starts_with('V') && g.file_name.ends_with("__customers_and_totals.sql"), "{}", g.file_name);
     diff::save(&cfg, &g.file_name, &g.sql).unwrap();
     assert!(diff::save(&cfg, &g.file_name, &g.sql).is_err(), "never overwrites");
@@ -106,6 +121,32 @@ async fn full_slice() {
     assert_eq!(r.applied.len(), 1);
     let after = diff::dev_vs_migrations(&cfg, None, None, &quiet).await.unwrap();
     assert!(after.is_empty(), "round trip left differences: {after:#?}\n--- script ---\n{}", g.sql);
+
+    // 6a. Undo, dry run, changes report, redo, drift.
+    let both = CheckOptions { drift: true, changes: true, dry_run: false };
+    let report = checks::check(&cfg, Some("test"), None, both, &quiet).await.unwrap();
+    assert!(!report.has_drift(), "freshly migrated: {:#?}", report.drift);
+    assert!(report.changes.as_ref().unwrap().is_empty(), "nothing pending");
+
+    let undone = runner::undo(&cfg, Some("test"), &quiet).await.unwrap();
+    assert_eq!(undone.script, u.file_name);
+    let state_of = |infos: &[runner::MigrationInfo], s: &str| infos.iter().find(|i| i.script == s).map(|i| i.state);
+    assert_eq!(state_of(&runner::info(&cfg, Some("test")).await.unwrap(), &g.file_name), Some(State::Pending));
+    let report = checks::check(&cfg, Some("test"), None, CheckOptions { drift: true, changes: true, dry_run: true }, &quiet).await.unwrap();
+    assert!(!report.has_drift(), "undo restores what the earlier scripts built: {:#?}", report.drift);
+    assert_eq!(report.changes.as_ref().unwrap().len(), 7, "the pending script changes 7 objects");
+    let dry = report.dry_run_sql.unwrap();
+    assert!(dry.contains(&g.file_name) && dry.contains("BEGIN;") && dry.contains("INSERT INTO public.liftoff_schema_history"), "{dry}");
+    assert_eq!(state_of(&runner::info(&cfg, Some("test")).await.unwrap(), &g.file_name), Some(State::Pending), "dry run changes nothing");
+
+    let r = runner::migrate(&cfg, Some("test"), MigrateOptions::default(), &quiet).await.unwrap();
+    assert_eq!(r.applied.len(), 1, "redo after undo");
+    c.batch_execute("alter table orders add column hotfix int").await.unwrap();
+    let report = checks::check(&cfg, Some("test"), None, CheckOptions { drift: true, ..Default::default() }, &quiet).await.unwrap();
+    let drift = report.drift.unwrap();
+    assert_eq!(drift.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["table:public.orders"], "{drift:#?}");
+    assert!(drift[0].sql.contains("ADD COLUMN hotfix integer"), "{}", drift[0].sql);
+    c.batch_execute("alter table orders drop column hotfix").await.unwrap();
 
     // 6b. Dev already has the generated change: record it there instead of running it.
     let state_on = |infos: &[runner::MigrationInfo], s: &str| infos.iter().find(|i| i.script == s).map(|i| i.state);
@@ -122,7 +163,7 @@ async fn full_slice() {
     sc.batch_execute(&cap.sql).await.unwrap();
     let dv = db::connect("dev", cfg.env("dev").unwrap()).await.unwrap();
     let table = &cfg.project.history_table;
-    let left = diff::compare(&diff::introspect(&dv, &cfg.project.schemas, table).await.unwrap(), &diff::introspect(&sc, &cfg.project.schemas, table).await.unwrap());
+    let left = diff::diff(&diff::introspect(&dv, &cfg.project.schemas, table).await.unwrap(), &diff::introspect(&sc, &cfg.project.schemas, table).await.unwrap());
     assert!(left.is_empty(), "capture round trip left differences: {left:#?}");
 
     // 6b3. Hand-written scripts get the next version (or R__ for repeatables).

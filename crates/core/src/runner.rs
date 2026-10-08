@@ -175,6 +175,8 @@ pub struct MigrateResult {
     pub environment: String,
     pub applied: Vec<Applied>,
     pub execution_time_ms: u128,
+    /// with `dry_run`: everything that would be sent to the database, nothing ran
+    pub dry_run_sql: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -185,24 +187,38 @@ pub struct Applied {
     pub transactional: bool,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct MigrateOptions {
     /// also run versioned scripts older than the latest applied one
     pub out_of_order: bool,
+    /// stop after this version (repeatables still run)
+    pub target: Option<String>,
+    /// write the SQL that would run instead of running it (C10); takes no lock and changes nothing
+    pub dry_run: bool,
 }
 
 /// Validates, then applies pending versioned scripts in order, then new or changed repeatables.
 pub async fn migrate(cfg: &Config, env_name: Option<&str>, opts: MigrateOptions, log: Log<'_>) -> Result<MigrateResult> {
     let started = Instant::now();
     let (name, env) = cfg.pick(env_name)?;
+    let target = match &opts.target {
+        Some(t) => Some(Version::parse(t).ok_or_else(|| Error::Config(format!("target '{t}' must be numbers separated by . or _")))?),
+        None => None,
+    };
     let scripts = migration::scan(&cfg.migrations_dir())?;
     let c = db::connect(&name, env).await?;
     let info = db::server_info(&c).await?;
     log(Level::Info, &format!("Connected to {name} ({} as {}, PostgreSQL {})", info.database, info.user, info.version));
 
     let (schema, table) = (cfg.history_schema(), cfg.project.history_table.as_str());
+    if opts.dry_run {
+        let rows = db::read_history(&c, schema, table).await?;
+        let mut result = dry_run(cfg, &name, &scripts, &rows, &opts, target.as_ref())?;
+        result.execution_time_ms = started.elapsed().as_millis();
+        return Ok(result);
+    }
     db::lock(&c, schema, table, || log(Level::Info, "Another run holds the lock on this database; waiting")).await?;
-    let result = migrate_locked(&c, cfg, &name, &scripts, opts, log).await;
+    let result = migrate_locked(&c, cfg, &name, &scripts, &opts, target.as_ref(), log).await;
     // Unlock even on failure; a dropped connection would release it too.
     let _ = db::unlock(&c, schema, table).await;
     let mut result = result?;
@@ -210,15 +226,9 @@ pub async fn migrate(cfg: &Config, env_name: Option<&str>, opts: MigrateOptions,
     Ok(result)
 }
 
-async fn migrate_locked(c: &tokio_postgres::Client, cfg: &Config, name: &str, scripts: &[Script], opts: MigrateOptions, log: Log<'_>) -> Result<MigrateResult> {
-    let (schema, table) = (cfg.history_schema(), cfg.project.history_table.as_str());
-    db::ensure_history(c, schema, table).await?;
-    let rows = db::read_history(c, schema, table).await?;
-    let infos = compute(scripts, &rows);
-
-    validate(&infos, opts)?;
-
-    let todo: Vec<&MigrationInfo> = infos
+/// The scripts migrate would run, in order.
+fn plan<'a>(infos: &'a [MigrationInfo], opts: &MigrateOptions, target: Option<&Version>) -> Vec<&'a MigrationInfo> {
+    infos
         .iter()
         .filter(|i| match (i.kind, i.state) {
             (Kind::Versioned, State::Pending) => true,
@@ -226,7 +236,53 @@ async fn migrate_locked(c: &tokio_postgres::Client, cfg: &Config, name: &str, sc
             (Kind::Repeatable, State::Pending | State::Outdated) => true,
             _ => false,
         })
-        .collect();
+        .filter(|i| match (target, i.version.as_deref().and_then(Version::parse)) {
+            (Some(t), Some(v)) => v <= *t,
+            _ => true,
+        })
+        .collect()
+}
+
+fn dry_run(cfg: &Config, name: &str, scripts: &[Script], rows: &[HistoryRow], opts: &MigrateOptions, target: Option<&Version>) -> Result<MigrateResult> {
+    let infos = compute(scripts, rows);
+    validate(&infos, opts)?;
+    let (schema, table) = (db::quote_ident(cfg.history_schema()), db::quote_ident(&cfg.project.history_table));
+    let mut sql = format!("-- Dry run for {name}: nothing below has been executed.\n-- History table: {schema}.{table}\n");
+    let mut result = MigrateResult { environment: name.to_string(), ..Default::default() };
+    for i in plan(&infos, opts, target) {
+        let s = scripts.iter().find(|s| s.file_name == i.script).unwrap();
+        let transactional = !migration::needs_no_transaction(&s.sql);
+        let version = s.version.as_ref().map(|v| format!("'{}'", v.text)).unwrap_or_else(|| "NULL".into());
+        let record = format!(
+            "INSERT INTO {schema}.{table} (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success)\n  SELECT coalesce(max(installed_rank), 0) + 1, {version}, '{}', 'SQL', '{}', {}, current_user, 0, true FROM {schema}.{table};",
+            s.description.replace('\'', "''"),
+            s.file_name.replace('\'', "''"),
+            s.checksum
+        );
+        sql.push_str(&format!("\n-- {}{}\n", s.file_name, if transactional { "" } else { " (runs outside a transaction)" }));
+        if transactional {
+            sql.push_str(&format!("BEGIN;\n{}\n{record}\nCOMMIT;\n", s.sql.trim_end()));
+        } else {
+            sql.push_str(&format!("{}\n{record}\n", s.sql.trim_end()));
+        }
+        result.applied.push(Applied { script: s.file_name.clone(), version: s.version.as_ref().map(|v| v.text.clone()), execution_time_ms: 0, transactional });
+    }
+    if result.applied.is_empty() {
+        sql.push_str("\n-- Nothing pending.\n");
+    }
+    result.dry_run_sql = Some(sql);
+    Ok(result)
+}
+
+async fn migrate_locked(c: &tokio_postgres::Client, cfg: &Config, name: &str, scripts: &[Script], opts: &MigrateOptions, target: Option<&Version>, log: Log<'_>) -> Result<MigrateResult> {
+    let (schema, table) = (cfg.history_schema(), cfg.project.history_table.as_str());
+    db::ensure_history(c, schema, table).await?;
+    let rows = db::read_history(c, schema, table).await?;
+    let infos = compute(scripts, &rows);
+
+    validate(&infos, opts)?;
+
+    let todo = plan(&infos, opts, target);
     if todo.is_empty() {
         log(Level::Info, &format!("{name} is up to date"));
     }
@@ -240,7 +296,7 @@ async fn migrate_locked(c: &tokio_postgres::Client, cfg: &Config, name: &str, sc
         }
         log(Level::Info, &format!("Running {}", s.file_name));
         let t = Instant::now();
-        let outcome = run_script(c, s, transactional, schema, table).await;
+        let outcome = run_script(c, s, transactional, schema, table, "SQL").await;
         let ms = t.elapsed().as_millis() as i32;
         if let Err(e) = outcome {
             let msg = match &e {
@@ -249,7 +305,7 @@ async fn migrate_locked(c: &tokio_postgres::Client, cfg: &Config, name: &str, sc
             };
             if !transactional {
                 // Partial changes may remain: record the failure so `repair` is required.
-                record(c, s, ms, false, schema, table).await?;
+                record(c, s, ms, false, schema, table, "SQL").await?;
             }
             log(Level::Warn, &format!("{} failed{}", s.file_name, if transactional { "; rolled back" } else { "" }));
             return Err(Error::Migration { script: s.file_name.clone(), msg });
@@ -260,8 +316,45 @@ async fn migrate_locked(c: &tokio_postgres::Client, cfg: &Config, name: &str, sc
     Ok(result)
 }
 
+/// Runs the U script of the latest applied version (C09) and records it; that version is pending again.
+pub async fn undo(cfg: &Config, env_name: Option<&str>, log: Log<'_>) -> Result<Applied> {
+    let (name, env) = cfg.pick(env_name)?;
+    let s = Session::open(cfg, &name, env, log).await?;
+    let result = async {
+        let infos = compute(&s.scripts, &s.rows);
+        validate(&infos, &MigrateOptions::default())?;
+        let latest = infos
+            .iter()
+            .filter(|i| i.kind == Kind::Versioned && i.state == State::Applied)
+            .max_by_key(|i| i.version.as_deref().and_then(Version::parse))
+            .ok_or_else(|| Error::Validate(format!("nothing to undo on {name}")))?;
+        let v = latest.version.as_deref().and_then(Version::parse);
+        let u = s
+            .scripts
+            .iter()
+            .find(|x| x.kind == Kind::Undo && x.version == v)
+            .ok_or_else(|| Error::Validate(format!("{} has no undo script (U{}__….sql)", latest.script, latest.version.as_deref().unwrap_or(""))))?;
+        let transactional = !migration::needs_no_transaction(&u.sql);
+        log(Level::Info, &format!("Undoing {} with {}", latest.script, u.file_name));
+        let t = Instant::now();
+        if let Err(e) = run_script(&s.c, u, transactional, &s.schema, &s.table, "UNDO_SQL").await {
+            let msg = match &e {
+                Error::Db(db) => db_message(db),
+                other => other.to_string(),
+            };
+            return Err(Error::Migration { script: u.file_name.clone(), msg });
+        }
+        let ms = t.elapsed().as_millis() as i32;
+        log(Level::Info, &format!("Undid {} in {ms} ms; it is pending again", latest.script));
+        Ok(Applied { script: u.file_name.clone(), version: latest.version.clone(), execution_time_ms: ms, transactional })
+    }
+    .await;
+    s.close().await;
+    result
+}
+
 /// What `migrate` refuses to run on (also the core of `validate`, C05).
-pub fn validate(infos: &[MigrationInfo], opts: MigrateOptions) -> Result<()> {
+pub fn validate(infos: &[MigrationInfo], opts: &MigrateOptions) -> Result<()> {
     let mut problems = Vec::new();
     for i in infos {
         match i.state {
@@ -279,14 +372,14 @@ pub fn validate(infos: &[MigrationInfo], opts: MigrateOptions) -> Result<()> {
     if problems.is_empty() { Ok(()) } else { Err(Error::Validate(problems.join("\n"))) }
 }
 
-async fn run_script(c: &tokio_postgres::Client, s: &Script, transactional: bool, schema: &str, table: &str) -> Result<()> {
+async fn run_script(c: &tokio_postgres::Client, s: &Script, transactional: bool, schema: &str, table: &str, kind: &str) -> Result<()> {
     if transactional {
         // One transaction for script + history row: both land or neither does.
         c.batch_execute("BEGIN").await?;
         let t = Instant::now();
         let run = async {
             c.batch_execute(&s.sql).await?;
-            record(c, s, t.elapsed().as_millis() as i32, true, schema, table).await
+            record(c, s, t.elapsed().as_millis() as i32, true, schema, table, kind).await
         }
         .await;
         match run {
@@ -301,15 +394,15 @@ async fn run_script(c: &tokio_postgres::Client, s: &Script, transactional: bool,
         for stmt in migration::split_statements(&s.sql) {
             c.batch_execute(&stmt).await?;
         }
-        record(c, s, t.elapsed().as_millis() as i32, true, schema, table).await
+        record(c, s, t.elapsed().as_millis() as i32, true, schema, table, kind).await
     }
 }
 
-async fn record(c: &tokio_postgres::Client, s: &Script, ms: i32, success: bool, schema: &str, table: &str) -> Result<()> {
+async fn record(c: &tokio_postgres::Client, s: &Script, ms: i32, success: bool, schema: &str, table: &str, kind: &str) -> Result<()> {
     db::insert_history(c, schema, table, NewRow {
         version: s.version.as_ref().map(|v| v.text.as_str()),
         description: &s.description,
-        kind: "SQL",
+        kind,
         script: &s.file_name,
         checksum: Some(s.checksum),
         execution_time: ms,
@@ -322,7 +415,7 @@ async fn record(c: &tokio_postgres::Client, s: &Script, ms: i32, success: bool, 
 
 pub async fn validate_env(cfg: &Config, env_name: Option<&str>) -> Result<Vec<MigrationInfo>> {
     let infos = info(cfg, env_name).await?;
-    validate(&infos, MigrateOptions::default())?;
+    validate(&infos, &MigrateOptions::default())?;
     Ok(infos)
 }
 
@@ -497,7 +590,7 @@ pub async fn mark_applied(cfg: &Config, env_name: Option<&str>, script: &str, lo
             return Err(Error::Validate(format!("{script} is {state} on {name}; only pending scripts can be recorded")));
         }
         let file = s.scripts.iter().find(|x| x.file_name == script).unwrap();
-        record(&s.c, file, 0, true, &s.schema, &s.table).await?;
+        record(&s.c, file, 0, true, &s.schema, &s.table, "SQL").await?;
         log(Level::Info, &format!("Recorded {script} as applied on {name} without running it"));
         Ok(())
     }
@@ -556,7 +649,7 @@ mod tests {
         // A failed row stays failed even when its file is gone.
         let failed_gone = compute(&scripts, &[row(Some("99"), "x", "V99__x.sql", 1, false, "SQL")]);
         assert_eq!(failed_gone.iter().find(|i| i.script == "V99__x.sql").unwrap().state, State::Failed);
-        let err = validate(&info, MigrateOptions::default()).unwrap_err().to_string();
+        let err = validate(&info, &MigrateOptions::default()).unwrap_err().to_string();
         assert!(err.contains("V3__c.sql changed"), "{err}");
         assert!(err.contains("V4__d.sql was applied but the file is missing"), "{err}");
         assert!(err.contains("V2__b.sql is older"), "{err}");
@@ -570,7 +663,7 @@ mod tests {
         let info = compute(&scripts, &[]);
         assert_eq!(info.iter().map(|i| i.script.as_str()).collect::<Vec<_>>(), ["V1__a.sql", "V2__b.sql", "V10__c.sql"]);
         assert!(info.iter().all(|i| i.state == State::Pending));
-        validate(&info, MigrateOptions::default()).unwrap();
+        validate(&info, &MigrateOptions::default()).unwrap();
     }
 
     #[test]
@@ -580,7 +673,7 @@ mod tests {
         let info = compute(&scripts, &rows);
         assert_eq!(info.iter().find(|i| i.script == "V1__a.sql").unwrap().state, State::BelowBaseline);
         assert_eq!(info.iter().filter(|i| i.state == State::Baseline).count(), 1);
-        validate(&info, MigrateOptions::default()).unwrap();
+        validate(&info, &MigrateOptions::default()).unwrap();
         assert_eq!(info.iter().find(|i| i.script == "V2__b.sql").unwrap().state, State::Pending);
     }
 }
