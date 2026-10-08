@@ -235,9 +235,9 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
       )}
 
       <ConnectionDialog key={dialog ? dialog.editing?.name ?? 'new' : 'closed'} open={!!dialog} onOpenChange={(o) => !o && setDialog(null)} project={project} editing={dialog?.editing} onSaved={onProject} />
-      <CaptureDialog key={captured?.g.file_name ?? 'none'} captured={captured} project={project} onClose={() => setCaptured(null)}
+      <CaptureDialog key={`capture:${captured?.g.file_name ?? ''}`} captured={captured} project={project} onClose={() => setCaptured(null)}
         onDone={(msg, tone) => { setCaptured(null); toast({ tone, title: msg }); if (captured) load(captured.env) }} />
-      <ImportDialog key={importFor ?? 'none'} env={importFor} onClose={() => setImportFor(null)}
+      <ImportDialog key={`import:${importFor ?? ''}`} env={importFor} onClose={() => setImportFor(null)}
         onConfirm={(name, table, acceptEdited) => {
           setImportFor(null)
           op(name, async () => {
@@ -245,7 +245,7 @@ export function Environments({ project, onProject, onSettings }: { project: Proj
             return `Imported ${r.imported} history row${r.imported === 1 ? '' : 's'} on ${name}${r.attention.length ? `; ${r.attention.length} need attention (see log)` : ''}`
           })
         }} />
-      <BaselineDialog key={baselineFor ?? 'none'} env={baselineFor} onClose={() => setBaselineFor(null)}
+      <BaselineDialog key={`baseline:${baselineFor ?? ''}`} env={baselineFor} onClose={() => setBaselineFor(null)}
         onConfirm={(name, version, description) => {
           setBaselineFor(null)
           op(name, async () => {

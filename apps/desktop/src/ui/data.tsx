@@ -249,7 +249,7 @@ export function EnvironmentColumn({ env, selected, busy, onOpen, onRun }: { env:
       ) : (
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
           <dt className="text-muted">Pending</dt>
-          <dd className={env.pending ? 'font-semibold text-warning' : ''}>{env.pending ? `${env.pending} scripts` : 'Up to date'}</dd>
+          <dd className={env.pending ? 'font-semibold text-warning' : ''}>{env.pending ? `${env.pending} script${env.pending === 1 ? '' : 's'}` : 'Up to date'}</dd>
           <dt className="text-muted">Last run</dt>
           <dd title={env.lastRun?.at} className={env.lastRun?.failed ? 'text-danger' : ''}>
             {env.lastRun ? `${env.lastRun.when}${env.lastRun.failed ? ', failed' : ''}` : 'Never'}
