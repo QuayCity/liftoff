@@ -228,6 +228,11 @@
         "title": "Save a Snapshot\u2026",
         "category": "LiftOff",
         "icon": "$(device-camera)"
+      },
+      {
+        "command": "liftoff.rebaseline",
+        "title": "Rebaseline Project\u2026",
+        "category": "LiftOff"
       }
     ],
     "menus": {

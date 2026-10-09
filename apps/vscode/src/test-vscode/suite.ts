@@ -140,6 +140,12 @@ export async function run(): Promise<void> {
   const again = await vscode.commands.executeCommand<CompareResult>('liftoff.compare', { source: `snapshot:${snap}`, target: 'dev' })
   assert.equal(again?.changes.length, 0, 'a snapshot matches what it was taken from')
 
+  // Rebaseline into an archive folder (the workspace is not a git repository, so not deleted).
+  const rb = await vscode.commands.executeCommand<{ baseline: string; removed: string[] }>('liftoff.rebaseline', { description: 'start here', archive: 'old' })
+  assert.match(path.basename(rb?.baseline ?? ''), /^B\d+__start_here\.sql$/)
+  assert.ok(rb && rb.removed.includes('V1__orders.sql') && fs.existsSync(path.join(workspace, 'old', 'V1__orders.sql')))
+  assert.deepEqual(fs.readdirSync(path.join(workspace, 'migrations')).filter((f) => f.startsWith('V')), [])
+
   fs.writeFileSync(path.join(workspace, '.suite-passed'), '')
   console.log('liftoff suite: all checks passed')
 }

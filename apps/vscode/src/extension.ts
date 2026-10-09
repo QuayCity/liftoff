@@ -273,6 +273,42 @@ async function runOnly(lo: Liftoff, item: MigrationItem, confirmed = false): Pro
   return result
 }
 
+type Rebaselined = { baseline: string; version: string; removed: string[]; archived_to: string | null }
+
+/**
+ * One baseline script replaces the versioned scripts; the old ones are deleted (git keeps them) or
+ * moved to a folder. `answers` is for the tests.
+ */
+async function rebaselineProject(lo: Liftoff, answers?: { description: string; archive?: string }): Promise<Rebaselined | undefined> {
+  let description = answers?.description
+  let archive = answers?.archive
+  if (!answers) {
+    const how = await vscode.window.showQuickPick(
+      [
+        { label: 'Remove the old scripts', detail: 'Fewer files; git still has them (they must be committed).', archive: undefined as string | undefined },
+        { label: 'Move them to migrations-archive', detail: 'Out of the migrations folder, still in the project.', archive: 'migrations-archive' },
+      ],
+      { title: 'Rebaseline: the scripts the baseline replaces' },
+    )
+    if (!how) return undefined
+    archive = how.archive
+    description = await vscode.window.showInputBox({ title: 'Rebaseline', prompt: 'Description of the baseline script', value: 'baseline', validateInput: (v) => (v.trim() ? undefined : 'Describe it') })
+    if (!description) return undefined
+    const go = await vscode.window.showWarningMessage(
+      'Rebaseline the project?',
+      { modal: true, detail: 'One baseline script replaces the versioned scripts. It is built on the scratch database and checked first; nothing is removed if it does not build the same schema. Databases that already ran the scripts are not changed.' },
+      'Rebaseline',
+    )
+    if (go !== 'Rebaseline') return undefined
+  }
+  const r = await withProgress(lo, 'Rebaselining', () => lo.run<Rebaselined>(['rebaseline', '--description', description!.trim(), ...(archive ? ['--archive', archive] : [])]))
+  if (r) {
+    vscode.window.showInformationMessage(`Wrote ${path.basename(r.baseline)}; ${r.removed.length} old script(s) ${r.archived_to ? `moved to ${path.basename(r.archived_to)}` : 'deleted (git still has them)'}.`)
+    await lo.load()
+  }
+  return r
+}
+
 async function dryRun(lo: Liftoff, item?: EnvironmentItem): Promise<void> {
   const env = await pickEnvironment(lo, item)
   if (!env) return
@@ -350,6 +386,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
     vscode.commands.registerCommand('liftoff.testConnection', (item?: EnvironmentItem) => testConnection(lo, item)),
     vscode.commands.registerCommand('liftoff.showLog', () => lo.log.show()),
     vscode.commands.registerCommand('liftoff.importFlyway', (answers?: ImportAnswers) => importFlyway(lo, answers)),
+    vscode.commands.registerCommand('liftoff.rebaseline', (answers?: { description: string; archive?: string }) => rebaselineProject(lo, answers)),
     vscode.commands.registerCommand('liftoff.newProject', (answers?: NewProjectAnswers) => newProject(lo, answers)),
     // From an environment's menu (its item), the import (a name), or the palette (nothing).
     vscode.commands.registerCommand('liftoff.settings', (target?: EnvironmentItem | string) =>

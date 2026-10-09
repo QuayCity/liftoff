@@ -7,6 +7,7 @@ import * as checks from '../../../packages/liftoff/src/core/checks.ts'
 import * as ci from '../../../packages/liftoff/src/core/ci.ts'
 import * as compare from '../../../packages/liftoff/src/core/compare.ts'
 import { DataSession } from '../../../packages/liftoff/src/core/datacompare.ts'
+import { rebaseline } from '../../../packages/liftoff/src/core/rebaseline.ts'
 import { Config, init, interpolate, PROJECT_FILE, readSettings, redactUrl, saveProject, saveSettings, type Environment, type Project, type Role } from '../../../packages/liftoff/src/core/config.ts'
 import { open } from '../../../packages/liftoff/src/core/db.ts'
 import * as diff from '../../../packages/liftoff/src/core/diff.ts'
@@ -243,6 +244,8 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
     const cfg = load(a.path)
     return (await diff.squash(cfg, s(a, 'upTo'), s(a, 'description'), undefined, false, h.log)).generated.file_name
   },
+  /** One baseline script replaces the scripts up to a version; they are deleted (git keeps them) or archived. */
+  rebaseline: (a, h) => rebaseline(load(a.path), { upTo: s(a, 'upTo'), description: s(a, 'description'), archive: a.archive ? s(a, 'archive') : undefined }, h.log),
   /** Writes the HTML report of a check to the file the user picked. */
   report_save: (a) => fs.writeFileSync(s(a, 'file'), checks.reportHtml(a.report as checks.CheckReport, load(a.path).project.name, new Date().toISOString())),
   scratch_create: async (a) => {

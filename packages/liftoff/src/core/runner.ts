@@ -67,6 +67,7 @@ export function compute(scripts: Script[], allRows: HistoryRow[]): MigrationInfo
   const baseline = max(baselineRows.map(ver))
   const maxApplied = max([...applied.filter((r) => r.success).map(ver), baseline])
   const maxFile = max(scripts.filter((s) => s.kind === 'versioned').map((s) => s.version))
+  const baselineFile = max(scripts.filter((s) => s.kind === 'baseline').map((s) => s.version))
 
   const fromRow = (r: HistoryRow, kind: Kind, state: State): MigrationInfo => ({
     kind,
@@ -109,7 +110,9 @@ export function compute(scripts: Script[], allRows: HistoryRow[]): MigrationInfo
     if (seen.some((x) => compareVersions(x, v) === 0)) continue
     if (versioned.some(([sv, i]) => compareVersions(sv, v) === 0 && i.kind === 'versioned')) continue
     seen.push(v)
-    const state: State = !r.success ? 'failed' : !maxFile || compareVersions(v, maxFile) > 0 ? 'future' : 'missing'
+    // A baseline script at or above this version replaced its file (liftoff rebaseline): covered, not missing.
+    const covered = !!baselineFile && compareVersions(v, baselineFile) <= 0
+    const state: State = !r.success ? 'failed' : covered ? 'below_baseline' : !maxFile || compareVersions(v, maxFile) > 0 ? 'future' : 'missing'
     versioned.push([v, fromRow(r, 'versioned', state)])
   }
   versioned.sort((a, b) => compareVersions(a[0], b[0]))

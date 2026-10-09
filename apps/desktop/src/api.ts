@@ -138,6 +138,8 @@ type Api = {
   scriptAdd(path: string, repeatable: boolean, description: string, sql: string): Promise<string>
   capture(path: string, env: string, description: string, asBaseline: boolean): Promise<Generated>
   squash(path: string, upTo: string, description: string): Promise<string>
+  /** squash, then take the old scripts out of the migrations folder: deleted (git keeps them) or moved to `archive` */
+  rebaseline(path: string, upTo: string, description: string, archive?: string): Promise<{ baseline: string; version: string; removed: string[]; archived_to: string | null }>
   scratchCreate(path: string): Promise<Project>
   changesDiff(path: string): Promise<Comparison>
   migrationGenerate(path: string, changes: Change[], description: string, withUndo: boolean): Promise<Generated>
@@ -207,6 +209,7 @@ const real: Api = {
   scriptAdd: (path, repeatable, description, sql) => invoke('script_add', { path, repeatable, description, sql }),
   capture: (path, env, description, asBaseline) => invoke('capture', { path, env, description, asBaseline }),
   squash: (path, upTo, description) => invoke('squash', { path, upTo, description }),
+  rebaseline: (path, upTo, description, archive) => invoke('rebaseline', { path, upTo, description, archive }),
   scratchCreate: (path) => invoke('scratch_create', { path }),
   changesDiff: (path) => invoke('changes_diff', { path }),
   migrationGenerate: (path, changes, description, withUndo) => invoke('migration_generate', { path, changes, description, withUndo }),
@@ -498,6 +501,12 @@ const fakeApi: Api = {
     emit('info', `Building 'scratch' from the versioned scripts up to ${upTo}`)
     await wait(500)
     return `B${upTo}__${description.replaceAll(' ', '_')}.sql`
+  },
+  rebaseline: async (_p, upTo, description, archive) => {
+    emit('info', `Building 'scratch' from the versioned scripts up to ${upTo}`)
+    await wait(500)
+    const removed = fake.scripts.filter(([v]) => v <= upTo).map(([v, d]) => `V${v}__${d.replaceAll(' ', '_')}.sql`)
+    return { baseline: `C:/repos/shop-db/migrations/B${upTo}__${description.replaceAll(' ', '_')}.sql`, version: upTo, removed, archived_to: archive ? `C:/repos/shop-db/${archive}` : null }
   },
   changesDiff: async () => {
     emit('info', "Rebuilding scratch database 'scratch' from migrations")

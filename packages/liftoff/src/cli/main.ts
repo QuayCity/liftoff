@@ -12,6 +12,7 @@ import { Config, defaultSchema, init, PROJECT_FILE, readSettings, saveSettings, 
 import { engineOf, isSqlServerUrl, open } from '../core/db.ts'
 import * as compare from '../core/compare.ts'
 import { DataSession } from '../core/datacompare.ts'
+import { rebaseline } from '../core/rebaseline.ts'
 import { versionsAfter } from '../core/renumber.ts'
 import * as diff from '../core/diff.ts'
 import { asLiftoffError, configError, driftError, LiftoffError, modelAheadError } from '../core/errors.ts'
@@ -406,6 +407,27 @@ const COMMANDS: Record<string, Command> = {
       const { generated: g, path: written } = await diff.squash(cfg, str(v, 'up-to'), str(v, 'description')!, str(v, 'scratch'), flag(v, 'dry-run'), log)
       if (!written) return [g, g.sql]
       return [{ written, version: g.version }, `Wrote ${written} and checked it builds the same schema.\nDatabases with history are not affected; empty ones now start from it.`]
+    },
+  },
+  rebaseline: {
+    help: 'Replace the versioned scripts with one baseline script (checked to build the same schema), and take the old scripts out of the migrations folder',
+    options: {
+      'up-to': { type: 'string', help: 'Last version to fold in (default: all of them)' },
+      description: { type: 'string', default: 'baseline', help: 'Description in the file name' },
+      scratch: { type: 'string', help: 'Scratch environment to build and check it in (default: the first with role "scratch")' },
+      archive: { type: 'string', help: 'Move the old scripts to this folder instead of deleting them (deleting needs them committed to git)', value: 'FOLDER' },
+    },
+    async run(ctx, v) {
+      const cfg = load(ctx)
+      const r = await rebaseline(cfg, { upTo: str(v, 'up-to'), description: str(v, 'description'), scratch: str(v, 'scratch'), archive: str(v, 'archive') }, log)
+      return [
+        r,
+        [
+          `Wrote ${r.baseline} and checked it builds the same schema.`,
+          r.archived_to ? `Moved ${r.removed.length} script(s) to ${r.archived_to}.` : `Deleted ${r.removed.length} script(s); git still has them. Commit the change.`,
+          'Empty databases now start from the baseline; databases that already ran the old scripts show them as covered by it.',
+        ].join('\n'),
+      ]
     },
   },
   model: {
