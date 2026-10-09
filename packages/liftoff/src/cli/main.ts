@@ -10,6 +10,7 @@ import * as checks from '../core/checks.ts'
 import * as ci from '../core/ci.ts'
 import { Config, defaultSchema, init, PROJECT_FILE, readSettings, saveSettings, type Environment, type Role, type SettingsChange } from '../core/config.ts'
 import { engineOf, isSqlServerUrl, open } from '../core/db.ts'
+import * as compare from '../core/compare.ts'
 import * as diff from '../core/diff.ts'
 import { asLiftoffError, configError, driftError, LiftoffError, modelAheadError } from '../core/errors.ts'
 import * as flyway from '../core/flyway.ts'
@@ -461,6 +462,69 @@ const COMMANDS: Record<string, Command> = {
     async run(ctx, v) {
       const r = await diff.createScratch(load(ctx), str(v, 'from'), str(v, 'name')!)
       return [r, `Created database ${r.database} and saved it as environment '${r.environment}' (role scratch, private)`]
+    },
+  },
+  compare: {
+    help: 'Compare the schema of any two sides; then save the differences as a script, write them as the next migration, or apply them. A side is an environment, a database URL, model, migrations, or a snapshot file (.json)',
+    options: {
+      source: { type: 'string', help: 'What it should look like (e.g. dev, model, snapshot:prod.json)', value: 'SIDE' },
+      target: { type: 'string', help: 'What gets changed to look like the source (e.g. test, a URL, migrations)', value: 'SIDE' },
+      scratch: { type: 'string', help: 'Scratch environment, when a side is model or migrations (default: the one with role "scratch")' },
+      object: { type: 'string', multiple: true, help: 'Only this difference, by its id as listed (e.g. table:public.orders); repeatable', value: 'ID' },
+      script: { type: 'string', help: 'Write a script that makes the target like the source to this file', value: 'FILE' },
+      migration: { type: 'string', help: 'Write the differences as the next migration, with this description', value: 'DESCRIPTION' },
+      undo: { type: 'boolean', help: 'With --migration: also write the undo script' },
+      apply: { type: 'boolean', help: 'Run the differences on the target database now (outside its migration history)' },
+      'confirm-production': { type: 'boolean', help: 'Needed with --apply when the target is a production environment' },
+    },
+    async run(ctx, v) {
+      const cfg = load(ctx)
+      const [src, tgt] = [str(v, 'source'), str(v, 'target')]
+      if (!src || !tgt) throw new UsageError('compare needs --source and --target')
+      const [source, target] = [compare.parseSide(src), compare.parseSide(tgt)]
+      if (flag(v, 'apply') && compare.isProduction(cfg, target) && !flag(v, 'confirm-production')) {
+        throw new UsageError(`${tgt} is a production environment; add --confirm-production to apply to it`)
+      }
+      const r = await compare.compare(cfg, source, target, str(v, 'scratch'), log)
+      const chosen = compare.pick(r.changes, v.object as string[] | undefined)
+      const lines = [`${r.target} -> ${r.source} (${r.engine}): ${r.changes.length} difference(s)`, ...r.changes.map((c) => `  ${kindOf(c)} ${c.id}${c.destructive ? '  (may lose data)' : ''}`), ...r.not_compared.map((n) => `  not compared: ${n}`)]
+      const out: Record<string, unknown> = { ...r }
+      if (chosen.length && str(v, 'script')) {
+        const file = path.resolve(ctx.root, str(v, 'script')!)
+        fs.writeFileSync(file, compare.syncScript(r, chosen))
+        out.script = file
+        lines.push(`Wrote ${file}`)
+      }
+      if (chosen.length && str(v, 'migration')) {
+        const g = diff.generate(cfg, chosen, str(v, 'migration')!, flag(v, 'undo'))
+        out.migration = diff.save(cfg, g.file_name, g.sql)
+        if (g.undo) out.undo = diff.save(cfg, g.undo.file_name, g.undo.sql)
+        lines.push(`Wrote ${out.migration as string}${g.undo ? ` and ${out.undo as string}` : ''}`)
+      }
+      if (chosen.length && flag(v, 'apply')) {
+        const a = await compare.apply(cfg, target, compare.syncScript(r, chosen), log)
+        out.applied = a
+        lines.push(`Applied ${chosen.length} change(s) to ${a.target}. Its migration history was not changed, so it now differs from its scripts.`)
+      }
+      return [out, lines.join('\n')]
+    },
+  },
+  snapshot: {
+    help: 'Save the schema of a side to a file, to compare with later without a connection (liftoff compare --source snapshot:FILE …)',
+    options: {
+      of: { type: 'string', help: 'What to save: an environment, a database URL, model or migrations', value: 'SIDE' },
+      out: { type: 'string', help: 'The file to write (default: snapshots/<side>-<date>.json)', value: 'FILE' },
+      scratch: { type: 'string', help: 'Scratch environment, for model or migrations' },
+    },
+    async run(ctx, v) {
+      const cfg = load(ctx)
+      const of = str(v, 'of')
+      if (!of) throw new UsageError('snapshot needs --of')
+      const side = compare.parseSide(of)
+      const name = compare.sideLabel(side).replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-|-$/g, '')
+      const file = str(v, 'out') ?? path.join('snapshots', `${name}-${new Date().toISOString().slice(0, 10)}.json`)
+      const r = await compare.snapshot(cfg, side, file, str(v, 'scratch'), log)
+      return [r, `Saved ${r.objects} object(s) of ${compare.sideLabel(side)} to ${r.file}`]
     },
   },
   diff: {

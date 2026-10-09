@@ -203,6 +203,26 @@ test('the CI contract', { skip: !base && 'set LIFTOFF_TEST_PG' }, async () => {
   fs.rmSync(path.join(dir, 'migrations/V3__tags.sql'))
   await sql(pgEnv('shop_test'), 'shop_test', "drop table notes; drop table tags; delete from liftoff_schema_history where version in ('2', '3')")
 
+  // Compare: test against the migrations, a script, a snapshot; apply needs a confirmation on production.
+  await sql(pgEnv('shop_test'), 'shop_test', 'create table extra (id int)')
+  r = liftoff(dir, ['compare', '--source', 'migrations', '--target', 'test', '--script', 'sync.sql', '--output-type', 'json'])
+  assert.equal(r.code, 0, r.stderr)
+  assert.deepEqual(json(r).result.changes.map((c: { id: string }) => c.id), ['table:public.extra'])
+  assert.match(fs.readFileSync(path.join(dir, 'sync.sql'), 'utf8'), /DROP TABLE.*extra/i)
+  r = liftoff(dir, ['snapshot', '--of', 'test', '--out', 'snap/test.json', '--output-type', 'json'])
+  assert.equal(r.code, 0, r.stderr)
+  r = liftoff(dir, ['compare', '--source', 'snapshot:snap/test.json', '--target', 'test', '--output-type', 'json'])
+  assert.deepEqual(json(r).result.changes, [])
+  assert.equal(liftoff(dir, ['compare', '--source', 'test']).code, 2, 'both sides are needed')
+  fs.appendFileSync(path.join(dir, 'liftoff.toml'), `\n[environments.live]\nurl = "${base}/shop_test"\nrole = "prod"\n`)
+  r = liftoff(dir, ['compare', '--source', 'migrations', '--target', 'live', '--apply'])
+  assert.ok(r.code === 2 && r.stderr.includes('--confirm-production'), r.stderr)
+  r = liftoff(dir, ['compare', '--source', 'migrations', '--target', 'live', '--apply', '--confirm-production', '--output-type', 'json'])
+  assert.equal(r.code, 0, r.stderr)
+  assert.equal(json(r).result.applied.target, 'live')
+  r = liftoff(dir, ['compare', '--source', 'migrations', '--target', 'test', '--output-type', 'json'])
+  assert.deepEqual(json(r).result.changes, [], 'applied: test (the same database as live) matches the migrations again')
+
   // F09-N1: clean is refused on a test database.
   assert.equal(liftoff(dir, ['-e', 'test', 'clean']).code, 2)
 

@@ -44,10 +44,14 @@ export function withDatabase(url: string, db: string): string {
 
 /** A SQL Server error with its number and line, e.g. `Invalid object name 'x'. (error 208, line 2)` */
 function wrap(e: unknown): never {
-  if (e instanceof Error && 'number' in e) {
-    const x = e as Error & { number: number; lineNumber?: number }
-    throw new DbError(`${x.message} (error ${x.number}, line ${x.lineNumber ?? 0})`, String(x.number))
+  type SqlError = Error & { number: number; lineNumber?: number }
+  const one = (x: SqlError) => `${x.message} (error ${x.number}, line ${x.lineNumber ?? 0})`
+  // Several errors in one batch arrive together, with an empty message of their own.
+  if (e instanceof AggregateError && e.errors.length) {
+    const errors = e.errors.filter((x): x is SqlError => x instanceof Error && 'number' in x)
+    if (errors.length) throw new DbError(errors.map(one).join('\n'), String(errors.at(-1)!.number))
   }
+  if (e instanceof Error && 'number' in e) throw new DbError(one(e as SqlError), String((e as SqlError).number))
   throw e instanceof Error ? new DbError(e.message) : e
 }
 

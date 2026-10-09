@@ -167,6 +167,11 @@ function render(header: string, changes: Change[], stepsOf: (c: Change) => Step[
   return sql
 }
 
+/** The changes' SQL, phase by phase, under a header (Compare's sync script). */
+export function renderScript(header: string, changes: Change[]): string {
+  return render(header, changes, (c) => c.steps)
+}
+
 function checkDescription(description: string): string {
   const d = description.trim()
   if (!d || d.length > 120 || !/^[\p{L}\p{N} _-]+$/u.test(d)) throw configError('describe the migration in up to 120 letters, digits, spaces, - or _')

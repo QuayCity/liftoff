@@ -30,6 +30,20 @@ test('the SQL Server sample project runs and undoes', { skip: !base && 'set LIFT
   assert.equal((await runner.info(cfg, 'test')).find((i) => i.script === 'V3__orders_by_customer.sql')?.state, 'pending')
 })
 
+test('a batch with several SQL Server errors reports every one of them', { skip: !base && 'set LIFTOFF_TEST_MSSQL' }, async () => {
+  const c = await SqlServerConn.open('master', { url: `${base};databaseName=master`, role: 'test', allow_clean: false, placeholders: {} })
+  try {
+    await assert.rejects(c.batch('SELECT 1 FROM no_such_table_a;\nSELEC 2;\nCREATE TABLE #t (id int);\nCREATE VIEW v AS SELECT 1 AS a;'), (e: unknown) => {
+      const m = e instanceof Error ? e.message : ''
+      assert.match(m, /must be the first statement in a query batch/, m)
+      assert.match(m, /\(error 111, line 4\)/, m)
+      return true
+    })
+  } finally {
+    await c.close()
+  }
+})
+
 test('the runner on SQL Server', { skip: !base && 'set LIFTOFF_TEST_MSSQL' }, async () => {
   const master = await SqlServerConn.open('master', { url: `${base};databaseName=master`, role: 'prod', allow_clean: false, placeholders: {} })
   for (const db of ['shop_test', 'shop_dev']) {
