@@ -154,6 +154,9 @@ function render(header: string, changes: Change[], stepsOf: (c: Change) => Step[
     .map((c) => `--   ${kindWord[c.kind]} ${c.object_type.toLowerCase().replace(/s+$/, '')} ${c.name}${c.destructive ? ' (may lose data)' : ''}`)
     .sort()
   sql += `--\n${summary.join('\n')}\n`
+  // SQL Server keeps the whole batch as a view's or procedure's text, comments too: the header
+  // gets a batch of its own. (Its statements end in GO; PostgreSQL's do not.)
+  if (changes.flatMap(stepsOf).some((s) => /\nGO\s*$/.test(s.sql))) sql += 'GO\n'
   const seen = new Set<string>()
   for (let phase = 0; phase < PHASES; phase++) {
     const steps = changes

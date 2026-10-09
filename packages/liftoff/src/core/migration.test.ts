@@ -9,6 +9,7 @@ import {
   compareVersions,
   needsNoTransaction,
   nextVersion,
+  versionNote,
   parseName,
   parseVersion,
   scan,
@@ -107,4 +108,13 @@ test("BUG-010: names that do not fit the history table are refused before anythi
   fs.mkdirSync(dir)
   fs.writeFileSync(path.join(dir, `V${'1'.repeat(51)}__x.sql`), 'select 1;\n')
   assert.throws(() => scan(dir), /the version is 51 characters; the history table holds 50/)
+})
+
+test('from V9990 on, a note says to rebaseline with a restart', () => {
+  const mk = (kind: 'versioned' | 'baseline', v: string): Script => ({ kind, version: parseVersion(v), description: '', fileName: '', path: '', checksum: 0, sql: '' })
+  assert.equal(versionNote([mk('versioned', '9989')]), undefined)
+  assert.match(versionNote([mk('versioned', '0005'), mk('versioned', '9990')]) ?? '', /rebaseline --restart/)
+  assert.match(versionNote([mk('baseline', '9995')]) ?? '', /9995/)
+  assert.equal(versionNote([mk('versioned', '20261008.1104')]), undefined, 'timestamps have no limit')
+  assert.equal(versionNote([]), undefined)
 })

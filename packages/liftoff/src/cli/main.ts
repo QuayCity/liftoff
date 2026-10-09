@@ -12,6 +12,7 @@ import { Config, defaultSchema, init, PROJECT_FILE, readSettings, saveSettings, 
 import { engineOf, isSqlServerUrl, open } from '../core/db.ts'
 import * as compare from '../core/compare.ts'
 import { DataSession } from '../core/datacompare.ts'
+import { adopt } from '../core/adopt.ts'
 import { rebaseline } from '../core/rebaseline.ts'
 import { versionsAfter } from '../core/renumber.ts'
 import * as diff from '../core/diff.ts'
@@ -257,6 +258,8 @@ const COMMANDS: Record<string, Command> = {
     options: {
       'out-of-order': { type: 'boolean', help: 'Also run scripts older than the latest applied version' },
       target: { type: 'string', help: 'Stop after this version' },
+      'accept-differences': { type: 'boolean', help: 'A database with objects that differ from the baseline script: record the baseline anyway (the differences show up as drift)' },
+      scratch: { type: 'string', help: 'Scratch environment to check a database with objects against the baseline script (default: the one with role "scratch")' },
       only: { type: 'string', multiple: true, help: "Run only this script and nothing else: a version (5, 1.2), a file name, or a repeatable script's name (repeatable). Older scripts may be picked", value: 'SCRIPT' },
       'dry-run': { type: 'boolean', help: 'Print the SQL that would run instead of running it' },
       'allow-non-empty': { type: 'boolean', help: 'Run every script on a database that has tables but no history (normally refused)' },
@@ -267,7 +270,7 @@ const COMMANDS: Record<string, Command> = {
       const r = await runner.migrate(
         cfg,
         ctx.env,
-        { outOfOrder: flag(v, 'out-of-order'), target: str(v, 'target'), dryRun: flag(v, 'dry-run'), allowNonEmpty: flag(v, 'allow-non-empty'), rerunRepeatables: flag(v, 'rerun-repeatables'), only: v.only as string[] | undefined },
+        { outOfOrder: flag(v, 'out-of-order'), target: str(v, 'target'), dryRun: flag(v, 'dry-run'), allowNonEmpty: flag(v, 'allow-non-empty'), rerunRepeatables: flag(v, 'rerun-repeatables'), only: v.only as string[] | undefined, acceptDifferences: flag(v, 'accept-differences'), scratch: str(v, 'scratch') },
         log,
       )
       return [r, r.dry_run_sql ?? `Applied ${r.applied.length} migration(s) to ${r.environment} in ${r.execution_time_ms} ms`]
@@ -409,6 +412,21 @@ const COMMANDS: Record<string, Command> = {
       return [{ written, version: g.version }, `Wrote ${written} and checked it builds the same schema.\nDatabases with history are not affected; empty ones now start from it.`]
     },
   },
+  adopt: {
+    help: 'Start from an existing database: capture its objects as B0001 and record that it has them (checked on the scratch database first). For a project without scripts',
+    options: {
+      description: { type: 'string', default: 'existing schema', help: 'Description in the file name' },
+      scratch: { type: 'string', help: 'Scratch environment to check the capture on (default: the one with role "scratch")' },
+    },
+    async run(ctx, v) {
+      const cfg = load(ctx)
+      const r = await adopt(cfg, ctx.env, str(v, 'description'), str(v, 'scratch'), log)
+      return [
+        r,
+        `Wrote ${r.baseline} from ${r.environment} and recorded it there.\nOther environments that already have these objects are checked against it on their next migrate; empty ones are built from it. New scripts start at the next number.`,
+      ]
+    },
+  },
   rebaseline: {
     help: 'Replace the versioned scripts with one baseline script (checked to build the same schema), and take the old scripts out of the migrations folder',
     options: {
@@ -416,10 +434,11 @@ const COMMANDS: Record<string, Command> = {
       description: { type: 'string', default: 'baseline', help: 'Description in the file name' },
       scratch: { type: 'string', help: 'Scratch environment to build and check it in (default: the first with role "scratch")' },
       archive: { type: 'string', help: 'Move the old scripts to this folder instead of deleting them (deleting needs them committed to git)', value: 'FOLDER' },
+      restart: { type: 'boolean', help: 'Start the numbering again: B0001 replaces every script; databases that ran them are checked against it on their next migrate' },
     },
     async run(ctx, v) {
       const cfg = load(ctx)
-      const r = await rebaseline(cfg, { upTo: str(v, 'up-to'), description: str(v, 'description'), scratch: str(v, 'scratch'), archive: str(v, 'archive') }, log)
+      const r = await rebaseline(cfg, { upTo: str(v, 'up-to'), description: str(v, 'description'), scratch: str(v, 'scratch'), archive: str(v, 'archive'), restart: flag(v, 'restart') }, log)
       return [
         r,
         [

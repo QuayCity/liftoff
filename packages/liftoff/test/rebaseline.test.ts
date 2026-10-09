@@ -78,3 +78,34 @@ test('rebaseline up to a version, into an archive folder', { skip: !base && 'set
   assert.deepEqual(fs.readdirSync(path.join(p.dir, 'migrations')).sort(), ['B0003__first_three.sql', 'R__order_count.sql', 'V0004__index.sql', 'V0005__email_not_null.sql'])
   await assert.rejects(rebaseline(cfg, { archive: 'migrations/inside' }), /outside the migrations folder/)
 })
+
+test('rebaseline with a restart: B0001 replaces everything; databases with the old history go through it', { skip: !base && 'set LIFTOFF_TEST_PG' }, async () => {
+  const p = setUp()
+  const cfg = p.cfg()
+  for (const env of ['dev', 'test']) await sql(cfg, env, pgSchemaReset)
+  await runner.migrate(cfg, 'test')
+  await runner.migrate(cfg, 'dev', { target: '0002' }) // behind: only customers and orders
+
+  const r = await rebaseline(cfg, { restart: true })
+  assert.equal(path.basename(r.baseline), 'B0001__baseline.sql')
+  assert.match(fs.readFileSync(r.baseline, 'utf8'), /^-- liftoff:restart/m)
+  assert.deepEqual(fs.readdirSync(path.join(p.dir, 'migrations')).sort(), ['B0001__baseline.sql', 'R__order_count.sql'])
+
+  // Up to date with the old scripts: the restart is recorded, nothing created.
+  let m = await runner.migrate(cfg, 'test')
+  assert.deepEqual([m.baseline_check?.restart, m.baseline_check?.created], [true, []])
+  assert.deepEqual((await runner.info(cfg, 'test')).filter((i) => i.kind !== 'repeatable').map((i) => [i.script, i.state]), [['B0001__baseline.sql', 'baseline']])
+
+  // The numbering starts again: the new V0002 runs, although the old history has a 0002 too.
+  p.write('V0002__phone.sql', 'alter table customers add column phone text;\n')
+  assert.deepEqual((await runner.migrate(cfg, 'test')).applied.map((a) => a.script), ['V0002__phone.sql'])
+  assert.equal((await runner.migrate(cfg, 'test')).applied.length, 0, 'and only once')
+
+  // Behind before the restart: it lacks what V0003 to V0005 did, so it is stopped and told.
+  await assert.rejects(runner.migrate(cfg, 'dev'), (e: unknown) => e instanceof LiftoffError && e.code === 'LIFTOFF_BASELINE_DIFFERS' && /table:public\.(customers|orders)/.test(e.message))
+
+  // An empty database: B0001 and the new V0002 give the same schema as test.
+  await sql(cfg, 'dev', pgSchemaReset)
+  assert.deepEqual((await runner.migrate(cfg, 'dev')).applied.map((a) => a.script), ['B0001__baseline.sql', 'V0002__phone.sql', 'R__order_count.sql'])
+  assert.equal((await compare(cfg, parseSide('dev'), parseSide('test'), undefined)).changes.length, 0)
+})

@@ -42,7 +42,12 @@ export type Script = {
   path: string
   checksum: number
   sql: string
+  /** a baseline script that starts the numbering again (`-- liftoff:restart` in it) */
+  restart?: boolean
 }
+
+/** The line that marks a baseline script as a numbering restart (liftoff rebaseline --restart). */
+export const RESTART_MARK = '-- liftoff:restart'
 
 /** `V1.2__add_orders.sql` -> versioned, "1.2", "add orders" */
 export function parseName(name: string): { kind: Kind; version: string | undefined; description: string } | undefined {
@@ -85,7 +90,8 @@ export function scan(dir: string): Script[] {
     } catch {
       throw configError(`${f.name} is not valid UTF-8`)
     }
-    scripts.push({ kind: parsed.kind, version, description: parsed.description, fileName: f.name, path: file, checksum: checksum(bytes), sql })
+    const restart = parsed.kind === 'baseline' && new RegExp(`^${RESTART_MARK}\\b`, 'm').test(sql)
+    scripts.push({ kind: parsed.kind, version, description: parsed.description, fileName: f.name, path: file, checksum: checksum(bytes), sql, restart })
   }
   for (const kind of ['versioned', 'undo', 'baseline'] as const) {
     const same = scripts.filter((s) => s.kind === kind).sort((a, b) => compareVersions(a.version, b.version))
@@ -139,6 +145,13 @@ export function nextVersion(existing: Script[], now: Date): string {
   const firstPart = latest.text.split(/[._]/)[0]
   if (firstPart.length >= 8) return compareVersions(parseVersion(stamp), latest) > 0 ? stamp : bump(latest.text)
   return bump(latest.text)
+}
+
+/** From V9990 on: time to rebaseline with a restart, before four digits run out. */
+export function versionNote(scripts: Script[]): string | undefined {
+  const latest = scripts.filter((s) => (s.kind === 'versioned' || s.kind === 'baseline') && s.version).map((s) => s.version!).sort(compareVersions).at(-1)
+  if (!latest || !/^\d{1,7}$/.test(latest.text) || Number(latest.text) < 9990) return undefined
+  return `the scripts have reached version ${latest.text}; rebaseline with a restart (liftoff rebaseline --restart) so the numbering starts again at 0001`
 }
 
 function bump(text: string): string {

@@ -3,9 +3,9 @@
 // and SQL Server; the differences live behind `Conn` (db.ts).
 
 import type { Config, Environment } from './config.ts'
-import { configError, DbError, MigrationError, notBaselinedError, validateError } from './errors.ts'
+import { BaselineDiffersError, configError, DbError, MigrationError, notBaselinedError, validateError } from './errors.ts'
 import { dialect, open, type Conn, type EngineName, type Held, type HistoryRow } from './db.ts'
-import { applyPlaceholders, compareVersions, parseVersion, scan, type Kind, type Script, type Version } from './migration.ts'
+import { applyPlaceholders, compareVersions, parseVersion, scan, versionNote, type Kind, type Script, type Version } from './migration.ts'
 import { quoteIdent } from './postgres.ts'
 import { quote as quoteTsql } from './sqlserver.ts'
 
@@ -48,8 +48,12 @@ const ver = (r: HistoryRow) => (r.version === null ? undefined : parseVersion(r.
 
 /** Each script's state, from the files and the history table. */
 export function compute(scripts: Script[], allRows: HistoryRow[]): MigrationInfo[] {
+  // Rows before the latest numbering restart belong to the old numbering: kept for the record, not
+  // compared. The restart row itself is the baseline the new numbering starts from.
+  const restart = allRows.findLastIndex((r) => r.type === 'RESTART')
+  const current = restart < 0 ? allRows : allRows.slice(restart).map((r, i) => (i === 0 ? { ...r, type: 'SQL_BASELINE' } : r))
   // Flyway's schema-creation marker is bookkeeping, not a migration.
-  const rows = allRows.filter((r) => r.type !== 'SCHEMA')
+  const rows = current.filter((r) => r.type !== 'SCHEMA')
   // One effective row per version, in rank order. A later DELETE row (repair forgot a missing
   // script) or UNDO_SQL row (undo ran) retires the version.
   const latest: [Version, HistoryRow][] = []
@@ -178,6 +182,18 @@ export type MigrateResult = {
   dry_run_sql: string | null
   /** with `only`: versioned scripts older than one that ran, still not run (a plain migrate now needs --out-of-order for them) */
   left_behind?: string[]
+  /** a database with objects was checked against a baseline script instead of running it */
+  baseline_check?: BaselineCheck
+}
+
+export type BaselineCheck = {
+  script: string
+  /** objects the database lacked, now created */
+  created: string[]
+  /** objects that differ, kept as they are (--accept-differences) */
+  accepted: string[]
+  /** a numbering restart (liftoff rebaseline --restart), not a first baseline */
+  restart: boolean
 }
 
 export type MigrateOptions = {
@@ -198,6 +214,12 @@ export type MigrateOptions = {
    * or a repeatable script's name (`customer_totals`). Older versioned scripts may be picked.
    */
   only?: string[]
+  /** a database with objects that differ from the baseline script: record the baseline anyway */
+  acceptDifferences?: boolean
+  /** the scratch environment to build a baseline script on, to check a database against it */
+  scratch?: string
+  /** adopt: the database must match the baseline exactly (nothing created, nothing accepted) */
+  baselineMustMatch?: boolean
 }
 
 const waiting = (log: Log) => () => log('info', 'Another run holds the lock on this database; waiting')
@@ -212,6 +234,8 @@ export async function migrate(cfg: Config, envName: string | undefined, opts: Mi
   }
   if (opts.only && opts.target !== undefined) throw configError('use --only or --target, not both')
   const scripts = scan(cfg.migrationsDir())
+  const note = versionNote(scripts)
+  if (note) log('warn', note)
   // Placeholder values are checked before anything runs (an unset variable fails here).
   if (cfg.usesPlaceholders()) cfg.placeholders(cfg.pick(envName)[0])
   return withEnv(cfg, envName, async (c, name, env) => {
@@ -288,6 +312,62 @@ function leftBehind(infos: MigrationInfo[], ran: MigrationInfo[]): string[] {
     .map((i) => i.script)
 }
 
+/** The newest baseline script, when it restarts the numbering and this database (with history) has not been through it. */
+function pendingRestart(scripts: Script[], rows: HistoryRow[]): Script | undefined {
+  const b = scripts.filter((s) => s.kind === 'baseline').sort((x, y) => compareVersions(x.version, y.version)).at(-1)
+  if (!b?.restart || !rows.length) return undefined
+  return rows.some((r) => r.type === 'RESTART' && r.script === b.fileName && r.checksum === b.checksum) ? undefined : b
+}
+
+/**
+ * Marks a database that already has objects with a baseline script, without running it: builds the
+ * script on the scratch database, compares, creates what the database lacks, and stops on anything
+ * that differs (unless accepted). The history row is written in the same transaction.
+ */
+async function smartBaseline(cfg: Config, c: Conn, name: string, b: Script, type: 'SQL_BASELINE' | 'RESTART', opts: MigrateOptions, log: Log): Promise<BaselineCheck> {
+  // diff.ts uses this module too; loaded when needed.
+  const d = await import('./diff.ts')
+  let scratch: [string, Environment]
+  try {
+    scratch = d.scratchEnv(cfg, opts.scratch)
+  } catch {
+    throw configError(
+      `'${name}' already has objects. To check them against ${b.fileName}, LiftOff builds that script on a scratch database: add an environment with role "scratch", ` +
+        `or mark it without checking: liftoff -e ${name} baseline --version ${b.version!.text}`,
+    )
+  }
+  if (scratch[0] === name) throw configError(`'${name}' cannot be its own scratch database`)
+  log('info', `${name} already has objects: checking them against ${b.fileName} (built on '${scratch[0]}')`)
+  const s = await d.rebuildScratch(cfg, scratch[0], scratch[1], b.version!.text, log)
+  let expected
+  try {
+    expected = await d.modelOf(cfg, s)
+  } finally {
+    await s.close()
+  }
+  const changes = d.diffSchemas(expected, await d.modelOf(cfg, c))
+  const brief = (x: { id: string; kind: string; destructive: boolean }) => ({ id: x.id, kind: x.kind, destructive: x.destructive })
+  const missing = changes.filter((x) => x.kind === 'added')
+  const differences = changes.filter((x) => x.kind !== 'added')
+  if (opts.baselineMustMatch && changes.length) throw new BaselineDiffersError(name, b.fileName, changes.map(brief))
+  if (differences.length && !opts.acceptDifferences) throw new BaselineDiffersError(name, b.fileName, differences.map(brief))
+  for (const x of differences) log('warn', `${name}: ${x.id} differs from ${b.fileName}; kept as it is (it shows up as drift)`)
+  const [schema, table] = [cfg.historySchema(), cfg.project.history_table]
+  if (missing.length) {
+    log('info', `${name}: creating what it lacks of ${b.fileName}: ${missing.map((x) => x.id).join(', ')}`)
+    const sql = d.renderScript(`-- What '${name}' lacked of ${b.fileName}`, missing)
+    try {
+      await runScript(c, b, sql, !dialect[c.engine].needsNoTransaction(sql), schema, table, type)
+    } catch (e) {
+      throw new MigrationError(b.fileName, failure(e))
+    }
+  } else {
+    await record(c, b, 0, true, schema, table, type)
+  }
+  log('info', type === 'RESTART' ? `${name}: the numbering starts again from ${b.fileName}` : `${name} is now at ${b.fileName}`)
+  return { script: b.fileName, created: missing.map((x) => x.id), accepted: differences.map((x) => x.id), restart: type === 'RESTART' }
+}
+
 /** The newest B script at or below `target`. */
 function baselineScript(scripts: Script[], target: Version | undefined): Script | undefined {
   return scripts
@@ -347,9 +427,17 @@ async function migrateLocked(c: Conn, cfg: Config, name: string, scripts: Script
     throw notBaselinedError(name)
   }
 
-  // A database without any history starts from the latest B script, when there is one.
-  const b = rows.length === 0 && useBaseline ? baselineScript(scripts, target) : undefined
-  if (b) {
+  // A database whose history is from before a numbering restart goes through the restart first.
+  const restart = useBaseline ? pendingRestart(scripts, rows) : undefined
+  // A database without any history starts from the latest B script, when there is one. One that
+  // already has objects is checked against it instead (missing objects created, differences listed).
+  const b = restart ?? (rows.length === 0 && useBaseline ? baselineScript(scripts, target) : undefined)
+  if (b && (restart || (!opts.allowNonEmpty && (await c.userObjects(cfg.project.schemas, table)) > 0))) {
+    const t = Date.now()
+    result.baseline_check = await smartBaseline(cfg, c, name, b, restart ? 'RESTART' : 'SQL_BASELINE', opts, log)
+    result.applied.push({ script: b.fileName, version: b.version?.text ?? null, execution_time_ms: Date.now() - t, transactional: true })
+    rows = await c.readHistory(schema, table)
+  } else if (b) {
     log('info', `Empty database: building it from ${b.fileName}`)
     const t = Date.now()
     try {

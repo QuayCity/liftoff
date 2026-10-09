@@ -10,6 +10,8 @@ export type ErrorCode =
   | 'LIFTOFF_VALIDATE'
   | 'LIFTOFF_DRIFT'
   | 'LIFTOFF_NOT_BASELINED'
+  /** a database's objects differ from the baseline script it is being marked with */
+  | 'LIFTOFF_BASELINE_DIFFERS'
   /** a schema-model file does not build */
   | 'LIFTOFF_MODEL_INVALID'
   /** the schema model has changes no migration script makes */
@@ -24,7 +26,13 @@ export type ErrorCode =
   | 'LIFTOFF_IO'
 
 /** What the CLI prints for a failure: `{"ok": false, "error": <ErrorReport>}` */
-export type ErrorReport = { code: ErrorCode; exit_code: number; message: string; problems?: { path: string; message: string }[] }
+export type ErrorReport = {
+  code: ErrorCode
+  exit_code: number
+  message: string
+  problems?: { path: string; message: string }[]
+  differences?: { id: string; kind: string; destructive: boolean }[]
+}
 
 export class LiftoffError extends Error {
   readonly code: ErrorCode
@@ -86,6 +94,25 @@ export class ModelInvalidError extends LiftoffError {
 
   report(): ErrorReport {
     return { ...super.report(), problems: this.problems }
+  }
+}
+
+/** A database with objects but no history differs from the baseline script it would be marked with. */
+export class BaselineDiffersError extends LiftoffError {
+  readonly differences: { id: string; kind: string; destructive: boolean }[]
+  constructor(env: string, script: string, differences: { id: string; kind: string; destructive: boolean }[]) {
+    const word = { added: 'missing', removed: 'extra', changed: 'different' } as Record<string, string>
+    super(
+      'LIFTOFF_BASELINE_DIFFERS',
+      12,
+      `'${env}' has objects that differ from ${script}:\n${differences.map((d) => `  ${word[d.kind] ?? d.kind}: ${d.id}`).join('\n')}\n` +
+        'Make them match, or keep them and record the baseline anyway with --accept-differences (they then show up as drift).',
+    )
+    this.differences = differences
+  }
+
+  report(): ErrorReport {
+    return { ...super.report(), differences: this.differences }
   }
 }
 
