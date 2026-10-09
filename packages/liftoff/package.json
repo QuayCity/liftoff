@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "Database migrations for PostgreSQL and SQL Server",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sanderstad/liftoff.git"
+  },
+  "homepage": "https://github.com/sanderstad/liftoff",
+  "bugs": {
+    "url": "https://github.com/sanderstad/liftoff/issues"
+  },
   "private": true,
   "type": "module",
   "engines": {

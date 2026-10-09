@@ -204,7 +204,7 @@ export class SchemaModelView implements vscode.TreeDataProvider<Item>, vscode.Te
     try {
       const r = await this.lo.run<{ written: string }>(args)
       await vscode.window.showTextDocument(vscode.Uri.file(r.written))
-      void vscode.window.showInformationMessage('Workflow written. Add the repository secrets it names, and point the install step at your LiftOff release.')
+      void vscode.window.showInformationMessage('Workflow written. Add the repository secrets it names (the comment at the top lists them).')
       return r.written
     } catch (e) {
       if (e instanceof LiftoffError && /already exists/.test(e.message)) {

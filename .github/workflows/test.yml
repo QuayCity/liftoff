@@ -1,0 +1,158 @@
+# Every pull request and every push to main: the whole test suite.
+#   core      the core, the CLI and the VS Code extension against real PostgreSQL, PgBouncer and SQL Server
+#   desktop   the desktop app's screens in a browser (Playwright, with axe accessibility checks)
+#   cli       the single-file CLI builds and runs on Windows and macOS too
+# The Electron tests (e2e/app) need Windows and a database; run them locally (CONTRIBUTING.md).
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: Core, CLI and VS Code extension
+    runs-on: ubuntu-latest
+    services:
+      pg:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: liftoff
+        ports: ['55432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
+      bouncer:
+        image: edoburu/pgbouncer:latest
+        env:
+          DB_HOST: pg
+          DB_USER: postgres
+          DB_PASSWORD: liftoff
+          POOL_MODE: transaction
+          AUTH_TYPE: scram-sha-256
+          MAX_PREPARED_STATEMENTS: 0
+          DEFAULT_POOL_SIZE: 5
+        ports: ['56432:5432']
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: 'Y'
+          MSSQL_PID: Developer
+          MSSQL_SA_PASSWORD: Liftoff!2026
+        ports: ['51433:1433']
+    env:
+      LIFTOFF_TEST_PG: postgres://postgres:liftoff@localhost:55432
+      LIFTOFF_TEST_PGBOUNCER: postgres://postgres:liftoff@localhost:56432
+      LIFTOFF_TEST_MSSQL: sqlserver://localhost:51433;encrypt=true;trustServerCertificate=true;user=sa;password=Liftoff!2026
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            packages/liftoff/package-lock.json
+            apps/vscode/package-lock.json
+      - name: Create the test databases
+        run: |
+          for db in shop_dev shop_scratch shop_test; do
+            PGPASSWORD=liftoff psql -h localhost -p 55432 -U postgres -c "create database $db"
+          done
+      - name: Wait for SQL Server
+        run: |
+          for _ in $(seq 1 60); do
+            docker exec ${{ job.services.mssql.id }} /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'Liftoff!2026' -Q 'select 1' > /dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          exit 1
+      - name: Install
+        working-directory: packages/liftoff
+        run: npm ci
+      - name: Type check
+        working-directory: packages/liftoff
+        run: npm run typecheck
+      - name: Unit tests
+        working-directory: packages/liftoff
+        run: npm test
+      - name: Against the databases, and the CLI contract
+        working-directory: packages/liftoff
+        run: npm run test:db
+      - name: Build the single-file CLI
+        working-directory: packages/liftoff
+        run: npm run build:cli
+      - name: The CLI contract on the single file
+        working-directory: packages/liftoff
+        run: LIFTOFF_CLI="$PWD/build/liftoff" node --test test/cli.test.ts
+      - name: VS Code extension, unit tests
+        working-directory: apps/vscode
+        run: npm ci && npm test
+      - name: VS Code extension, in a real VS Code
+        working-directory: apps/vscode
+        run: xvfb-run -a npm run test:vscode
+
+  desktop:
+    name: Desktop app screens
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            apps/desktop/package-lock.json
+            e2e/package-lock.json
+      - name: Install
+        run: |
+          (cd apps/desktop && npm ci)
+          (cd e2e && npm ci && npx playwright install --with-deps chromium)
+      - name: Type check
+        working-directory: apps/desktop
+        run: npx tsc --noEmit -p tsconfig.app.json && npx tsc --noEmit -p tsconfig.node.json
+      - name: Screens in a browser (Playwright, axe)
+        working-directory: e2e
+        run: npx playwright test --project=ui
+      - name: Keep the failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: e2e/test-results/
+          if-no-files-found: ignore
+
+  cli:
+    name: Single-file CLI on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: packages/liftoff
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: packages/liftoff/package-lock.json
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Build the single-file CLI
+        run: npm run build:cli
+      - name: The CLI contract on the single file (the database parts are skipped here)
+        run: |
+          exe=build/liftoff
+          if [ "$RUNNER_OS" = Windows ]; then exe=build/liftoff.exe; fi
+          LIFTOFF_CLI="$(node -p "require('path').resolve('$exe')")" node --test test/cli.test.ts

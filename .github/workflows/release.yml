@@ -1,0 +1,84 @@
+# Pushing a version tag (git tag v0.2.0 && git push origin v0.2.0) builds and publishes a release:
+#   liftoff-linux-x64, liftoff-win-x64.exe, liftoff-macos-arm64     the single-file CLI
+#   liftoff-vscode-<platform>.vsix                                  the VS Code extension, CLI included
+# The tag has to match the version in the code (see the first job), so a release says what it is.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: The tag matches the version in the code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cli=$(sed -n "s/^const VERSION = '\(.*\)'$/\1/p" packages/liftoff/src/cli/main.ts)
+          core=$(node -p "require('./packages/liftoff/package.json').version")
+          ext=$(node -p "require('./apps/vscode/package.json').version")
+          echo "tag $tag, CLI $cli, packages/liftoff $core, apps/vscode $ext"
+          [ "$tag" = "$cli" ] && [ "$tag" = "$core" ] && [ "$tag" = "$ext" ] || { echo "::error::set the version to $tag in main.ts and both package.json files"; exit 1; }
+
+  build:
+    name: Build for ${{ matrix.name }}
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest, name: linux-x64, vsce: linux-x64, exe: liftoff, ext: '' }
+          - { os: windows-latest, name: win-x64, vsce: win32-x64, exe: liftoff.exe, ext: .exe }
+          - { os: macos-latest, name: macos-arm64, vsce: darwin-arm64, exe: liftoff, ext: '' }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            packages/liftoff/package-lock.json
+            apps/vscode/package-lock.json
+      - name: Build the CLI
+        working-directory: packages/liftoff
+        run: npm ci && npm test && npm run build:cli
+      - name: It runs
+        working-directory: packages/liftoff
+        run: ./build/${{ matrix.exe }} --version
+      - name: The VS Code extension for this platform
+        working-directory: apps/vscode
+        run: npm ci && npm run build && npm run bundle-cli && npx vsce package --target ${{ matrix.vsce }} --out ../../liftoff-vscode-${{ matrix.vsce }}.vsix
+      - name: Name the CLI for the release
+        run: cp packages/liftoff/build/${{ matrix.exe }} liftoff-${{ matrix.name }}${{ matrix.ext }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: |
+            liftoff-${{ matrix.name }}${{ matrix.ext }}
+            liftoff-vscode-${{ matrix.vsce }}.vsix
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "LiftOff $GITHUB_REF_NAME" --generate-notes

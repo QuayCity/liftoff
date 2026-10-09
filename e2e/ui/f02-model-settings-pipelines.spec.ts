@@ -42,13 +42,13 @@ test('S15/S16 edit settings and a filter; leaving with unsaved changes asks firs
   checkConsole()
 })
 
-test('S17 the workflow follows the chosen stages and warns about the install command', async ({ page }) => {
+test('S17 the workflow follows the chosen stages and installs LiftOff from its releases', async ({ page }) => {
   const checkConsole = watchConsole(page)
   await page.goto('/?open=1&ws=Pipelines')
   const preview = page.getByRole('region', { name: 'Workflow preview' })
   await expect(preview).toContainText("liftoff --environment 'staging' migrate")
   await expect(preview).toContainText('needs: staging')
-  await expect(page.getByText('Replace the install command')).toBeVisible()
+  await expect(page.getByLabel('Install command')).toHaveValue(/github\.com\/sanderstad\/liftoff\/releases\/latest\/download\/liftoff-linux-x64/)
   await page.getByRole('checkbox', { name: 'production (prod)' }).click()
   await expect(preview).not.toContainText('production')
   await expectNoA11yViolations(page, 'Pipelines')

@@ -6,7 +6,7 @@ import { Button, Checkbox, Field, Input, RadioGroup, Switch } from '../ui/contro
 import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
 import { useToast } from '../ui/overlays'
 
-const DEFAULT_INSTALL = 'curl -fsSL -o liftoff https://github.com/YOUR-ORG/liftoff/releases/latest/download/liftoff-linux-x64 && sudo install -m 755 liftoff /usr/local/bin/liftoff'
+const DEFAULT_INSTALL = 'curl -fsSL -o liftoff https://github.com/sanderstad/liftoff/releases/latest/download/liftoff-linux-x64 && sudo install -m 755 liftoff /usr/local/bin/liftoff'
 const secret = (env: string, field: string) => `LIFTOFF_ENV_${env.toUpperCase().replaceAll('-', '_')}_${field}`
 
 export function Pipelines({ project }: { project: Project }) {
@@ -73,7 +73,6 @@ export function Pipelines({ project }: { project: Project }) {
         <Field label="Install command" help="Runs on the CI machine before the steps.">
           {(a) => <Input {...a} mono value={install} onChange={(e) => setInstall(e.target.value)} />}
         </Field>
-        {install === DEFAULT_INSTALL && <InlineAlert tone="warning" title="Replace the install command">Point it at where you publish LiftOff before you use this workflow.</InlineAlert>}
         <div>
           <h3 className="text-sm font-medium">Repository secrets to add</h3>
           <ul className="mt-1 list-disc pl-5 font-mono text-xs">
