@@ -2,7 +2,7 @@
 import { FileCode2, Layers, Plus, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { api, errorText, type Project, type ScriptView } from '../api'
-import { Button, Field, IconButton, Input, RadioGroup, Select, Textarea } from '../ui/controls'
+import { Button, Checkbox, Field, IconButton, Input, RadioGroup, Select, Textarea } from '../ui/controls'
 import { DataTable } from '../ui/data'
 import { Badge, Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
 import { Dialog, useToast } from '../ui/overlays'
@@ -79,7 +79,12 @@ export function Scripts({ project }: { project: Project }) {
           toast({ tone: 'success', title: `Created ${name}` })
           load(name)
         }} />
-      <SquashDialog key={squashing ? 'squash-open' : 'squash-closed'} open={squashing} onOpenChange={setSquashing} project={project}
+      {project.notes.map((n) => (
+        <div key={n} className="px-6 pt-4">
+          <InlineAlert tone="warning" title="Time for a rebaseline" action={<Button size="sm" onClick={() => setSquashing(true)}>Rebaseline…</Button>}>{n}</InlineAlert>
+        </div>
+      ))}
+      <SquashDialog key={squashing ? 'squash-open' : 'squash-closed'} open={squashing} onOpenChange={setSquashing} project={project} startWithRestart={project.notes.length > 0}
         versions={(scripts ?? []).filter((s) => s.kind === 'versioned' && s.version).map((s) => s.version!)}
         onDone={(message) => {
           toast({ tone: 'success', title: message })
@@ -89,27 +94,36 @@ export function Scripts({ project }: { project: Project }) {
   )
 }
 
-function SquashDialog({ open, onOpenChange, project, versions, onDone }: {
-  open: boolean; onOpenChange: (o: boolean) => void; project: Project; versions: string[]; onDone: (message: string) => void
+function SquashDialog({ open, onOpenChange, project, versions, onDone, startWithRestart }: {
+  open: boolean; onOpenChange: (o: boolean) => void; project: Project; versions: string[]; onDone: (message: string) => void; startWithRestart: boolean
 }) {
   const [upTo, setUpTo] = useState(versions[versions.length - 1] ?? '')
+  // Opened before the scripts were loaded: take the newest version once they are.
+  useEffect(() => {
+    if (!upTo && versions.length) setUpTo(versions[versions.length - 1])
+  }, [upTo, versions])
   const [description, setDescription] = useState('baseline')
   // keep: squash only; remove/archive: rebaseline (the old scripts leave the migrations folder)
   const [old, setOld] = useState<'keep' | 'remove' | 'archive'>('remove')
   const [archive, setArchive] = useState('migrations-archive')
+  // Start the numbering again at B0001 (near V9999, or for a fresh start).
+  const [restart, setRestart] = useState(startWithRestart)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const valid = /^[\p{L}\p{N} _-]{1,120}$/u.test(description.trim())
+  const restarting = restart && old !== 'keep'
+  // A restart needs no version (it replaces every script); otherwise one must be chosen (the list may still be loading).
+  const ready = valid && (restarting || !!upTo) && (old !== 'archive' || !!archive.trim())
 
   const run = async () => {
-    if (!valid || !upTo) return
+    if (!ready) return
     setBusy(true)
     setError(null)
     try {
       if (old === 'keep') {
         onDone(`Wrote ${await api.squash(project.root, upTo, description.trim())}`)
       } else {
-        const r = await api.rebaseline(project.root, upTo, description.trim(), old === 'archive' ? archive.trim() : undefined)
+        const r = await api.rebaseline(project.root, upTo, description.trim(), old === 'archive' ? archive.trim() : undefined, restart)
         const name = r.baseline.split(/[\\/]/).pop()
         onDone(`Wrote ${name}; ${r.removed.length} old script${r.removed.length === 1 ? '' : 's'} ${r.archived_to ? `moved to ${r.archived_to}` : 'deleted (git still has them)'}`)
       }
@@ -124,10 +138,10 @@ function SquashDialog({ open, onOpenChange, project, versions, onDone }: {
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title="Squash or rebaseline" size="md" submitting={busy}
       description="Writes one baseline script with the schema the versioned scripts build. New, empty databases start from it; databases that already ran the scripts are not changed."
-      footer={<><Button onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button><Button variant="primary" loading={busy} onClick={run} disabled={!valid || (old === 'archive' && !archive.trim())}>{old === 'keep' ? 'Squash' : 'Rebaseline'}</Button></>}>
+      footer={<><Button onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button><Button variant="primary" loading={busy} onClick={run} disabled={!ready}>{old === 'keep' ? 'Squash' : 'Rebaseline'}</Button></>}>
       <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); run() }}>
-        <Field label="Up to version" help="Scripts after it stay as they are.">
-          {(a) => <Select {...a} value={upTo} onChange={(e) => setUpTo(e.target.value)}>{versions.map((v) => <option key={v} value={v}>{v}</option>)}</Select>}
+        <Field label="Up to version" help={restart && old !== 'keep' ? 'A restart replaces every script.' : 'Scripts after it stay as they are.'}>
+          {(a) => <Select {...a} value={upTo} disabled={restart && old !== 'keep'} onChange={(e) => setUpTo(e.target.value)}>{versions.map((v) => <option key={v} value={v}>{v}</option>)}</Select>}
         </Field>
         <Field label="Description" error={valid ? undefined : 'Up to 120 letters, digits, spaces, - or _.'}>
           {(a) => <Input {...a} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={120} />}
@@ -137,6 +151,12 @@ function SquashDialog({ open, onOpenChange, project, versions, onDone }: {
           { value: 'archive', label: 'Move them to a folder (rebaseline)', help: 'Out of the migrations folder, still in the project.' },
           { value: 'keep', label: 'Keep them (squash only)', help: 'Only empty databases use the baseline script.' },
         ]} />
+        {old !== 'keep' && (
+          <Checkbox checked={restart} onChange={setRestart} label="Start the numbering again: the baseline is B0001, the next script V0002" />
+        )}
+        {old !== 'keep' && restart && (
+          <p className="text-xs font-normal text-muted">Databases that ran the old scripts are checked against B0001 on their next run: missing objects are created, anything different stops it for you to decide.</p>
+        )}
         {old === 'archive' && (
           <Field label="Folder" help="Relative to the project folder, outside the migrations folder.">
             {(a) => <Input {...a} mono value={archive} onChange={(e) => setArchive(e.target.value)} />}

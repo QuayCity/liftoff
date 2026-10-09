@@ -45,6 +45,31 @@ liftoff -e test migrate
 takes `--output-type json` for scripts and pipelines. To try it without a project:
 `liftoff init --sample`.
 
+## How a project goes
+
+**A new database.** The first script is `V0001`, the next `V0002`, and so on. Every database is
+built from the scripts.
+
+**An existing database.** Start from what is there: `liftoff -e prod adopt` captures the database
+that is right (usually production) into `B0001`, checks on the scratch database that it rebuilds
+exactly that, and records it as already there. New scripts start at `V0002`. Other environments
+that already have objects are checked against `B0001` on their next `migrate`:
+
+- the same: the baseline is recorded, nothing runs;
+- objects missing: they are created, then the baseline is recorded;
+- objects that differ: it stops and lists them, and nothing changes until you decide
+  (fix them, or `--accept-differences`: they are kept and show up as drift).
+
+Empty databases are simply built from `B0001`.
+
+**Branches.** Every pull request checks that its new scripts are numbered after everything on the
+main branch; when the pipeline writes the script, it renumbers it (`liftoff renumber`).
+
+**Many scripts.** `liftoff rebaseline` replaces the scripts with one baseline script (checked to
+build the same schema) and takes the old ones out of the folder; git still has them. From
+`V9990` on, migrate and the apps say it is time for `liftoff rebaseline --restart`: the baseline
+becomes `B0001` again, and each existing database goes through the same check on its next run.
+
 ## The repository
 
 | folder | what |

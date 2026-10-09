@@ -2,7 +2,7 @@
 import { Database, Pencil, Plus, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, errorText, isErrorReport, olderNotRun, pickable, type EnvView, type Generated, type MigrationInfo, type Project, type State } from '../api'
-import { Button, Checkbox, Field, IconButton, Input, cx } from '../ui/controls'
+import { Button, Checkbox, Field, IconButton, Input, Select, cx } from '../ui/controls'
 import { CommandBar, DataTable, EnvironmentColumn, LogConsole, type Env, type LogLine } from '../ui/data'
 import { Badge, Card, CodeBlock, EmptyState, InlineAlert, StatePill, type MigrationState } from '../ui/display'
 import { ConfirmDestructive, Dialog, useToast } from '../ui/overlays'
@@ -42,6 +42,8 @@ export function Environments({ project, onProject }: { project: Project; onProje
   const [drift, setDrift] = useState<Record<string, boolean>>({})
   const [importFor, setImportFor] = useState<string | null>(null)
   const [notBaselined, setNotBaselined] = useState<string | null>(null)
+  // A database whose objects differ from the baseline script it would be marked with.
+  const [differs, setDiffers] = useState<{ env: string; differences: { id: string; kind: string }[] } | null>(null)
   // A script picked to run on its own, waiting for confirmation.
   const [pick, setPick] = useState<{ env: EnvView; info: MigrationInfo } | null>(null)
 
@@ -92,9 +94,15 @@ export function Environments({ project, onProject }: { project: Project; onProje
     }
   }
 
-  const run = (name: string, allowNonEmpty = false) => op(name, async () => {
+  const run = (name: string, allowNonEmpty = false, acceptDifferences = false) => op(name, async () => {
     try {
-      const r = await api.migrate(project.root, name, false, allowNonEmpty)
+      const r = await api.migrate(project.root, name, false, allowNonEmpty, undefined, acceptDifferences)
+      const c = r.baseline_check
+      const checked = c
+        ? `${name} ${c.restart ? 'went through the restart at' : 'is now at'} ${c.script}${c.created.length ? `; created ${c.created.length} missing object${c.created.length > 1 ? 's' : ''}` : ''}${c.accepted.length ? `; kept ${c.accepted.length} difference${c.accepted.length > 1 ? 's' : ''}` : ''}`
+        : ''
+      const ran = r.applied.filter((a) => a.script !== c?.script).length
+      if (checked) return ran ? `${checked}; then ran ${ran} script${ran > 1 ? 's' : ''}` : checked
       return r.applied.length ? `Ran ${r.applied.length} script${r.applied.length > 1 ? 's' : ''} on ${name}` : `${name} was already up to date`
     } catch (e) {
       // A database that has tables but no history: ask instead of failing half-way through the scripts.
@@ -102,8 +110,20 @@ export function Environments({ project, onProject }: { project: Project; onProje
         setNotBaselined(name)
         return null
       }
+      // Checked against the baseline script, it differs: show what, let the user decide.
+      if (isErrorReport(e) && e.code === 'LIFTOFF_BASELINE_DIFFERS') {
+        setDiffers({ env: name, differences: e.differences ?? [] })
+        return null
+      }
       throw e
     }
+  })
+
+  /** A project without scripts starts from this database: its objects become B0001. */
+  const adoptDb = (name: string) => op(name, async () => {
+    const r = await api.adopt(project.root, name)
+    onProject(await api.projectOpen(project.root))
+    return `Captured ${name} as ${r.baseline.split(/[\\/]/).pop()} and recorded it there`
   })
 
   /** One script and nothing else (`migrate --only`). */
@@ -130,6 +150,7 @@ export function Environments({ project, onProject }: { project: Project; onProje
       return `Undid version ${r.version ?? ''} on ${name}`
     })
     if (id === 'baseline') return setBaselineFor(name)
+    if (id === 'adopt') return adoptDb(name)
     if (id === 'import-flyway') return setImportFor(name)
     if (id === 'capture') return op(name, async () => {
       setCaptured({ env: name, g: await api.capture(project.root, name, 'existing schema', false) })
@@ -174,6 +195,7 @@ export function Environments({ project, onProject }: { project: Project; onProje
 
   return (
     <div className="flex flex-col gap-6 p-6">
+      {!project.has_scripts && envs.length > 0 && <AdoptPrompt envs={envs} busy={running !== null} onAdopt={adoptDb} />}
       <div className="flex gap-4 overflow-x-auto pb-1">
         {envs.map((e) => (
           <EnvironmentColumn key={e.name} env={column(e)} selected={e.name === selected} busy={running !== null} onOpen={() => setSelected(e.name)} onRun={() => run(e.name)} />
@@ -248,6 +270,7 @@ export function Environments({ project, onProject }: { project: Project; onProje
                   ...(selStatus?.info?.length === 0 || selStatus?.info?.every((i) => !i.installed_on)
                   ? [{ id: 'import-flyway', label: 'Import Flyway history…' }, { id: 'baseline', label: 'Baseline…' }]
                   : []),
+                  ...(!project.has_scripts ? [{ id: 'adopt', label: 'Adopt as B0001 (capture this database)' }] : []),
                   ...(sel.role === 'scratch' || sel.allow_clean ? [{ id: 'clean', label: 'Clean…', destructive: true }] : []),
                   { id: 'capture', label: 'Capture as script…' },
                 { id: 'capture-b', label: 'Capture as baseline script…' },
@@ -289,13 +312,29 @@ export function Environments({ project, onProject }: { project: Project; onProje
         })()}
       </Dialog>
       <Dialog open={!!notBaselined} onOpenChange={(o) => !o && setNotBaselined(null)} size="sm" title={`${notBaselined ?? ''} already has tables`}
-        description="It has no migration history, so running every script would try to create what is already there."
-        footer={<>
+        description={project.has_scripts ? 'It has no migration history, so running every script would try to create what is already there.' : 'This project has no scripts yet. Start from what this database has.'}
+        footer={project.has_scripts ? <>
           <Button onClick={() => setNotBaselined(null)}>Cancel</Button>
           <Button variant="danger" onClick={() => { const n = notBaselined!; setNotBaselined(null); run(n, true) }}>Run them anyway</Button>
           <Button variant="primary" onClick={() => { const n = notBaselined!; setNotBaselined(null); setBaselineFor(n) }}>Baseline…</Button>
+        </> : <>
+          <Button onClick={() => setNotBaselined(null)}>Cancel</Button>
+          <Button variant="primary" onClick={() => { const n = notBaselined!; setNotBaselined(null); adoptDb(n) }}>Adopt as B0001</Button>
         </>}>
-        <p className="text-sm">Baseline it at the version it already matches, or import its Flyway history if it came from Flyway.</p>
+        {project.has_scripts
+          ? <p className="text-sm">Baseline it at the version it already matches, or import its Flyway history if it came from Flyway.</p>
+          : <p className="text-sm">Its objects are captured into B0001__existing_schema.sql, checked on the scratch database, and recorded as already there. Other environments are checked against it when they migrate; new scripts start at V0002. Use the database that is right, usually production or a copy of it.</p>}
+      </Dialog>
+      <Dialog open={!!differs} onOpenChange={(o) => !o && setDiffers(null)} size="md" title={`${differs?.env ?? ''} differs from the baseline`}
+        description="It already has objects, so it was compared with what the baseline script builds instead of running it. Nothing was changed."
+        footer={<>
+          <Button onClick={() => setDiffers(null)}>Cancel</Button>
+          <Button variant="danger" onClick={() => { const n = differs!.env; setDiffers(null); run(n, false, true) }}>Record anyway</Button>
+        </>}>
+        <ul className="list-disc pl-5 text-sm">
+          {differs?.differences.map((d) => <li key={d.id}><span className="font-mono">{d.id}</span>: {d.kind === 'added' ? 'missing' : d.kind === 'removed' ? 'not in the baseline' : 'different'}</li>)}
+        </ul>
+        <p className="mt-3 text-sm text-muted">Make these match and run again, or record the baseline anyway: missing objects are created, the rest is kept as it is and shows up as drift.</p>
       </Dialog>
       <ImportDialog key={`import:${importFor ?? ''}`} env={importFor} onClose={() => setImportFor(null)}
         onConfirm={(name, table, acceptEdited) => {
@@ -401,5 +440,25 @@ function BaselineDialog({ env, onClose, onConfirm }: { env: string | null; onClo
         <Field label="Description">{(a) => <Input {...a} value={description} onChange={(e) => setDescription(e.target.value)} />}</Field>
       </div>
     </Dialog>
+  )
+}
+
+/** A project without scripts: start from a database that already has the objects. */
+function AdoptPrompt({ envs, busy, onAdopt }: { envs: EnvView[]; busy: boolean; onAdopt: (name: string) => void }) {
+  // The database that is right is usually production; else the first one.
+  const [env, setEnv] = useState((envs.find((e) => e.role === 'prod') ?? envs[0]).name)
+  return (
+    <InlineAlert tone="info" title="Starting from an existing database?"
+      action={
+        <div className="flex items-center gap-2">
+          <Select aria-label="Database to adopt" value={env} onChange={(e) => setEnv(e.target.value)}>
+            {envs.map((e) => <option key={e.name} value={e.name}>{e.name} ({e.role})</option>)}
+          </Select>
+          <Button size="sm" variant="primary" disabled={busy} onClick={() => onAdopt(env)}>Adopt as B0001</Button>
+        </div>
+      }>
+      This project has no scripts yet. Capture the database that is right (usually production) as B0001: the other
+      environments are checked against it when they run, and new scripts start at V0002. A new, empty database? Just write V0001.
+    </InlineAlert>
   )
 }

@@ -146,6 +146,12 @@ export async function run(): Promise<void> {
   assert.ok(rb && rb.removed.includes('V1__orders.sql') && fs.existsSync(path.join(workspace, 'old', 'V1__orders.sql')))
   assert.deepEqual(fs.readdirSync(path.join(workspace, 'migrations')).filter((f) => f.startsWith('V')), [])
 
+  // A restart: B0001 replaces everything; test, which ran the old scripts, goes through it on its next run.
+  const restarted = await vscode.commands.executeCommand<{ baseline: string }>('liftoff.rebaseline', { description: 'fresh', archive: 'old2', restart: true })
+  assert.equal(path.basename(restarted?.baseline ?? ''), 'B0001__fresh.sql')
+  const afterRestart = await vscode.commands.executeCommand<MigrateResult>('liftoff.migrate', envItem)
+  assert.equal(afterRestart?.baseline_check?.restart, true, JSON.stringify(afterRestart))
+
   fs.writeFileSync(path.join(workspace, '.suite-passed'), '')
   console.log('liftoff suite: all checks passed')
 }

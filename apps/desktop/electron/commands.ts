@@ -8,13 +8,14 @@ import * as ci from '../../../packages/liftoff/src/core/ci.ts'
 import * as compare from '../../../packages/liftoff/src/core/compare.ts'
 import { DataSession } from '../../../packages/liftoff/src/core/datacompare.ts'
 import { rebaseline } from '../../../packages/liftoff/src/core/rebaseline.ts'
+import { adopt } from '../../../packages/liftoff/src/core/adopt.ts'
 import { Config, init, interpolate, PROJECT_FILE, readSettings, redactUrl, saveProject, saveSettings, type Environment, type Project, type Role } from '../../../packages/liftoff/src/core/config.ts'
 import { open } from '../../../packages/liftoff/src/core/db.ts'
 import * as diff from '../../../packages/liftoff/src/core/diff.ts'
 import { LiftoffError } from '../../../packages/liftoff/src/core/errors.ts'
 import * as flyway from '../../../packages/liftoff/src/core/flyway.ts'
 import * as git from '../../../packages/liftoff/src/core/git.ts'
-import { scan } from '../../../packages/liftoff/src/core/migration.ts'
+import { scan, versionNote } from '../../../packages/liftoff/src/core/migration.ts'
 import * as model from '../../../packages/liftoff/src/core/model.ts'
 import * as runner from '../../../packages/liftoff/src/core/runner.ts'
 import { createSample } from '../../../packages/liftoff/src/core/sample.ts'
@@ -36,7 +37,12 @@ type Args = Record<string, unknown>
  */
 function view(cfg: Config) {
   const written = new Map(readSettings(cfg.root).environments.map((e) => [e.name, e]))
+  const scripts = scan(cfg.migrationsDir())
   return {
+    /** any versioned or baseline script yet (without: an existing database can be adopted) */
+    has_scripts: scripts.some((x) => x.kind === 'versioned' || x.kind === 'baseline'),
+    /** e.g. the numbering nearing 9999 */
+    notes: [versionNote(scripts)].filter((n): n is string => !!n),
     root: cfg.root,
     name: cfg.project.name,
     engine: cfg.project.engine,
@@ -176,7 +182,9 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
 
   /* F04: run */
   migrations_info: (a) => runner.info(load(a.path), s(a, 'env')),
-  migrate: (a, h) => runner.migrate(load(a.path), s(a, 'env'), { outOfOrder: b(a, 'outOfOrder'), allowNonEmpty: b(a, 'allowNonEmpty'), only: a.only as string[] | undefined }, h.log),
+  migrate: (a, h) => runner.migrate(load(a.path), s(a, 'env'), { outOfOrder: b(a, 'outOfOrder'), allowNonEmpty: b(a, 'allowNonEmpty'), only: a.only as string[] | undefined, acceptDifferences: b(a, 'acceptDifferences') }, h.log),
+  /** A project without scripts starts from this database: B0001, checked, recorded there. */
+  adopt: (a, h) => adopt(load(a.path), s(a, 'env'), undefined, undefined, h.log),
   validate: (a) => runner.validateEnv(load(a.path), s(a, 'env')),
   baseline: (a, h) => runner.baseline(load(a.path), s(a, 'env'), s(a, 'version'), s(a, 'description'), h.log),
   repair: (a, h) => runner.repair(load(a.path), s(a, 'env'), h.log),
@@ -245,7 +253,7 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
     return (await diff.squash(cfg, s(a, 'upTo'), s(a, 'description'), undefined, false, h.log)).generated.file_name
   },
   /** One baseline script replaces the scripts up to a version; they are deleted (git keeps them) or archived. */
-  rebaseline: (a, h) => rebaseline(load(a.path), { upTo: s(a, 'upTo'), description: s(a, 'description'), archive: a.archive ? s(a, 'archive') : undefined }, h.log),
+  rebaseline: (a, h) => rebaseline(load(a.path), { upTo: a.restart ? undefined : s(a, 'upTo'), description: s(a, 'description'), archive: a.archive ? s(a, 'archive') : undefined, restart: b(a, 'restart') }, h.log),
   /** Writes the HTML report of a check to the file the user picked. */
   report_save: (a) => fs.writeFileSync(s(a, 'file'), checks.reportHtml(a.report as checks.CheckReport, load(a.path).project.name, new Date().toISOString())),
   scratch_create: async (a) => {

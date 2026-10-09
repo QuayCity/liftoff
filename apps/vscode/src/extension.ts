@@ -13,6 +13,7 @@ import { SettingsPanel } from './settingsPanel'
 import {
   describe,
   groupProblems,
+  migrateSummary,
   olderNotRun,
   pickable,
   problemsFor,
@@ -114,6 +115,13 @@ export class Liftoff implements vscode.TreeDataProvider<Item> {
     if (this.projectDir) {
       try {
         this.project = await this.run<Project>(['project'])
+        void vscode.commands.executeCommand('setContext', 'liftoff.noScripts', this.project.has_scripts === false)
+        // Near V9999: say so once per load, with the way out.
+        for (const note of this.project.notes ?? []) {
+          void vscode.window.showWarningMessage(`LiftOff: ${note}`, 'Rebaseline…').then((c) => {
+            if (c) void vscode.commands.executeCommand('liftoff.rebaseline')
+          })
+        }
       } catch (e) {
         this.log.appendLine(`Could not read the project: ${message(e)}`)
       }
@@ -241,13 +249,57 @@ async function migrate(lo: Liftoff, item?: EnvironmentItem): Promise<MigrateResu
     const go = await vscode.window.showWarningMessage(`Run the pending migrations on ${env.name}? This is a production database.`, { modal: true }, 'Run')
     if (go !== 'Run') return undefined
   }
-  const result = await withProgress(lo, `Running migrations on ${env.name}`, () => lo.run<MigrateResult>(['migrate'], env.name))
-  if (result) {
-    const n = result.applied.length
-    vscode.window.showInformationMessage(n ? `Applied ${n} migration${n === 1 ? '' : 's'} to ${env.name}` : `${env.name} is up to date`)
-  }
+  const result = await runMigrate(lo, env, [])
   await lo.reloadOpened()
   return result
+}
+
+/**
+ * Runs migrate; a database with tables but no history (project without scripts) is offered for
+ * adoption, and one that differs from the baseline script gets its differences listed first.
+ */
+async function runMigrate(lo: Liftoff, env: Environment, extra: string[]): Promise<MigrateResult | undefined> {
+  try {
+    const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Running migrations on ${env.name}` }, () =>
+      lo.run<MigrateResult>(['migrate', ...extra], env.name),
+    )
+    vscode.window.showInformationMessage(migrateSummary(env.name, r))
+    return r
+  } catch (e) {
+    if (e instanceof LiftoffError && e.report.code === 'LIFTOFF_NOT_BASELINED' && lo.project?.has_scripts === false) {
+      const c = await vscode.window.showWarningMessage(
+        `${env.name} already has tables, and this project has no scripts yet.`,
+        { modal: true, detail: 'Adopt it: its objects become B0001 (checked on the scratch database first), recorded as already there. Other environments are checked against it when they migrate; new scripts start at V0002.' },
+        'Adopt as B0001',
+      )
+      if (c) await adoptDatabase(lo, env)
+      return undefined
+    }
+    if (e instanceof LiftoffError && e.report.code === 'LIFTOFF_BASELINE_DIFFERS') {
+      const word = { added: 'missing', removed: 'not in the baseline', changed: 'different' } as Record<string, string>
+      const list = (e.report.differences ?? []).map((d) => `• ${d.id}: ${word[d.kind] ?? d.kind}`).join('\n')
+      const c = await vscode.window.showWarningMessage(
+        `${env.name} differs from the baseline script. Nothing was changed.`,
+        { modal: true, detail: `${list}\n\nMake these match and run again, or record the baseline anyway: missing objects are created, the rest is kept as it is and shows up as drift.` },
+        'Record Anyway',
+      )
+      return c ? runMigrate(lo, env, ['--accept-differences']) : undefined
+    }
+    showError(lo, e)
+    return undefined
+  }
+}
+
+/** A project without scripts starts from this database: B0001. `env` comes from the menu, else a pick. */
+async function adoptDatabase(lo: Liftoff, env?: Environment): Promise<{ baseline: string } | undefined> {
+  const target = env ?? (await pickEnvironment(lo))
+  if (!target) return undefined
+  const r = await withProgress(lo, `Capturing ${target.name} as B0001`, () => lo.run<{ baseline: string }>(['adopt'], target.name))
+  if (r) {
+    vscode.window.showInformationMessage(`Captured ${target.name} as ${path.basename(r.baseline)} and recorded it there. New scripts start at V0002.`)
+    await lo.load()
+  }
+  return r
 }
 
 /** Runs one script and nothing else on an environment (`migrate --only`), after saying what that means. */
@@ -279,9 +331,10 @@ type Rebaselined = { baseline: string; version: string; removed: string[]; archi
  * One baseline script replaces the versioned scripts; the old ones are deleted (git keeps them) or
  * moved to a folder. `answers` is for the tests.
  */
-async function rebaselineProject(lo: Liftoff, answers?: { description: string; archive?: string }): Promise<Rebaselined | undefined> {
+async function rebaselineProject(lo: Liftoff, answers?: { description: string; archive?: string; restart?: boolean }): Promise<Rebaselined | undefined> {
   let description = answers?.description
   let archive = answers?.archive
+  let restart = answers?.restart ?? false
   if (!answers) {
     const how = await vscode.window.showQuickPick(
       [
@@ -292,6 +345,15 @@ async function rebaselineProject(lo: Liftoff, answers?: { description: string; a
     )
     if (!how) return undefined
     archive = how.archive
+    const numbering = await vscode.window.showQuickPick(
+      [
+        { label: 'Start the numbering again', detail: 'The baseline is B0001 and the next script V0002. Databases that ran the old scripts are checked against it on their next run.', restart: true },
+        { label: 'Keep the numbering', detail: 'The baseline takes the number of the last script it replaces.', restart: false },
+      ],
+      { title: 'Rebaseline: numbering' },
+    )
+    if (!numbering) return undefined
+    restart = numbering.restart
     description = await vscode.window.showInputBox({ title: 'Rebaseline', prompt: 'Description of the baseline script', value: 'baseline', validateInput: (v) => (v.trim() ? undefined : 'Describe it') })
     if (!description) return undefined
     const go = await vscode.window.showWarningMessage(
@@ -301,7 +363,9 @@ async function rebaselineProject(lo: Liftoff, answers?: { description: string; a
     )
     if (go !== 'Rebaseline') return undefined
   }
-  const r = await withProgress(lo, 'Rebaselining', () => lo.run<Rebaselined>(['rebaseline', '--description', description!.trim(), ...(archive ? ['--archive', archive] : [])]))
+  const r = await withProgress(lo, 'Rebaselining', () =>
+    lo.run<Rebaselined>(['rebaseline', '--description', description!.trim(), ...(archive ? ['--archive', archive] : []), ...(restart ? ['--restart'] : [])]),
+  )
   if (r) {
     vscode.window.showInformationMessage(`Wrote ${path.basename(r.baseline)}; ${r.removed.length} old script(s) ${r.archived_to ? `moved to ${path.basename(r.archived_to)}` : 'deleted (git still has them)'}.`)
     await lo.load()
@@ -386,7 +450,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
     vscode.commands.registerCommand('liftoff.testConnection', (item?: EnvironmentItem) => testConnection(lo, item)),
     vscode.commands.registerCommand('liftoff.showLog', () => lo.log.show()),
     vscode.commands.registerCommand('liftoff.importFlyway', (answers?: ImportAnswers) => importFlyway(lo, answers)),
-    vscode.commands.registerCommand('liftoff.rebaseline', (answers?: { description: string; archive?: string }) => rebaselineProject(lo, answers)),
+    vscode.commands.registerCommand('liftoff.rebaseline', (answers?: { description: string; archive?: string; restart?: boolean }) => rebaselineProject(lo, answers)),
+    vscode.commands.registerCommand('liftoff.adopt', (item?: EnvironmentItem) => adoptDatabase(lo, item?.env)),
     vscode.commands.registerCommand('liftoff.newProject', (answers?: NewProjectAnswers) => newProject(lo, answers)),
     // From an environment's menu (its item), the import (a name), or the palette (nothing).
     vscode.commands.registerCommand('liftoff.settings', (target?: EnvironmentItem | string) =>

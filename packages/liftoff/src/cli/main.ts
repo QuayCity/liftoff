@@ -13,6 +13,7 @@ import { engineOf, isSqlServerUrl, open } from '../core/db.ts'
 import * as compare from '../core/compare.ts'
 import { DataSession } from '../core/datacompare.ts'
 import { adopt } from '../core/adopt.ts'
+import { scan, versionNote } from '../core/migration.ts'
 import { rebaseline } from '../core/rebaseline.ts'
 import { versionsAfter } from '../core/renumber.ts'
 import * as diff from '../core/diff.ts'
@@ -229,7 +230,13 @@ const COMMANDS: Record<string, Command> = {
       const list = [...cfg.environments].map(([name, e]) => ({ allow_clean: e.allow_clean, engine: engineOf(e.url), name, role: e.role }))
       const p = cfg.project
       const text = list.map((e) => `${e.name.padEnd(16)} ${e.role.padEnd(8)} ${e.engine}`).join('\n')
-      return [{ engine: p.engine, environments: list, migrations: p.migrations, name: p.name, schemas: p.schemas }, `${p.name} (${p.engine}, scripts in ${p.migrations})\n${text}`]
+      const scripts = scan(cfg.migrationsDir())
+      const hasScripts = scripts.some((s) => s.kind === 'versioned' || s.kind === 'baseline')
+      const notes = [versionNote(scripts)].filter((n): n is string => !!n)
+      return [
+        { engine: p.engine, environments: list, migrations: p.migrations, name: p.name, schemas: p.schemas, has_scripts: hasScripts, notes },
+        [`${p.name} (${p.engine}, scripts in ${p.migrations})`, text, ...notes.map((n) => `note: ${n}`)].filter(Boolean).join('\n'),
+      ]
     },
   },
   'test-connection': {

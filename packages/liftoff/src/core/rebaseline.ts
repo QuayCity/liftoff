@@ -106,7 +106,8 @@ export async function rebaseline(cfg: Config, o: RebaselineOptions = {}, log: Lo
   if (o.upTo !== undefined && !upTo) throw configError(`'${o.upTo}' is not a version`)
   const going = (version: ReturnType<typeof parseVersion>) => !upTo || compareVersions(version!, upTo) <= 0
   const candidates = scan(dir).filter((s) => (s.kind === 'versioned' || s.kind === 'undo' || s.kind === 'baseline') && s.version && going(s.version))
-  if (!candidates.some((s) => s.kind === 'versioned')) throw configError('there are no versioned scripts to fold into a baseline')
+  // A restart may also renumber a project that is only a baseline script by now.
+  if (!candidates.some((s) => s.kind === 'versioned' || (o.restart && s.kind === 'baseline'))) throw configError('there are no versioned scripts to fold into a baseline')
   if (!archive) {
     // Deleting is safe only when git has them.
     const files = candidates.map((s) => path.relative(cfg.root, s.path))

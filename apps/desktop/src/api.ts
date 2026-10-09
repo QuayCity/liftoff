@@ -3,7 +3,7 @@
 // signatures run against seeded fake data.
 
 export type Role = 'dev' | 'scratch' | 'test' | 'prod'
-export type ErrorReport = { code: string; exit_code: number; message: string }
+export type ErrorReport = { code: string; exit_code: number; message: string; differences?: { id: string; kind: string; destructive: boolean }[] }
 export type EnvView = { name: string; role: Role; url: string; user: string | null; has_password: boolean; allow_clean: boolean; /** in liftoff.toml (else this computer only) */ shared: boolean }
 export type Filter = { action: 'include' | 'exclude'; object: string; pattern: string }
 export type LockMode = 'advisory' | 'table'
@@ -14,6 +14,10 @@ export const engineOfUrl = (url: string): Engine => (/^(jdbc:)?sqlserver:\/\//i.
 export type ProjectSettings = { name: string; engine: string; migrations: string; schemas: string[]; history_table: string; filters: Filter[]; lock: LockMode }
 export type Project = {
   root: string; name: string; engine: string; schemas: string[]; migrations: string; history_table: string; filters: Filter[]; lock: LockMode; environments: EnvView[]
+  /** any versioned or baseline script yet (without: an existing database can be adopted) */
+  has_scripts: boolean
+  /** e.g. the numbering nearing 9999 */
+  notes: string[]
 }
 export type Recent = { name: string; path: string; exists: boolean }
 export type EnvInput = { url: string; user: string | null; password: string | null; role: Role; allow_clean: boolean }
@@ -27,6 +31,8 @@ export type MigrateResult = {
   environment: string; applied: { script: string; version: string | null; execution_time_ms: number; transactional: boolean }[]; execution_time_ms: number
   /** after a run with `only`: older versioned scripts that still have not run */
   left_behind?: string[]
+  /** a database with objects checked against a baseline script instead of running it */
+  baseline_check?: { script: string; created: string[]; accepted: string[]; restart: boolean }
 }
 
 /** Whether a script can be run on its own (`migrate --only`); the core checks again. */
@@ -113,7 +119,8 @@ type Api = {
   envTestDraft(env: EnvInput, path?: string, name?: string): Promise<ServerInfo>
   migrationsInfo(path: string, env: string): Promise<MigrationInfo[]>
   /** `only`: run these scripts and nothing else (a cherry-pick) */
-  migrate(path: string, env: string, outOfOrder: boolean, allowNonEmpty?: boolean, only?: string[]): Promise<MigrateResult>
+  migrate(path: string, env: string, outOfOrder: boolean, allowNonEmpty?: boolean, only?: string[], acceptDifferences?: boolean): Promise<MigrateResult>
+  adopt(path: string, env: string): Promise<{ environment: string; baseline: string; version: string; objects: number }>
   saveReport(path: string, report: CheckReport): Promise<string | null>
   modelStatus(path: string): Promise<ModelChange[]>
   modelSave(path: string, changes: ModelChange[]): Promise<number>
@@ -139,7 +146,7 @@ type Api = {
   capture(path: string, env: string, description: string, asBaseline: boolean): Promise<Generated>
   squash(path: string, upTo: string, description: string): Promise<string>
   /** squash, then take the old scripts out of the migrations folder: deleted (git keeps them) or moved to `archive` */
-  rebaseline(path: string, upTo: string, description: string, archive?: string): Promise<{ baseline: string; version: string; removed: string[]; archived_to: string | null }>
+  rebaseline(path: string, upTo: string, description: string, archive?: string, restart?: boolean): Promise<{ baseline: string; version: string; removed: string[]; archived_to: string | null }>
   scratchCreate(path: string): Promise<Project>
   changesDiff(path: string): Promise<Comparison>
   migrationGenerate(path: string, changes: Change[], description: string, withUndo: boolean): Promise<Generated>
@@ -179,7 +186,8 @@ const real: Api = {
   envTest: (path, name) => invoke('env_test', { path, name }),
   envTestDraft: (env, path, name) => invoke('env_test_draft', { env, path, name }),
   migrationsInfo: (path, env) => invoke('migrations_info', { path, env }),
-  migrate: (path, env, outOfOrder, allowNonEmpty = false, only) => invoke('migrate', { path, env, outOfOrder, allowNonEmpty, only }),
+  migrate: (path, env, outOfOrder, allowNonEmpty = false, only, acceptDifferences = false) => invoke('migrate', { path, env, outOfOrder, allowNonEmpty, only, acceptDifferences }),
+  adopt: (path, env) => invoke('adopt', { path, env }),
   modelStatus: (path) => invoke('model_status', { path }),
   modelSave: (path, changes) => invoke('model_save', { path, changes }),
   modelFiles: (path) => invoke('model_files', { path }),
@@ -209,7 +217,7 @@ const real: Api = {
   scriptAdd: (path, repeatable, description, sql) => invoke('script_add', { path, repeatable, description, sql }),
   capture: (path, env, description, asBaseline) => invoke('capture', { path, env, description, asBaseline }),
   squash: (path, upTo, description) => invoke('squash', { path, upTo, description }),
-  rebaseline: (path, upTo, description, archive) => invoke('rebaseline', { path, upTo, description, archive }),
+  rebaseline: (path, upTo, description, archive, restart) => invoke('rebaseline', { path, upTo, description, archive, restart }),
   scratchCreate: (path) => invoke('scratch_create', { path }),
   changesDiff: (path) => invoke('changes_diff', { path }),
   migrationGenerate: (path, changes, description, withUndo) => invoke('migration_generate', { path, changes, description, withUndo }),
@@ -247,7 +255,7 @@ const emit = (level: LogEvent['level'], message: string) => logListeners.forEach
 
 const fake = {
   project: {
-    root: 'C:/repos/shop-db', name: 'shop-db', engine: 'postgresql', schemas: ['public'], migrations: 'migrations', history_table: 'liftoff_schema_history', filters: [], lock: 'advisory' as LockMode, license: null, license_error: null,
+    root: 'C:/repos/shop-db', name: 'shop-db', engine: 'postgresql', schemas: ['public'], migrations: 'migrations', history_table: 'liftoff_schema_history', filters: [], lock: 'advisory' as LockMode, has_scripts: true, notes: [],
     environments: [
       { name: 'local', role: 'dev', url: 'postgres://me@localhost:5432/shop', user: null, has_password: true, allow_clean: false, shared: true },
       { name: 'scratch', role: 'scratch', url: 'postgres://me@localhost:5432/shop_scratch', user: null, has_password: true, allow_clean: false, shared: true },
@@ -272,7 +280,7 @@ const fake = {
   gitRejectPush: new URLSearchParams(location.search).has('rejectpush'),
   notGit: new URLSearchParams(location.search).has('nogit'),
 }
-const fakeProject = (): Project => ({ ...fake.project })
+const fakeProject = (): Project => ({ ...fake.project, has_scripts: !new URLSearchParams(location.search).has('noscripts'), notes: new URLSearchParams(location.search).has('nearlimit') ? ['the scripts have reached version 9991; rebaseline with a restart (liftoff rebaseline --restart) so the numbering starts again at 0001'] : [] })
 const fakeInfo = (env: string): MigrationInfo[] =>
   fake.scripts.map(([version, description], i) => {
     const done = i < (fake.applied[env] ?? 0)
@@ -433,7 +441,18 @@ const fakeApi: Api = {
     fake.gitRejectPush = false
   },
   saveReport: async (_p, report) => `C:/Users/me/liftoff-checks-${report.environment}.html`,
-  migrate: async (_p, env, _o, _a, only) => {
+  migrate: async (_p, env, _o, _a, only, acceptDifferences) => {
+    // ?noscripts: production has tables but the project has no scripts (adopt it).
+    // ?differs: staging has objects that differ from the baseline script.
+    const flags = new URLSearchParams(location.search)
+    if (flags.has('noscripts') && env === 'production') throw fail('LIFTOFF_NOT_BASELINED', `'${env}' already has tables but no migration history`, 12)
+    if (flags.has('differs') && env === 'staging') {
+      await wait(300)
+      if (!acceptDifferences) {
+        throw { ...fail('LIFTOFF_BASELINE_DIFFERS', `'${env}' has objects that differ from B0001__existing_schema.sql`, 12), differences: [{ id: 'table:public.orders', kind: 'changed', destructive: false }] }
+      }
+      return { environment: env, applied: [{ script: 'B0001__existing_schema.sql', version: '0001', execution_time_ms: 300, transactional: true }], execution_time_ms: 300, baseline_check: { script: 'B0001__existing_schema.sql', created: ['view:public.daily_totals'], accepted: ['table:public.orders'], restart: false } }
+    }
     if (only) {
       // The preview keeps state as "the first n ran"; a cherry-pick only shows its log and result.
       const infos = fakeInfo(env)
@@ -502,11 +521,17 @@ const fakeApi: Api = {
     await wait(500)
     return `B${upTo}__${description.replaceAll(' ', '_')}.sql`
   },
-  rebaseline: async (_p, upTo, description, archive) => {
+  rebaseline: async (_p, upTo, description, archive, restart) => {
     emit('info', `Building 'scratch' from the versioned scripts up to ${upTo}`)
     await wait(500)
-    const removed = fake.scripts.filter(([v]) => v <= upTo).map(([v, d]) => `V${v}__${d.replaceAll(' ', '_')}.sql`)
-    return { baseline: `C:/repos/shop-db/migrations/B${upTo}__${description.replaceAll(' ', '_')}.sql`, version: upTo, removed, archived_to: archive ? `C:/repos/shop-db/${archive}` : null }
+    const removed = fake.scripts.filter(([v]) => restart || v <= upTo).map(([v, d]) => `V${v}__${d.replaceAll(' ', '_')}.sql`)
+    const version = restart ? '0001' : upTo
+    return { baseline: `C:/repos/shop-db/migrations/B${version}__${description.replaceAll(' ', '_')}.sql`, version, removed, archived_to: archive ? `C:/repos/shop-db/${archive}` : null }
+  },
+  adopt: async (_p, env) => {
+    await wait(400)
+    emit('info', `Capturing the objects of '${env}'`)
+    return { environment: env, baseline: 'C:/repos/shop-db/migrations/B0001__existing_schema.sql', version: '0001', objects: 12 }
   },
   changesDiff: async () => {
     emit('info', "Rebuilding scratch database 'scratch' from migrations")

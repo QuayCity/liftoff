@@ -52,3 +52,13 @@ test('which scripts can run on their own, and what running one leaves behind', a
   assert.deepEqual(olderNotRun(infos, infos[1]), [])
   assert.ok(pickable({ ...row('R__v.sql', 'applied'), kind: 'repeatable', version: null }), 'a repeatable can be run again on purpose')
 })
+
+test('what a migrate did, in one line: plain, and after a baseline check', async () => {
+  const { migrateSummary } = await import('../model.js')
+  const a = (script: string) => ({ script, version: null, execution_time_ms: 1, transactional: true })
+  assert.equal(migrateSummary('test', { environment: 'test', applied: [], execution_time_ms: 0, dry_run_sql: null }), 'test is up to date')
+  assert.equal(
+    migrateSummary('test', { environment: 'test', applied: [a('B0001__x.sql'), a('V0002__y.sql')], execution_time_ms: 0, dry_run_sql: null, baseline_check: { script: 'B0001__x.sql', created: ['view:v'], accepted: [], restart: false } }),
+    'test is now at B0001__x.sql; created 1 missing object; then applied 1 migration',
+  )
+})

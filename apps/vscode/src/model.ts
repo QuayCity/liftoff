@@ -21,6 +21,10 @@ export type Project = {
   migrations: string
   schemas: string[]
   environments: Environment[]
+  /** any versioned or baseline script yet (without: an existing database can be adopted) */
+  has_scripts?: boolean
+  /** e.g. the numbering nearing 9999 */
+  notes?: string[]
 }
 
 export type State =
@@ -55,6 +59,23 @@ export type MigrateResult = {
   dry_run_sql: string | null
   /** after `--only`: older versioned scripts that still have not run */
   left_behind?: string[]
+  /** a database with objects was checked against a baseline script instead of running it */
+  baseline_check?: { script: string; created: string[]; accepted: string[]; restart: boolean }
+}
+
+/** What a migrate did, in one line. */
+export function migrateSummary(env: string, r: MigrateResult): string {
+  const c = r.baseline_check
+  if (c) {
+    const parts = [`${env} ${c.restart ? 'went through the restart at' : 'is now at'} ${c.script}`]
+    if (c.created.length) parts.push(`created ${c.created.length} missing object${c.created.length === 1 ? '' : 's'}`)
+    if (c.accepted.length) parts.push(`kept ${c.accepted.length} difference${c.accepted.length === 1 ? '' : 's'}`)
+    const ran = r.applied.filter((a) => a.script !== c.script).length
+    if (ran) parts.push(`then applied ${ran} migration${ran === 1 ? '' : 's'}`)
+    return parts.join('; ')
+  }
+  const n = r.applied.length
+  return n ? `Applied ${n} migration${n === 1 ? '' : 's'} to ${env}` : `${env} is up to date`
 }
 
 /** Whether `migrate --only` can run this script now (the CLI checks again). */

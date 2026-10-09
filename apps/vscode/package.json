@@ -233,6 +233,11 @@
         "command": "liftoff.rebaseline",
         "title": "Rebaseline Project\u2026",
         "category": "LiftOff"
+      },
+      {
+        "command": "liftoff.adopt",
+        "title": "Adopt Existing Database\u2026",
+        "category": "LiftOff"
       }
     ],
     "menus": {
@@ -363,6 +368,11 @@
           "command": "liftoff.runOnly",
           "when": "view == liftoff.environments && viewItem == migration.pickable",
           "group": "1_run@1"
+        },
+        {
+          "command": "liftoff.adopt",
+          "when": "view == liftoff.environments && viewItem == environment && liftoff.noScripts",
+          "group": "3_edit@2"
         }
       ],
       "commandPalette": [
