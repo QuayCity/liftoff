@@ -143,7 +143,7 @@ test('F03-H1 write a migration from dev changes; it is recorded as applied on de
   psql('shop_dev', 'create table customers (id bigint generated always as identity primary key, email text not null unique);')
 
   await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Changes' }).click()
-  await page.getByRole('button', { name: 'Compare' }).click()
+  await page.getByRole('main').getByRole('button', { name: 'Compare', exact: true }).click()
   await expect(page.getByRole('treeitem', { name: 'Added public.customers' })).toBeVisible({ timeout: 60_000 })
   await page.getByLabel('Description').fill('add customers')
   await page.getByRole('button', { name: 'Write migration…' }).click()
@@ -203,7 +203,7 @@ test('F07-N2 a database with tables but no history asks for a baseline instead o
 test('F02-H1 save dev into the schema model: one file per object', async () => {
   await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Changes' }).click()
   await page.getByRole('group', { name: 'Compare dev with' }).getByRole('button', { name: 'Schema model' }).click()
-  await page.getByRole('button', { name: 'Compare' }).click()
+  await page.getByRole('main').getByRole('button', { name: 'Compare', exact: true }).click()
   await expect(page.getByRole('treeitem', { name: 'Added customers' })).toBeVisible({ timeout: 60_000 })
   await page.getByRole('button', { name: 'Save to model' }).click()
   await expect(page.getByText(/^Saved \d+ files? to .*schema-model$/)).toBeVisible()
@@ -248,6 +248,23 @@ test('S20-H1 the history of a schema-model object comes from real git', async ()
   await expect(commits.getByRole('button', { name: /Add the first migrations/ })).toBeVisible()
   await expect(dialog.getByRole('region', { name: 'What the commit changed' })).toContainText('COMMENT ON TABLE public.customers')
   await page.keyboard.press('Escape')
+})
+
+test('F16-H3 compare dev with test in the real app and apply: Postgres gets the table', async () => {
+  psql('shop_dev', 'create table compare_only (id int primary key, note text)')
+  await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Compare' }).click()
+  await page.getByLabel('Source', { exact: true }).selectOption('env:dev')
+  await page.getByLabel('Target', { exact: true }).selectOption('env:test')
+  await page.getByRole('main').getByRole('button', { name: 'Compare', exact: true }).click()
+  // Changes that cannot lose data start selected; the new table is one.
+  await expect(page.getByRole('treeitem', { name: 'Added public.compare_only' })).toHaveAttribute('aria-checked', 'true', { timeout: 60_000 })
+  await page.screenshot({ path: 'test-results/compare-real.png' })
+  await page.getByRole('button', { name: 'Apply to test…' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Apply' }).click()
+  await expect(page.getByText(/^Applied \d+ changes? to test$/).first()).toBeVisible({ timeout: 30_000 })
+  expect(psql('shop_test', "select to_regclass('public.compare_only') is not null")).toBe('t')
+  psql('shop_dev', 'drop table compare_only')
+  psql('shop_test', 'drop table compare_only')
 })
 
 test('X-CONSOLE no console errors in the real app', async () => {

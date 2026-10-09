@@ -57,6 +57,7 @@ export type Change = {
   id: string; object_type: string; name: string; kind: 'added' | 'changed' | 'removed'; destructive: boolean
   sql: string; steps: Step[]; undo_steps: Step[]; before: string | null; after: string | null
 }
+export type CompareResult = { source: string; target: string; engine: string; changes: Change[]; not_compared: string[] }
 export type Generated = { file_name: string; version: string; sql: string; undo: { file_name: string; sql: string } | null }
 export type CheckReport = { environment: string; applied_up_to: string | null; drift: Change[] | null; changes: Change[] | null; dry_run_sql: string | null; not_compared: string[] }
 export type Comparison = { changes: Change[]; not_compared: string[] }
@@ -74,6 +75,7 @@ export type RepairReport = { removed_failed: string[]; realigned: string[]; forg
 type Bridge = {
   invoke(name: string, args?: Record<string, unknown>): Promise<{ ok: true; value: unknown } | { ok: false; error: ErrorReport }>
   pickFolder(): Promise<string | null>
+  openFile(filterName: string, extensions: string[]): Promise<string | null>
   saveFile(defaultPath: string, filterName: string, extensions: string[]): Promise<string | null>
   onLog(cb: (e: LogEvent) => void): () => void
 }
@@ -137,6 +139,17 @@ type Api = {
   undo(path: string, env: string): Promise<{ script: string; version: string | null }>
   check(path: string, env: string, opts: { drift: boolean; changes: boolean; dryRun: boolean }): Promise<CheckReport>
   migrationSave(path: string, fileName: string, sql: string): Promise<string>
+  /** Compare two sides: an environment name, a database URL, 'model', 'migrations' or 'snapshot:<file>' */
+  compareRun(path: string, source: string, target: string): Promise<CompareResult>
+  compareScript(sourceLabel: string, targetLabel: string, changes: Change[]): Promise<string>
+  compareApply(path: string, target: string, script: string): Promise<{ target: string; transactional: boolean }>
+  snapshotSave(path: string, of: string, file: string): Promise<{ file: string; objects: number }>
+  /** Picks a snapshot file to compare with; null when cancelled */
+  pickSnapshot(): Promise<string | null>
+  /** Asks where to save the sync script and writes it there; the path, or null when cancelled */
+  saveScript(defaultName: string, text: string): Promise<string | null>
+  /** Asks where to save a snapshot; the path, or null when cancelled */
+  pickSnapshotTarget(defaultName: string): Promise<string | null>
   onLog(cb: (e: LogEvent) => void): Promise<() => void>
 }
 
@@ -188,6 +201,17 @@ const real: Api = {
   undo: (path, env) => invoke('undo', { path, env }),
   check: (path, env, o) => invoke('check', { path, env, drift: o.drift, changes: o.changes, dryRun: o.dryRun }),
   migrationSave: (path, fileName, sql) => invoke('migration_save', { path, fileName, sql }),
+  compareRun: (path, source, target) => invoke('compare_run', { path, source, target }),
+  compareScript: (sourceLabel, targetLabel, changes) => invoke('compare_script', { sourceLabel, targetLabel, changes }),
+  compareApply: (path, target, script) => invoke('compare_apply', { path, target, script }),
+  snapshotSave: (path, of, file) => invoke('snapshot_save', { path, of, file }),
+  pickSnapshot: () => bridge!.openFile('LiftOff snapshot', ['json']),
+  saveScript: async (defaultName, text) => {
+    const file = await bridge!.saveFile(defaultName, 'SQL script', ['sql'])
+    if (file) await invoke('text_save', { file, text })
+    return file
+  },
+  pickSnapshotTarget: (defaultName) => bridge!.saveFile(defaultName, 'LiftOff snapshot', ['json']),
   onLog: async (cb) => bridge!.onLog(cb),
 }
 
@@ -244,6 +268,26 @@ const fakeApi: Api = {
   ],
   recentForget: async () => {},
   pickFolder: async () => 'C:/repos/new-project',
+  compareRun: async (p, source, target) => {
+    await wait(300)
+    const label = (side: string) => (side === 'model' ? 'the schema model' : side === 'migrations' ? 'the migrations' : side.startsWith('snapshot:') ? `snapshot ${side.split(/[\\/]/).pop()}` : side)
+    if (source === target) throw fail('LIFTOFF_CONFIG', 'the source and the target are the same', 2)
+    const d = await fakeApi.changesDiff(p)
+    return { source: label(source), target: label(target), engine: 'PostgreSQL', changes: d.changes, not_compared: d.not_compared }
+  },
+  compareScript: async (s, t, changes) => `-- Makes ${t} match ${s}\n-- Written by LiftOff. Review before running.\n\n${changes.map((c) => c.sql).join('\n')}\n`,
+  compareApply: async (_p, target) => {
+    await wait(300)
+    emit('info', `Applying the differences to ${target} in one transaction`)
+    return { target, transactional: true }
+  },
+  snapshotSave: async (_p, of, file) => {
+    await wait(200)
+    return { file, objects: 12 + of.length }
+  },
+  pickSnapshot: async () => 'C:/repos/shop-db/snapshots/production-2026-10-01.json',
+  saveScript: async (name) => `C:/Users/me/${name}`,
+  pickSnapshotTarget: async (name) => `C:/repos/shop-db/snapshots/${name}`,
   projectInit: async (path, name, engine) => ({ ...fakeProject(), root: path, name, engine, schemas: [engine === 'sqlserver' ? 'dbo' : 'public'], environments: [] }),
   projectOpen: async (path) => {
     await wait()

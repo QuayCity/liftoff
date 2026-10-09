@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, engineName, inDesktop, type Project } from './api'
+import { Compare } from './screens/Compare'
 import { Changes } from './screens/Changes'
 import { Environments } from './screens/Environments'
 import { Home } from './screens/Home'
@@ -73,6 +74,7 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
         {view === 'Environments' && <Environments project={project} onProject={onProject} />}
         {view === 'Changes' && <Changes project={project} onProject={onProject} onEnvironments={() => setView('Environments')} />}
         {view === 'Settings' && <Settings project={project} onProject={onProject} onDirty={setSettingsDirty} />}
+        {view === 'Compare' && <Compare project={project} />}
         {view === 'Scripts' && <Scripts project={project} />}
         {view === 'Commit' && <Commit project={project} />}
         {view === 'Pipelines' && <Pipelines project={project} />}

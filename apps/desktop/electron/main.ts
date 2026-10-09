@@ -54,6 +54,11 @@ app.whenReady().then(() => {
     return r.canceled ? null : (r.filePaths[0] ?? null)
   })
 
+  ipcMain.handle('liftoff:open-file', async (_e, filterName: string, extensions: string[]) => {
+    const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: filterName, extensions }] })
+    return r.canceled ? null : (r.filePaths[0] ?? null)
+  })
+
   ipcMain.handle('liftoff:save-file', async (_e, defaultPath: string, filterName: string, extensions: string[]) => {
     const r = await dialog.showSaveDialog(win, { defaultPath, filters: [{ name: filterName, extensions }] })
     return r.canceled ? null : (r.filePath ?? null)

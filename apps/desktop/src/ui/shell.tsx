@@ -4,7 +4,7 @@ import { IconButton, cx } from './controls'
 import { Kbd, Spinner } from './display'
 import { Menu } from './overlays'
 
-export const workspaces = ['Changes', 'Environments', 'Scripts', 'Commit', 'Pipelines'] as const
+export const workspaces = ['Changes', 'Environments', 'Compare', 'Scripts', 'Commit', 'Pipelines'] as const
 export type Workspace = (typeof workspaces)[number]
 
 /** Title bar. Empty areas are the window drag region once Tauri's custom title bar is on. */

@@ -5,6 +5,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as checks from '../../../packages/liftoff/src/core/checks.ts'
 import * as ci from '../../../packages/liftoff/src/core/ci.ts'
+import * as compare from '../../../packages/liftoff/src/core/compare.ts'
 import { Config, init, interpolate, PROJECT_FILE, readSettings, redactUrl, saveProject, saveSettings, type Environment, type Project, type Role } from '../../../packages/liftoff/src/core/config.ts'
 import { open } from '../../../packages/liftoff/src/core/db.ts'
 import * as diff from '../../../packages/liftoff/src/core/diff.ts'
@@ -186,6 +187,14 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
     return checks.check(cfg, s(a, 'env'), undefined, { drift: b(a, 'drift'), changes: b(a, 'changes'), dryRun: b(a, 'dryRun') }, h.log)
   },
   migration_save: (a) => diff.save(load(a.path), s(a, 'fileName'), s(a, 'sql')),
+
+  /* Compare: any two sides (an environment, a URL, model, migrations, snapshot:<file>) */
+  compare_run: (a, h) => compare.compare(load(a.path), compare.parseSide(s(a, 'source')), compare.parseSide(s(a, 'target')), undefined, h.log),
+  compare_script: (a) => compare.syncScript({ source: s(a, 'sourceLabel'), target: s(a, 'targetLabel') }, a.changes as diff.Comparison['changes']),
+  compare_apply: (a, h) => compare.apply(load(a.path), compare.parseSide(s(a, 'target')), s(a, 'script'), h.log),
+  snapshot_save: (a, h) => compare.snapshot(load(a.path), compare.parseSide(s(a, 'of')), s(a, 'file'), undefined, h.log),
+  /** Writes text to a file the user picked in a save dialog (the sync script). */
+  text_save: (a) => fs.writeFileSync(s(a, 'file'), s(a, 'text')),
 
   /* S09: scripts */
   scripts_list: (a) =>

@@ -7,7 +7,7 @@ test.describe('F03 Changes', () => {
   test.beforeEach(async ({ page }) => {
     checkConsole = watchConsole(page)
     await page.goto('/?open=1&ws=Changes')
-    await page.getByRole('button', { name: 'Compare' }).click()
+    await page.getByRole('main').getByRole('button', { name: 'Compare', exact: true }).click()
     await expect(page.getByRole('tree', { name: 'Changes' })).toBeVisible()
   })
   test.afterEach(() => checkConsole())
