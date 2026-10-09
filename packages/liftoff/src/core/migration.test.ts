@@ -58,7 +58,8 @@ test('checksums equal what Flyway stores (black-box fixtures)', () => {
 test('next versions', () => {
   const now = new Date(Date.UTC(2026, 9, 8, 11, 4))
   const mk = (v: string): Script => ({ kind: 'versioned', version: parseVersion(v), description: '', fileName: '', path: '', checksum: 0, sql: '' })
-  assert.equal(nextVersion([], now), '20261008.1104')
+  assert.equal(nextVersion([], now), '1', 'a new project counts V1, V2, V3')
+  assert.equal(nextVersion([mk('1'), mk('2'), mk('10')], now), '11')
   assert.equal(nextVersion([mk('007')], now), '008')
   assert.equal(nextVersion([mk('1.9')], now), '1.10')
   assert.equal(nextVersion([mk('20261001.0900')], now), '20261008.1104')

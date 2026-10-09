@@ -352,9 +352,9 @@ const COMMANDS: Record<string, Command> = {
   },
   'mark-applied': {
     help: 'Record a pending script as applied without running it (the dev database it was written from)',
-    positional: { name: 'SCRIPT', help: 'File name in the migrations folder, e.g. V20261008.1104__add_customers.sql' },
+    positional: { name: 'SCRIPT', help: 'File name in the migrations folder, e.g. V3__add_customers.sql' },
     async run(ctx, _v, script) {
-      if (!script) throw configError('name the script to record, e.g. liftoff mark-applied V20261008.1104__add_customers.sql')
+      if (!script) throw configError('name the script to record, e.g. liftoff mark-applied V3__add_customers.sql')
       await runner.markApplied(load(ctx), ctx.env, script, log)
       return [{ recorded: script }, '']
     },

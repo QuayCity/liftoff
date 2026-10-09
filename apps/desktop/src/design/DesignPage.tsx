@@ -111,7 +111,7 @@ function Page() {
 
           <Section title="Alerts and toasts">
             <InlineAlert tone="info" title="Scratch DB needed">We build it from your scripts to see what changed.</InlineAlert>
-            <InlineAlert tone="success" title="Migration written">V20261008.1104__daily_totals.sql</InlineAlert>
+            <InlineAlert tone="success" title="Migration written">V4__daily_totals.sql</InlineAlert>
             <InlineAlert tone="warning" title="2 scripts not yet run on local">Run them first so the comparison is accurate.</InlineAlert>
             <InlineAlert tone="danger" title="Checksum mismatch" action={<Button size="sm">Repair</Button>}>A script changed after it ran on staging.</InlineAlert>
             <div className="flex gap-2">

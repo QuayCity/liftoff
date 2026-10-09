@@ -238,7 +238,7 @@ export function Compare({ project }: { project: Project }) {
         </>}>
         {migration && !migration.draft && (
           <div className="flex flex-col gap-3">
-            <Field label="Description" help="Goes into the file name, e.g. V20261009.1200__sync_with_prod.sql">
+            <Field label="Description" help="Goes into the file name, e.g. V4__sync_with_prod.sql">
               {(a) => <Input {...a} autoFocus value={migration.description} maxLength={120} placeholder="sync with prod" onChange={(e) => setMigration({ ...migration, description: e.target.value })} />}
             </Field>
             <Checkbox checked={migration.undo} onChange={(v) => setMigration({ ...migration, undo: v })} label="Also write an undo script" />

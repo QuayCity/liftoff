@@ -125,15 +125,16 @@ export function checksum(bytes: Uint8Array): number {
 }
 
 /**
- * Timestamp versions (UTC `yyyyMMdd.HHmm`), unless the project already uses short counters: then
- * the last part goes up by one with its padding kept (`007` -> `008`, `1.9` -> `1.10`).
+ * The next number: V1, V2, V3 (the last part goes up by one with its padding kept: `007` -> `008`,
+ * `1.9` -> `1.10`). Projects that already use timestamp versions (UTC `yyyyMMdd.HHmm`, often from
+ * Flyway) keep getting timestamps, since a small number would sort before them.
  */
 export function nextVersion(existing: Script[], now: Date): string {
   const versions = existing.filter((s) => s.kind === 'versioned' && s.version).map((s) => s.version!)
   const latest = versions.sort(compareVersions).at(-1)
   const p = (n: number, w = 2) => String(n).padStart(w, '0')
   const stamp = `${p(now.getUTCFullYear(), 4)}${p(now.getUTCMonth() + 1)}${p(now.getUTCDate())}.${p(now.getUTCHours())}${p(now.getUTCMinutes())}`
-  if (!latest) return stamp
+  if (!latest) return '1'
   const firstPart = latest.text.split(/[._]/)[0]
   if (firstPart.length >= 8) return compareVersions(parseVersion(stamp), latest) > 0 ? stamp : bump(latest.text)
   return bump(latest.text)
