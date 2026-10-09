@@ -61,7 +61,7 @@ function modelJob(cfg: Config, o: CiOptions, migrations: string): string {
   y +=
     '    env:\n' +
     `      LIFTOFF_ENV_CI_SCRATCH_URL: ${yamlStr(sc.url)}\n      LIFTOFF_ENV_CI_SCRATCH_ROLE: scratch\n`
-  y += '    steps:\n      - uses: actions/checkout@v4\n'
+  y += '    steps:\n      - uses: actions/checkout@v7\n'
   // To commit back, check out the pull request's own branch (pull requests from forks cannot be written to).
   if (generate) y += '        with:\n          ref: ${{ github.head_ref }}\n'
   y += `      - name: Install LiftOff\n        run: ${yamlStr(o.install)}\n`
@@ -123,7 +123,7 @@ export function githubActions(cfg: Config, o: CiOptions): string {
     y += `    environment: ${yamlStr(s)}\n`
     const pw = envVar(s, 'PASSWORD')
     y += `    env:\n      ${pw}: \${{ secrets.${pw} }}\n`
-    y += '    steps:\n      - uses: actions/checkout@v4\n'
+    y += '    steps:\n      - uses: actions/checkout@v7\n'
     y += `      - name: Install LiftOff\n        run: ${yamlStr(o.install)}\n`
     const e = yamlStr(s)
     if (o.checks) {
@@ -132,7 +132,7 @@ export function githubActions(cfg: Config, o: CiOptions): string {
     }
     y += `      - name: Migrate\n        run: liftoff --environment ${e} migrate\n`
     if (o.checks) {
-      y += `      - name: Keep the check report\n        if: always()\n        uses: actions/upload-artifact@v4\n        with:\n          name: checks-${job}\n          path: checks-${job}.html\n          if-no-files-found: ignore\n`
+      y += `      - name: Keep the check report\n        if: always()\n        uses: actions/upload-artifact@v7\n        with:\n          name: checks-${job}\n          path: checks-${job}.html\n          if-no-files-found: ignore\n`
     }
     previous = job
   }

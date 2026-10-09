@@ -2,11 +2,13 @@
 #   liftoff-linux-x64, liftoff-win-x64.exe, liftoff-macos-arm64     the single-file CLI
 #   liftoff-vscode-<platform>.vsix                                  the VS Code extension, CLI included
 # The tag has to match the version in the code (see the first job), so a release says what it is.
+# Run it by hand (Actions > Release > Run workflow) for a dry run: everything is built, nothing published.
 name: Release
 
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,9 +16,10 @@ permissions:
 jobs:
   version:
     name: The tag matches the version in the code
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Compare
         run: |
           tag="${GITHUB_REF_NAME#v}"
@@ -29,6 +32,8 @@ jobs:
   build:
     name: Build for ${{ matrix.name }}
     needs: version
+    # runs after the check, or without it on a dry run
+    if: ${{ !cancelled() && (needs.version.result == 'success' || needs.version.result == 'skipped') }}
     strategy:
       matrix:
         include:
@@ -40,8 +45,8 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -59,7 +64,7 @@ jobs:
         run: npm ci && npm run build && npm run bundle-cli && npx vsce package --target ${{ matrix.vsce }} --out ../../liftoff-vscode-${{ matrix.vsce }}.vsix
       - name: Name the CLI for the release
         run: cp packages/liftoff/build/${{ matrix.exe }} liftoff-${{ matrix.name }}${{ matrix.ext }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.name }}
           path: |
@@ -70,11 +75,12 @@ jobs:
   publish:
     name: Publish the release
     needs: build
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
