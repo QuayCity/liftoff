@@ -38,7 +38,8 @@ export async function check(cfg: Config, envName: string | undefined, scratch: s
   if (opts.drift || opts.changes) {
     const [scratchName, scratchEnvironment] = scratchEnv(cfg, scratch)
     if (scratchName === name) throw configError('the scratch database cannot be the environment being checked')
-    const applied = (await runner.info(cfg, name))
+    const infos = await runner.info(cfg, name)
+    const applied = infos
       .filter((i) => i.state === 'applied' || i.state === 'baseline')
       .map((i) => i.version)
       .filter((v): v is string => v !== null)
@@ -46,7 +47,9 @@ export async function check(cfg: Config, envName: string | undefined, scratch: s
       .at(-1)
     report.applied_up_to = applied ?? null
     // "0" builds nothing: an environment without history should match an empty database.
-    const s = await rebuildScratch(cfg, scratchName, scratchEnvironment, applied ?? '0', log)
+    // Repeatables only when the environment ran some: they may need tables from later versions.
+    const ranRepeatables = infos.some((i) => i.kind === 'repeatable' && i.state !== 'pending')
+    const s = await rebuildScratch(cfg, scratchName, scratchEnvironment, applied ?? '0', log, !ranRepeatables)
     try {
       const expected = await modelOf(cfg, s)
       if (opts.drift) {

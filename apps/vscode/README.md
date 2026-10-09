@@ -1,3 +1,5 @@
+<img src="media/icon.png" alt="" width="96" align="right">
+
 # LiftOff for VS Code
 
 Your database migrations, next to your code.

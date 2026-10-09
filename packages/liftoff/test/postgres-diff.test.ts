@@ -31,6 +31,8 @@ test('compare, generate and the rest on PostgreSQL', { skip: !base && 'set LIFTO
   p.write('V1__orders.sql', 'create table orders (id serial, note text);\n')
   p.write('R__order_view.sql', 'create or replace view order_ids as select id from orders;\n')
   p.write('V2__index.sql', 'create index concurrently orders_note_idx on orders (note);\n')
+  // A new environment: the repeatable needs V1's table, so the expected state leaves it out.
+  assert.ok(!checks.hasDrift(await checks.check(cfg, 'test', undefined, { drift: true, changes: true })), 'check on an empty environment')
   await runner.migrate(cfg, 'test')
 
   // 6. Dev changes -> generated migration -> applied -> no differences left.

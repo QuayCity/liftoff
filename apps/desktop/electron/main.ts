@@ -11,6 +11,7 @@ const configDir = path.join(app.getPath('appData'), 'app.liftoff.desktop')
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     title: 'LiftOff',
+    icon: path.join(import.meta.dirname, '..', 'electron', 'icon.png'),
     width: 1280,
     height: 800,
     minWidth: 960,

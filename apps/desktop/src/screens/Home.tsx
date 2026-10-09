@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { api, type Engine, errorText, isErrorReport, type ConvertReport, type Project, type Recent } from '../api'
 import { Button, Field, Input, RadioGroup, Select } from '../ui/controls'
 import { Card, EmptyState, InlineAlert, Spinner } from '../ui/display'
+import logo from '../assets/logo.svg'
 import { Dialog } from '../ui/overlays'
 
 function ConvertSummary({ r }: { r: ConvertReport }) {
@@ -75,9 +76,12 @@ export function Home({ onOpen }: { onOpen: (p: Project) => void }) {
 
   return (
     <main className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-8 px-6 py-16">
-      <header>
-        <h1 className="text-display">LiftOff</h1>
-        <p className="mt-1 text-muted">Turn database changes into reviewed migration scripts, then run them everywhere.</p>
+      <header className="flex items-center gap-5">
+        <img src={logo} alt="" className="size-20" />
+        <div>
+          <h1 className="text-display">LiftOff</h1>
+          <p className="mt-1 text-muted">Turn database changes into reviewed migration scripts, then run them everywhere.</p>
+        </div>
       </header>
 
       <div className="grid grid-cols-3 gap-4">

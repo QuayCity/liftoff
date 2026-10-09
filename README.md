@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/logo-wordmark-on-dark.png">
+    <img src="assets/logo/logo-wordmark.png" alt="LiftOff" width="420">
+  </picture>
+</p>
+
 # LiftOff
 
 Database migrations for teams that work the way teams actually work: change your dev database

@@ -761,6 +761,14 @@ function optionLines(opts: Record<string, OptionSpec>): string[] {
   })
 }
 
+const ROCKET = [
+  '      /\\',
+  '     |()|    LiftOff',
+  '    /|  |\\',
+  "      ''",
+  '',
+].join('\n')
+
 function help(name?: string): string {
   if (name && COMMANDS[name]) {
     const c = COMMANDS[name]
@@ -775,6 +783,7 @@ function help(name?: string): string {
     ].join('\n')
   }
   return [
+    ROCKET,
     'Database migrations: write them from your changes, run them everywhere.',
     '',
     'Usage: liftoff [OPTIONS] <COMMAND>',
