@@ -58,6 +58,11 @@ export type Change = {
   sql: string; steps: Step[]; undo_steps: Step[]; before: string | null; after: string | null
 }
 export type CompareResult = { source: string; target: string; engine: string; changes: Change[]; not_compared: string[] }
+export type DataKind = 'only_in_source' | 'only_in_target' | 'different'
+export type TableResult = { table: string; key: string[]; source_rows: number; target_rows: number; only_in_source: number; only_in_target: number; different: number; skipped?: string; ms: number }
+export type DataComparison = { id: string; source: string; target: string; engine: string; tables: TableResult[]; ms: number }
+export type RowPage = { columns: string[]; key: string[]; total: number; rows: { key: string[]; source: (string | null)[] | null; target: (string | null)[] | null }[] }
+export type SyncWhat = { insert: boolean; update: boolean; delete: boolean }
 export type Generated = { file_name: string; version: string; sql: string; undo: { file_name: string; sql: string } | null }
 export type CheckReport = { environment: string; applied_up_to: string | null; drift: Change[] | null; changes: Change[] | null; dry_run_sql: string | null; not_compared: string[] }
 export type Comparison = { changes: Change[]; not_compared: string[] }
@@ -150,6 +155,13 @@ type Api = {
   saveScript(defaultName: string, text: string): Promise<string | null>
   /** Asks where to save a snapshot; the path, or null when cancelled */
   pickSnapshotTarget(defaultName: string): Promise<string | null>
+  /** Data compare: two databases (an environment name or a URL); the comparison stays open for paging */
+  dataOpen(path: string, source: string, target: string): Promise<DataComparison>
+  dataPage(id: string, table: string, kind: DataKind, offset: number, limit: number): Promise<RowPage>
+  /** Asks where to save the sync script and writes it there; the path, or null when cancelled */
+  dataScript(id: string, defaultName: string, tables: string[], what: SyncWhat): Promise<string | null>
+  dataApply(id: string, tables: string[], what: SyncWhat): Promise<{ statements: number }>
+  dataClose(): Promise<void>
   onLog(cb: (e: LogEvent) => void): Promise<() => void>
 }
 
@@ -212,6 +224,14 @@ const real: Api = {
     return file
   },
   pickSnapshotTarget: (defaultName) => bridge!.saveFile(defaultName, 'LiftOff snapshot', ['json']),
+  dataOpen: (path, source, target) => invoke('data_open', { path, source, target }),
+  dataPage: (id, table, kind, offset, limit) => invoke('data_page', { id, table, kind, offset, limit }),
+  dataScript: async (id, defaultName, tables, what) => {
+    const file = await bridge!.saveFile(defaultName, 'SQL script', ['sql'])
+    return file ? invoke('data_script', { id, file, tables, what }) : null
+  },
+  dataApply: (id, tables, what) => invoke('data_apply', { id, tables, what }),
+  dataClose: () => invoke('data_close', {}),
   onLog: async (cb) => bridge!.onLog(cb),
 }
 
@@ -288,6 +308,35 @@ const fakeApi: Api = {
   pickSnapshot: async () => 'C:/repos/shop-db/snapshots/production-2026-10-01.json',
   saveScript: async (name) => `C:/Users/me/${name}`,
   pickSnapshotTarget: async (name) => `C:/repos/shop-db/snapshots/${name}`,
+  dataOpen: async (_p, source, target) => {
+    await wait(300)
+    if (source === target) throw fail('LIFTOFF_CONFIG', 'the source and the target are the same', 2)
+    const t = (table: string, s: number, o: number, d: number, rows: number, skipped?: string) =>
+      ({ table, key: skipped ? [] : ['id'], source_rows: rows + s, target_rows: rows + o, only_in_source: s, only_in_target: o, different: d, skipped, ms: 40 })
+    return { id: '1', source, target, engine: 'PostgreSQL', ms: 1840, tables: [t('public.audit_log', 0, 0, 0, 0, 'no primary key or unique index on non-null columns, so rows cannot be matched'), t('public.customers', 0, 0, 0, 52_310), t('public.orders', 2, 1, 132, 1_204_551)] }
+  },
+  dataPage: async (_id, table, kind, offset, limit) => {
+    await wait(100)
+    const total = kind === 'different' ? 132 : kind === 'only_in_source' ? 2 : 1
+    const n = Math.max(0, Math.min(limit, total - offset))
+    const row = (i: number, note: string | null, total_: string) => [String(i), `customer ${i % 50}`, total_, note]
+    return {
+      columns: ['id', 'customer', 'total', 'note'], key: ['id'], total,
+      rows: Array.from({ length: n }, (_, j) => {
+        const i = 1000 + offset + j
+        if (kind === 'only_in_source') return { key: [String(i)], source: row(i, 'new', '10.00'), target: null }
+        if (kind === 'only_in_target') return { key: [String(i)], source: null, target: row(i, 'stale', '9.00') }
+        return { key: [String(i)], source: row(i, j % 3 === 0 ? null : 'paid', '12.50'), target: row(i, j % 3 === 0 ? '' : 'paid', j % 2 ? '12.51' : '12.50') }
+      }).filter(() => table === 'public.orders'),
+    }
+  },
+  dataScript: async (_id, name) => `C:/Users/me/${name}`,
+  dataApply: async () => {
+    await wait(300)
+    emit('info', 'Applied 135 statement(s)')
+    return { statements: 135 }
+  },
+  dataClose: async () => {},
   projectInit: async (path, name, engine) => ({ ...fakeProject(), root: path, name, engine, schemas: [engine === 'sqlserver' ? 'dbo' : 'public'], environments: [] }),
   projectOpen: async (path) => {
     await wait()

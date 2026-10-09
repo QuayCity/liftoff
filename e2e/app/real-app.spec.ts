@@ -267,6 +267,32 @@ test('F16-H3 compare dev with test in the real app and apply: Postgres gets the 
   psql('shop_test', 'drop table compare_only')
 })
 
+test('F17-H3 compare the data of dev and test in the real app, then apply: Postgres gets the rows', async () => {
+  psql('shop_dev', "create table prices (id int primary key, amount numeric(10, 2), note text); insert into prices select i, i * 1.5, 'p' || i from generate_series(1, 2000) i")
+  psql('shop_test', "create table prices (id int primary key, amount numeric(10, 2), note text); insert into prices select i, i * 1.5, 'p' || i from generate_series(1, 2000) i")
+  psql('shop_test', "update prices set note = '' where id = 7; delete from prices where id = 8; insert into prices values (5000, 1, 'stale')")
+  await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Compare' }).click()
+  await page.getByRole('radio', { name: 'Data' }).click()
+  await page.getByLabel('Source', { exact: true }).selectOption('env:dev')
+  await page.getByLabel('Target', { exact: true }).selectOption('env:test')
+  await page.getByRole('main').getByRole('button', { name: 'Compare data' }).click()
+  const tables = page.getByRole('list', { name: 'Tables' })
+  await expect(tables.getByText('1 different · 1 only in source · 1 only in target')).toBeVisible({ timeout: 60_000 })
+  await tables.getByRole('button', { name: /public\.prices/ }).click()
+  await expect(page.getByRole('table', { name: /Different in public\.prices/ }).getByText('(empty)')).toBeVisible()
+  await page.screenshot({ path: 'test-results/data-compare-real.png' })
+  // Only prices: untick the other tables that differ.
+  for (const box of await tables.getByRole('checkbox', { checked: true }).all()) {
+    if ((await box.getAttribute('aria-label')) !== 'Sync public.prices') await box.click()
+  }
+  await page.getByRole('button', { name: 'Apply to test…' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Apply' }).click()
+  await expect(page.getByText(/^Applied 3 statements to test$/).first()).toBeVisible({ timeout: 30_000 })
+  expect(psql('shop_test', "select string_agg(id || ':' || note, ',' order by id) from prices where id in (7, 8, 5000)")).toBe('7:p7,8:p8')
+  psql('shop_dev', 'drop table prices')
+  psql('shop_test', 'drop table prices')
+})
+
 test('X-CONSOLE no console errors in the real app', async () => {
   checkConsole()
 })

@@ -10,6 +10,7 @@ import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
 import { DiffView } from '../ui/diffview'
 import { ConfirmDestructive, Dialog, useToast } from '../ui/overlays'
 import { NotCompared } from './Changes'
+import { DataCompare } from './DataCompare'
 
 /** One side as picked on screen. */
 type Pick = { kind: 'env'; name: string } | { kind: 'model' } | { kind: 'migrations' } | { kind: 'snapshot'; file: string } | { kind: 'url'; url: string }
@@ -40,6 +41,7 @@ export function Compare({ project }: { project: Project }) {
   const [confirmProd, setConfirmProd] = useState(false)
   const [applying, setApplying] = useState(false)
   const [migration, setMigration] = useState<{ description: string; undo: boolean; draft: Generated | null } | null>(null)
+  const [mode, setMode] = useState<'schema' | 'data'>('schema')
 
   useEffect(() => {
     let off: (() => void) | undefined
@@ -132,12 +134,38 @@ export function Compare({ project }: { project: Project }) {
     }
   }
 
+  const modeSwitch = (
+    <div role="radiogroup" aria-label="What to compare" className="flex self-end rounded-md border border-border p-0.5">
+      {(['schema', 'data'] as const).map((m) => (
+        <button key={m} role="radio" aria-checked={mode === m} onClick={() => switchMode(m)}
+          className={`rounded px-3 py-1 text-sm ${mode === m ? 'bg-accent text-on-accent' : 'text-muted hover:text-fg'}`}>
+          {m === 'schema' ? 'Schema' : 'Data'}
+        </button>
+      ))}
+    </div>
+  )
+  /** Data compare needs two databases: a side that is not one goes back to an environment. */
+  function switchMode(m: 'schema' | 'data') {
+    setMode(m)
+    if (m === 'data') {
+      if (!isDatabase(source) && first) setSource({ kind: 'env', name: first.name })
+      if (!isDatabase(target) && second) setTarget({ kind: 'env', name: second.name })
+    }
+  }
+  const pickers = (
+    <>
+      {modeSwitch}
+      <SidePicker label="Source" help="What it should look like" value={source} onChange={(p) => { setSource(p); setResult(null) }} project={project} hasScratch={hasScratch} databasesOnly={mode === 'data'} />
+      <IconButton label="Swap source and target" icon={ArrowLeftRight} onClick={swap} />
+      <SidePicker label="Target" help="What would change" value={target} onChange={(p) => { setTarget(p); setResult(null) }} project={project} hasScratch={hasScratch} databasesOnly={mode === 'data'} />
+    </>
+  )
+  if (mode === 'data') return <DataCompare project={project} source={sideText(source)} target={sideText(target)} header={pickers} />
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-end gap-3 border-b border-border bg-surface px-6 py-4">
-        <SidePicker label="Source" help="What it should look like" value={source} onChange={(p) => { setSource(p); setResult(null) }} project={project} hasScratch={hasScratch} />
-        <IconButton label="Swap source and target" icon={ArrowLeftRight} onClick={swap} />
-        <SidePicker label="Target" help="What would change" value={target} onChange={(p) => { setTarget(p); setResult(null) }} project={project} hasScratch={hasScratch} />
+        {pickers}
         <span className="flex-1" />
         <Button icon={Camera} disabled={source.kind === 'snapshot' || !complete(source)} onClick={saveSnapshot}>Snapshot the source…</Button>
         <Button data-compare variant="primary" loading={comparing} disabled={!complete(source) || !complete(target)} onClick={run}>{result ? 'Compare again' : 'Compare'}</Button>
@@ -223,8 +251,10 @@ export function Compare({ project }: { project: Project }) {
 }
 
 /** Where one side comes from: an environment, the model, the migrations, a snapshot file, a URL. */
-function SidePicker({ label, help, value, onChange, project, hasScratch }: {
+function SidePicker({ label, help, value, onChange, project, hasScratch, databasesOnly }: {
   label: string; help: string; value: Pick; onChange: (p: Pick) => void; project: Project; hasScratch: boolean
+  /** data compare: only environments and URLs */
+  databasesOnly?: boolean
 }) {
   const key = value.kind === 'env' ? `env:${value.name}` : value.kind
   const choose = async (k: string) => {
@@ -242,12 +272,14 @@ function SidePicker({ label, help, value, onChange, project, hasScratch }: {
             <optgroup label="Environments">
               {project.environments.map((e) => <option key={e.name} value={`env:${e.name}`}>{e.name} ({e.role})</option>)}
             </optgroup>
-            <optgroup label="This project">
-              <option value="model" disabled={!hasScratch}>The schema model{hasScratch ? '' : ' (needs a scratch database)'}</option>
-              <option value="migrations" disabled={!hasScratch}>What the migrations build{hasScratch ? '' : ' (needs a scratch database)'}</option>
-            </optgroup>
+            {!databasesOnly && (
+              <optgroup label="This project">
+                <option value="model" disabled={!hasScratch}>The schema model{hasScratch ? '' : ' (needs a scratch database)'}</option>
+                <option value="migrations" disabled={!hasScratch}>What the migrations build{hasScratch ? '' : ' (needs a scratch database)'}</option>
+              </optgroup>
+            )}
             <optgroup label="Elsewhere">
-              <option value="snapshot">{value.kind === 'snapshot' ? `Snapshot: ${value.file.split(/[\\/]/).pop()}` : 'A snapshot file…'}</option>
+              {!databasesOnly && <option value="snapshot">{value.kind === 'snapshot' ? `Snapshot: ${value.file.split(/[\\/]/).pop()}` : 'A snapshot file…'}</option>}
               <option value="url">A database URL…</option>
             </optgroup>
           </Select>

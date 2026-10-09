@@ -6,6 +6,7 @@ import * as path from 'node:path'
 import * as checks from '../../../packages/liftoff/src/core/checks.ts'
 import * as ci from '../../../packages/liftoff/src/core/ci.ts'
 import * as compare from '../../../packages/liftoff/src/core/compare.ts'
+import { DataSession } from '../../../packages/liftoff/src/core/datacompare.ts'
 import { Config, init, interpolate, PROJECT_FILE, readSettings, redactUrl, saveProject, saveSettings, type Environment, type Project, type Role } from '../../../packages/liftoff/src/core/config.ts'
 import { open } from '../../../packages/liftoff/src/core/db.ts'
 import * as diff from '../../../packages/liftoff/src/core/diff.ts'
@@ -53,6 +54,18 @@ function view(cfg: Config) {
 }
 
 const load = (p: unknown) => Config.load(String(p))
+
+const dataSessions = new Map<string, DataSession>()
+let dataIds = 0
+const dataSession = (a: Args) => {
+  const d = dataSessions.get(String(a.id))
+  if (!d) throw new LiftoffError('LIFTOFF_CONFIG', 2, 'that comparison is closed; compare again')
+  return d
+}
+async function closeData(): Promise<void> {
+  await Promise.allSettled([...dataSessions.values()].map((d) => d.close()))
+  dataSessions.clear()
+}
 const s = (a: Args, k: string) => a[k] as string
 const b = (a: Args, k: string) => a[k] === true
 
@@ -193,6 +206,27 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
   compare_script: (a) => compare.syncScript({ source: s(a, 'sourceLabel'), target: s(a, 'targetLabel') }, a.changes as diff.Comparison['changes']),
   compare_apply: (a, h) => compare.apply(load(a.path), compare.parseSide(s(a, 'target')), s(a, 'script'), h.log),
   snapshot_save: (a, h) => compare.snapshot(load(a.path), compare.parseSide(s(a, 'of')), s(a, 'file'), undefined, h.log),
+  /* Data compare: one open comparison at a time, kept here so its rows can be paged */
+  data_open: async (a, h) => {
+    await closeData()
+    const session = await DataSession.open(load(a.path), compare.parseSide(s(a, 'source')), compare.parseSide(s(a, 'target')), undefined, h.log)
+    const id = String(++dataIds)
+    dataSessions.set(id, session)
+    return { id, ...session.result }
+  },
+  data_page: (a) => dataSession(a).page(s(a, 'table'), s(a, 'kind') as 'different', Number(a.offset), Number(a.limit)),
+  /** Writes the sync script, as it is made, to the file the user picked. */
+  data_script: async (a) => {
+    const fd = fs.openSync(s(a, 'file'), 'w')
+    try {
+      for await (const chunk of dataSession(a).script(a.tables as string[], a.what as Record<string, boolean>)) fs.writeSync(fd, chunk)
+    } finally {
+      fs.closeSync(fd)
+    }
+    return s(a, 'file')
+  },
+  data_apply: (a, h) => dataSession(a).apply(a.tables as string[], a.what as Record<string, boolean>, h.log),
+  data_close: () => closeData(),
   /** Writes text to a file the user picked in a save dialog (the sync script). */
   text_save: (a) => fs.writeFileSync(s(a, 'file'), s(a, 'text')),
 

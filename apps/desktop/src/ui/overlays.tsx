@@ -162,7 +162,8 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
             </RToast.Root>
           )
         })}
-        <RToast.Viewport className="fixed right-4 bottom-10 z-50 flex w-96 flex-col gap-2 outline-none" />
+        {/* Above the action bars at the bottom of the screens (Save, Apply, Write migration) */}
+        <RToast.Viewport className="fixed right-4 bottom-24 z-50 flex w-96 flex-col gap-2 outline-none" />
       </RToast.Provider>
     </RTooltip.Provider>
   )
