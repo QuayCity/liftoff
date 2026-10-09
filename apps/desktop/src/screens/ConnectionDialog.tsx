@@ -21,7 +21,8 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
   const [url, setUrl] = useState(editing?.url ?? '')
   const [user, setUser] = useState(editing?.user ?? '')
   const [password, setPassword] = useState('')
-  const [shared, setShared] = useState<'me' | 'team'>('me')
+  // Editing keeps the environment where it is; new ones start private.
+  const [shared, setShared] = useState<'me' | 'team'>(editing?.shared ? 'team' : 'me')
   const [allowClean, setAllowClean] = useState(editing?.allow_clean ?? false)
   const [eraseOk, setEraseOk] = useState(!!editing && editing.role === 'scratch')
   const [touched, setTouched] = useState(false)
@@ -40,7 +41,7 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
     if (!url.trim()) return
     setTest('running')
     try {
-      setTest({ ok: await api.envTestDraft(env()) })
+      setTest({ ok: await api.envTestDraft(env(), project.root, editing?.name) })
     } catch (e) {
       setTest({ error: errorText(e) })
     }

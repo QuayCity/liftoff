@@ -4,7 +4,7 @@
 
 export type Role = 'dev' | 'scratch' | 'test' | 'prod'
 export type ErrorReport = { code: string; exit_code: number; message: string }
-export type EnvView = { name: string; role: Role; url: string; user: string | null; has_password: boolean; allow_clean: boolean }
+export type EnvView = { name: string; role: Role; url: string; user: string | null; has_password: boolean; allow_clean: boolean; /** in liftoff.toml (else this computer only) */ shared: boolean }
 export type Filter = { action: 'include' | 'exclude'; object: string; pattern: string }
 export type LockMode = 'advisory' | 'table'
 export type Engine = 'postgresql' | 'sqlserver'
@@ -74,7 +74,8 @@ type Api = {
   historyImport(path: string, env: string, table: string, acceptEdited: boolean): Promise<HistoryImport>
   envSave(path: string, name: string, env: EnvInput, shared: boolean): Promise<Project>
   envTest(path: string, name: string): Promise<ServerInfo>
-  envTestDraft(env: EnvInput): Promise<ServerInfo>
+  /** `path` and `name` when editing a saved environment: its saved password and URL fill the gaps */
+  envTestDraft(env: EnvInput, path?: string, name?: string): Promise<ServerInfo>
   migrationsInfo(path: string, env: string): Promise<MigrationInfo[]>
   migrate(path: string, env: string, outOfOrder: boolean, allowNonEmpty?: boolean): Promise<MigrateResult>
   saveReport(path: string, report: CheckReport): Promise<string | null>
@@ -120,7 +121,7 @@ const real: Api = {
   historyImport: (path, env, table, acceptEdited) => invoke('history_import', { path, env, table, acceptEdited }),
   envSave: (path, name, env, shared) => invoke('env_save', { path, name, env, shared }),
   envTest: (path, name) => invoke('env_test', { path, name }),
-  envTestDraft: (env) => invoke('env_test_draft', { env }),
+  envTestDraft: (env, path, name) => invoke('env_test_draft', { env, path, name }),
   migrationsInfo: (path, env) => invoke('migrations_info', { path, env }),
   migrate: (path, env, outOfOrder, allowNonEmpty = false) => invoke('migrate', { path, env, outOfOrder, allowNonEmpty }),
   modelStatus: (path) => invoke('model_status', { path }),
@@ -172,10 +173,10 @@ const fake = {
   project: {
     root: 'C:/repos/shop-db', name: 'shop-db', engine: 'postgresql', schemas: ['public'], migrations: 'migrations', history_table: 'liftoff_schema_history', filters: [], lock: 'advisory' as LockMode, license: null, license_error: null,
     environments: [
-      { name: 'local', role: 'dev', url: 'postgres://me@localhost:5432/shop', user: null, has_password: true, allow_clean: false },
-      { name: 'scratch', role: 'scratch', url: 'postgres://me@localhost:5432/shop_scratch', user: null, has_password: true, allow_clean: false },
-      { name: 'staging', role: 'test', url: 'postgres://deploy@staging.internal:5432/shop', user: null, has_password: true, allow_clean: false },
-      { name: 'production', role: 'prod', url: 'postgres://deploy@prod.internal:5432/shop', user: null, has_password: true, allow_clean: false },
+      { name: 'local', role: 'dev', url: 'postgres://me@localhost:5432/shop', user: null, has_password: true, allow_clean: false, shared: true },
+      { name: 'scratch', role: 'scratch', url: 'postgres://me@localhost:5432/shop_scratch', user: null, has_password: true, allow_clean: false, shared: true },
+      { name: 'staging', role: 'test', url: 'postgres://deploy@staging.internal:5432/shop', user: null, has_password: true, allow_clean: false, shared: true },
+      { name: 'production', role: 'prod', url: 'postgres://deploy@prod.internal:5432/shop', user: null, has_password: true, allow_clean: false, shared: true },
     ],
   } as Project,
   scripts: [

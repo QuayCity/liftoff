@@ -5,7 +5,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as checks from '../../../packages/liftoff/src/core/checks.ts'
 import * as ci from '../../../packages/liftoff/src/core/ci.ts'
-import { Config, init, PROJECT_FILE, saveEnvironment, saveProject, type Environment, type Project, type Role } from '../../../packages/liftoff/src/core/config.ts'
+import { Config, init, interpolate, PROJECT_FILE, readSettings, redactUrl, saveProject, saveSettings, type Environment, type Project, type Role } from '../../../packages/liftoff/src/core/config.ts'
 import { open } from '../../../packages/liftoff/src/core/db.ts'
 import * as diff from '../../../packages/liftoff/src/core/diff.ts'
 import { LiftoffError } from '../../../packages/liftoff/src/core/errors.ts'
@@ -26,17 +26,13 @@ export type Host = {
 
 type Args = Record<string, unknown>
 
-/** postgres://user:secret@host -> postgres://user@host */
-export function redact(url: string): string {
-  const s = url.indexOf('://')
-  const at = url.lastIndexOf('@')
-  if (s < 0 || at <= s) return url
-  const user = url.slice(s + 3, at).split(':')[0]
-  return `${url.slice(0, s + 3)}${user}${url.slice(at)}`
-}
 
-/** A project as the screens see it: no passwords. */
+/**
+ * A project as the screens see it: no passwords. Environments are shown as written in the files
+ * (`${env.X}` kept), so editing one and saving it back keeps what was there.
+ */
 function view(cfg: Config) {
+  const written = new Map(readSettings(cfg.root).environments.map((e) => [e.name, e]))
   return {
     root: cfg.root,
     name: cfg.project.name,
@@ -46,14 +42,12 @@ function view(cfg: Config) {
     history_table: cfg.project.history_table,
     filters: cfg.project.filters,
     lock: cfg.project.lock,
-    environments: [...cfg.environments].map(([name, e]) => ({
-      name,
-      role: e.role,
-      url: redact(e.url),
-      user: e.user ?? null,
-      has_password: e.password !== undefined || redact(e.url) !== e.url,
-      allow_clean: e.allow_clean,
-    })),
+    environments: [...cfg.environments].map(([name, e]) => {
+      const w = written.get(name)
+      // Not in the files: the environment comes from LIFTOFF_ENV_<NAME>_* variables only.
+      if (!w) return { name, role: e.role, url: redactUrl(e.url), user: e.user ?? null, has_password: e.password !== undefined || redactUrl(e.url) !== e.url, allow_clean: e.allow_clean, shared: false }
+      return { name, role: w.role, url: w.url, user: w.user, has_password: w.has_password, allow_clean: w.allow_clean, shared: w.shared }
+    }),
   }
 }
 
@@ -88,6 +82,24 @@ function remember(h: Host, name: string, root: string): void {
 function envFromInput(e: Record<string, unknown>): Environment {
   const blank = (v: unknown) => (typeof v === 'string' && v.trim() ? v : undefined)
   return { url: String(e.url).trim(), user: blank(e.user), password: blank(e.password), role: e.role as Role, allow_clean: e.allow_clean === true, placeholders: {} }
+}
+
+/**
+ * What the dialog's Test connects to. Editing a saved environment: an unchanged URL is the saved
+ * one (with its password and variables), and an empty password field means the saved password.
+ */
+function draftToTest(root: string, name: string | undefined, typed: Environment): Environment {
+  const env = { ...typed }
+  if (name) {
+    const cfg = Config.load(root)
+    const saved = cfg.environments.get(name)
+    const written = readSettings(root).environments.find((e) => e.name === name)
+    if (saved && written && env.url === written.url) env.url = saved.url
+    if (saved) env.password ??= saved.password
+  }
+  env.url = interpolate(env.url)
+  if (env.user !== undefined) env.user = interpolate(env.user)
+  return env
 }
 
 async function serverInfo(name: string, env: Environment) {
@@ -131,19 +143,10 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
   history_import: (a, h) => flyway.importHistory(load(a.path), s(a, 'env'), s(a, 'table'), b(a, 'acceptEdited'), h.log),
   env_save: (a) => {
     const root = s(a, 'path')
-    const name = s(a, 'name')
     const env = envFromInput(a.env as Record<string, unknown>)
-    try {
-      const old = load(root).environments.get(name)
-      if (old) {
-        // Editing without retyping the password keeps the stored one; placeholders are edited in liftoff.toml.
-        env.password ??= old.password
-        env.placeholders = old.placeholders
-      }
-    } catch {
-      // a project without that environment yet
-    }
-    saveEnvironment(root, name, env, b(a, 'shared'))
+    // As in the VS Code settings: an unchanged URL keeps what is written (variables, a password in
+    // it); no password typed keeps the stored one; the environment's placeholders stay.
+    saveSettings(root, { environments: [{ name: s(a, 'name'), url: env.url, user: env.user ?? null, password: env.password, role: env.role, allow_clean: env.allow_clean, shared: b(a, 'shared') }] })
     return view(load(root))
   },
   env_test: (a) => {
@@ -151,7 +154,10 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
     return serverInfo(s(a, 'name'), cfg.env(s(a, 'name')))
   },
   /** Tests the connection dialog's values before anything is saved. */
-  env_test_draft: (a) => serverInfo('new environment', envFromInput(a.env as Record<string, unknown>)),
+  env_test_draft: (a) => {
+    const name = a.name === undefined ? undefined : s(a, 'name')
+    return serverInfo(name ?? 'new environment', a.path === undefined ? envFromInput(a.env as Record<string, unknown>) : draftToTest(s(a, 'path'), name, envFromInput(a.env as Record<string, unknown>)))
+  },
 
   /* F04: run */
   migrations_info: (a) => runner.info(load(a.path), s(a, 'env')),

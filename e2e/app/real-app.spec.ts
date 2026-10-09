@@ -54,11 +54,12 @@ test.beforeAll(async () => {
     `[project]\nname = "app-e2e"\nmigrations = "migrations"\nschemas = ["public"]\n\n` +
       `[environments.dev]\nurl = "${base}/shop_dev"\nrole = "dev"\n\n` +
       `[environments.scratch]\nurl = "${base}/shop_scratch"\nrole = "scratch"\n\n` +
-      `[environments.test]\nurl = "${base}/shop_test"\nrole = "test"\n`,
+      // The database name comes from a variable, as teams do for secrets and per-machine values.
+      `[environments.test]\nurl = "${base}/\${env.LO_E2E_TEST_DB}"\nrole = "test"\n`,
   )
   replace(recentFile, JSON.stringify([{ name: 'app-e2e', path: project, exists: true }]))
 
-  app = await _electron.launch({ executablePath: electron, args: [desktop], cwd: desktop })
+  app = await _electron.launch({ executablePath: electron, args: [desktop], cwd: desktop, env: { ...process.env, LO_E2E_TEST_DB: 'shop_test' } })
   page = await app.firstWindow()
   checkConsole = watchConsole(page)
   await expect(page.getByRole('heading', { name: 'LiftOff' })).toBeVisible({ timeout: 30_000 })
@@ -86,6 +87,23 @@ test('F04-H1 run pending on test: Postgres gets the table and the history row', 
   await expect(details('test').getByRole('table', { name: 'Migrations on test' }).getByText('Applied')).toBeVisible()
   expect(psql('shop_test', "select count(*) from liftoff_schema_history where success and script = 'V1__orders.sql'")).toBe('1')
   expect(psql('shop_test', "select to_regclass('public.orders') is not null")).toBe('t')
+})
+
+test('F01-E4 editing an environment keeps ${env.X} in its URL, its password, and where it is stored', async () => {
+  await details('test').getByRole('button', { name: 'Edit test' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Edit test' })
+  await expect(dialog.getByLabel('Connection URL')).toHaveValue(/\$\{env\.LO_E2E_TEST_DB\}$/)
+  await expect(dialog.getByRole('radio', { name: 'Everyone on the project' })).toBeChecked()
+  // Test with the password field empty: the saved password and the variable are used.
+  await dialog.getByRole('button', { name: 'Test connection' }).click()
+  await expect(dialog.getByText('Connected', { exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(dialog).toBeHidden()
+  const toml = fs.readFileSync(path.join(project, 'liftoff.toml'), 'utf8')
+  expect(toml).toContain(`url = "${base}/\${env.LO_E2E_TEST_DB}"`)
+  const user = path.join(project, 'liftoff.user.toml')
+  expect(fs.existsSync(user) ? fs.readFileSync(user, 'utf8') : '').not.toContain('[environments.test]')
+  await expect(column('test').getByText('Connected')).toBeVisible()
 })
 
 test('F04-E2 a failing script is rolled back and its Postgres error is shown', async () => {
