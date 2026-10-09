@@ -122,7 +122,7 @@ export async function run(): Promise<void> {
   const sampleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-new-'))
   await vscode.commands.executeCommand('liftoff.newProject', { folder: sampleDir, engine: 'sqlserver', sample: true, name: 'try-it' })
   assert.match(fs.readFileSync(path.join(sampleDir, 'liftoff.toml'), 'utf8'), /name = "try-it"/)
-  assert.match(fs.readFileSync(path.join(sampleDir, 'migrations', 'V1__customers.sql'), 'utf8'), /IDENTITY/)
+  assert.match(fs.readFileSync(path.join(sampleDir, 'migrations', 'V0001__customers.sql'), 'utf8'), /IDENTITY/)
 
   // Compare: test has notes and tags (picked above); dev does not. Make dev like test.
   const compared = await vscode.commands.executeCommand<CompareResult>('liftoff.compare', { source: 'test', target: 'dev' })

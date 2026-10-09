@@ -125,16 +125,17 @@ export function checksum(bytes: Uint8Array): number {
 }
 
 /**
- * The next number: V1, V2, V3 (the last part goes up by one with its padding kept: `007` -> `008`,
- * `1.9` -> `1.10`). Projects that already use timestamp versions (UTC `yyyyMMdd.HHmm`, often from
- * Flyway) keep getting timestamps, since a small number would sort before them.
+ * The next number, four digits: V0001, V0002, V0003 (after V9999 it keeps counting). A dotted version
+ * goes up in its last part (`1.9` -> `1.10`). Baseline scripts count too: after B0150 comes V0151.
+ * Projects that already use timestamp versions (UTC `yyyyMMdd.HHmm`, often from Flyway) keep getting
+ * timestamps, since a small number would sort before them.
  */
 export function nextVersion(existing: Script[], now: Date): string {
-  const versions = existing.filter((s) => s.kind === 'versioned' && s.version).map((s) => s.version!)
+  const versions = existing.filter((s) => (s.kind === 'versioned' || s.kind === 'baseline') && s.version).map((s) => s.version!)
   const latest = versions.sort(compareVersions).at(-1)
   const p = (n: number, w = 2) => String(n).padStart(w, '0')
   const stamp = `${p(now.getUTCFullYear(), 4)}${p(now.getUTCMonth() + 1)}${p(now.getUTCDate())}.${p(now.getUTCHours())}${p(now.getUTCMinutes())}`
-  if (!latest) return '1'
+  if (!latest) return '0001'
   const firstPart = latest.text.split(/[._]/)[0]
   if (firstPart.length >= 8) return compareVersions(parseVersion(stamp), latest) > 0 ? stamp : bump(latest.text)
   return bump(latest.text)
@@ -144,7 +145,8 @@ function bump(text: string): string {
   const cut = Math.max(text.lastIndexOf('.'), text.lastIndexOf('_')) + 1
   const last = text.slice(cut)
   const n = (BigInt(last || '0') + 1n).toString()
-  return text.slice(0, cut) + n.padStart(last.length, '0')
+  // A plain counter has at least four digits; a part of a dotted version keeps its own width.
+  return text.slice(0, cut) + n.padStart(cut === 0 ? Math.max(4, last.length) : last.length, '0')
 }
 
 /**

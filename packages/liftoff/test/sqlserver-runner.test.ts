@@ -25,9 +25,9 @@ test('the SQL Server sample project runs and undoes', { skip: !base && 'set LIFT
   saveEnvironment(root, 'test', { url: `${base};databaseName=shop_sample`, role: 'test', allow_clean: false, placeholders: {} }, true, false)
   const cfg = Config.load(root)
   const r = await runner.migrate(cfg, 'test')
-  assert.deepEqual(r.applied.map((a) => a.script), ['V1__customers.sql', 'V2__orders.sql', 'V3__orders_by_customer.sql', 'R__customer_totals.sql'])
+  assert.deepEqual(r.applied.map((a) => a.script), ['V0001__customers.sql', 'V0002__orders.sql', 'V0003__orders_by_customer.sql', 'R__customer_totals.sql'])
   await runner.undo(cfg, 'test')
-  assert.equal((await runner.info(cfg, 'test')).find((i) => i.script === 'V3__orders_by_customer.sql')?.state, 'pending')
+  assert.equal((await runner.info(cfg, 'test')).find((i) => i.script === 'V0003__orders_by_customer.sql')?.state, 'pending')
 })
 
 test('a batch with several SQL Server errors reports every one of them', { skip: !base && 'set LIFTOFF_TEST_MSSQL' }, async () => {
@@ -63,7 +63,7 @@ test('the runner on SQL Server', { skip: !base && 'set LIFTOFF_TEST_MSSQL' }, as
 
   // 1. GO batches, a procedure, a repeated batch, a placeholder, a repeatable; three runs at once.
   p.write(
-    'V1__orders.sql',
+    'V0001__orders.sql',
     'CREATE ROLE ${app_role};\nGO\nCREATE TABLE dbo.orders (id int IDENTITY PRIMARY KEY, note nvarchar(100) NOT NULL);\nGO\n' +
       'CREATE PROCEDURE dbo.add_order @note nvarchar(100) AS\nBEGIN\n  INSERT INTO dbo.orders (note) VALUES (@note);\nEND\nGO\n' +
       "EXEC dbo.add_order N'GO on its own line inside a string\nGO\nstill one string';\nGO 2\n",

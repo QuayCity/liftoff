@@ -7,24 +7,24 @@ import { init } from './config.ts'
 import { configError } from './errors.ts'
 
 const POSTGRES: Record<string, string> = {
-  'V1__customers.sql': `-- A first table. Versioned scripts run once, in version order.
+  'V0001__customers.sql': `-- A first table. Versioned scripts run once, in version order.
 create table customers (
     id bigint generated always as identity primary key,
     email text not null unique,
     created_at timestamptz not null default now()
 );
 `,
-  'V2__orders.sql': `create table orders (
+  'V0002__orders.sql': `create table orders (
     id bigint generated always as identity primary key,
     customer_id bigint not null references customers (id),
     total numeric(10, 2) not null default 0,
     placed_at timestamptz not null default now()
 );
 `,
-  'V3__orders_by_customer.sql': `-- Runs outside a transaction: CREATE INDEX CONCURRENTLY cannot run inside one.
+  'V0003__orders_by_customer.sql': `-- Runs outside a transaction: CREATE INDEX CONCURRENTLY cannot run inside one.
 create index concurrently orders_customer_idx on orders (customer_id);
 `,
-  'U3__orders_by_customer.sql': `-- Undo for V3: \`liftoff undo\` runs it when V3 is the latest applied script.
+  'U0003__orders_by_customer.sql': `-- Undo for V0003: \`liftoff undo\` runs it when V0003 is the latest applied script.
 drop index if exists orders_customer_idx;
 `,
   'R__customer_totals.sql': `-- Repeatable: runs again whenever this file changes.
@@ -38,24 +38,24 @@ group by c.id, c.email;
 
 /** The same shop in T-SQL. */
 const SQLSERVER: Record<string, string> = {
-  'V1__customers.sql': `-- A first table. Versioned scripts run once, in version order.
+  'V0001__customers.sql': `-- A first table. Versioned scripts run once, in version order.
 CREATE TABLE dbo.customers (
     id bigint IDENTITY(1, 1) PRIMARY KEY,
     email nvarchar(320) NOT NULL UNIQUE,
     created_at datetime2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
 `,
-  'V2__orders.sql': `CREATE TABLE dbo.orders (
+  'V0002__orders.sql': `CREATE TABLE dbo.orders (
     id bigint IDENTITY(1, 1) PRIMARY KEY,
     customer_id bigint NOT NULL REFERENCES dbo.customers (id),
     total decimal(10, 2) NOT NULL DEFAULT 0,
     placed_at datetime2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
 `,
-  'V3__orders_by_customer.sql': `-- An index; like every script here, it runs in a transaction and is rolled back if it fails.
+  'V0003__orders_by_customer.sql': `-- An index; like every script here, it runs in a transaction and is rolled back if it fails.
 CREATE INDEX orders_customer_idx ON dbo.orders (customer_id);
 `,
-  'U3__orders_by_customer.sql': `-- Undo for V3: \`liftoff undo\` runs it when V3 is the latest applied script.
+  'U0003__orders_by_customer.sql': `-- Undo for V0003: \`liftoff undo\` runs it when V0003 is the latest applied script.
 DROP INDEX IF EXISTS orders_customer_idx ON dbo.orders;
 `,
   'R__customer_totals.sql': `-- Repeatable: runs again whenever this file changes.
@@ -71,8 +71,8 @@ const readme = (engine: string) => `# LiftOff sample
 
 Five scripts for a small shop database, in migrations/:
 
-- V1, V2 create tables; V3 adds an index${engine === 'postgresql' ? ' (outside a transaction)' : ''}
-- U3 undoes V3
+- V0001, V0002 create tables; V0003 adds an index${engine === 'postgresql' ? ' (outside a transaction)' : ''}
+- U0003 undoes V0003
 - R__customer_totals is a view, run again whenever the file changes
 
 To run them, add an environment (a ${engine === 'sqlserver' ? 'SQL Server' : 'PostgreSQL'} database you may write to), then run the pending
