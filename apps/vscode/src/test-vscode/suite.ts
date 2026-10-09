@@ -6,6 +6,7 @@ import * as vscode from 'vscode'
 import type { Liftoff } from '../extension'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
+import type { CompareResult } from '../compareView'
 import type { ConvertReport } from '../flywayImport'
 import type { MigrateResult, ModelChange } from '../model'
 import type { SettingsPanel } from '../settingsPanel'
@@ -122,6 +123,22 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand('liftoff.newProject', { folder: sampleDir, engine: 'sqlserver', sample: true, name: 'try-it' })
   assert.match(fs.readFileSync(path.join(sampleDir, 'liftoff.toml'), 'utf8'), /name = "try-it"/)
   assert.match(fs.readFileSync(path.join(sampleDir, 'migrations', 'V1__customers.sql'), 'utf8'), /IDENTITY/)
+
+  // Compare: test has notes and tags (picked above); dev does not. Make dev like test.
+  const compared = await vscode.commands.executeCommand<CompareResult>('liftoff.compare', { source: 'test', target: 'dev' })
+  assert.deepEqual(compared?.changes.map((c) => c.id).sort(), ['table:public.notes', 'table:public.tags'])
+  assert.deepEqual([...lo.compare!.checked].sort(), ['table:public.notes', 'table:public.tags'], 'nothing here can lose data, so all start ticked')
+  lo.compare!.checked.delete('table:public.tags')
+  const script = await vscode.commands.executeCommand<string>('liftoff.compare.script')
+  assert.match(script ?? '', /Makes dev match test/)
+  assert.match(script ?? '', /notes/)
+  assert.doesNotMatch(script ?? '', /tags/, 'only what is ticked')
+  await vscode.commands.executeCommand('liftoff.compare.apply', true)
+  assert.deepEqual(lo.compare!.result?.changes.map((c) => c.id), ['table:public.tags'], 'compared again after applying')
+  const snap = await vscode.commands.executeCommand<string>('liftoff.snapshot', 'dev', path.join(workspace, 'snapshots', 'dev.json'))
+  assert.ok(snap && fs.existsSync(snap))
+  const again = await vscode.commands.executeCommand<CompareResult>('liftoff.compare', { source: `snapshot:${snap}`, target: 'dev' })
+  assert.equal(again?.changes.length, 0, 'a snapshot matches what it was taken from')
 
   fs.writeFileSync(path.join(workspace, '.suite-passed'), '')
   console.log('liftoff suite: all checks passed')

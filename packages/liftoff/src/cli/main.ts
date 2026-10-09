@@ -471,7 +471,7 @@ const COMMANDS: Record<string, Command> = {
       target: { type: 'string', help: 'What gets changed to look like the source (e.g. test, a URL, migrations)', value: 'SIDE' },
       scratch: { type: 'string', help: 'Scratch environment, when a side is model or migrations (default: the one with role "scratch")' },
       object: { type: 'string', multiple: true, help: 'Only this difference, by its id as listed (e.g. table:public.orders); repeatable', value: 'ID' },
-      script: { type: 'string', help: 'Write a script that makes the target like the source to this file', value: 'FILE' },
+      script: { type: 'string', help: 'Write a script that makes the target like the source to this file (- to print it)', value: 'FILE' },
       migration: { type: 'string', help: 'Write the differences as the next migration, with this description', value: 'DESCRIPTION' },
       undo: { type: 'boolean', help: 'With --migration: also write the undo script' },
       apply: { type: 'boolean', help: 'Run the differences on the target database now (outside its migration history)' },
@@ -489,7 +489,10 @@ const COMMANDS: Record<string, Command> = {
       const chosen = compare.pick(r.changes, v.object as string[] | undefined)
       const lines = [`${r.target} -> ${r.source} (${r.engine}): ${r.changes.length} difference(s)`, ...r.changes.map((c) => `  ${kindOf(c)} ${c.id}${c.destructive ? '  (may lose data)' : ''}`), ...r.not_compared.map((n) => `  not compared: ${n}`)]
       const out: Record<string, unknown> = { ...r }
-      if (chosen.length && str(v, 'script')) {
+      if (chosen.length && str(v, 'script') === '-') {
+        out.script_text = compare.syncScript(r, chosen)
+        lines.push('', out.script_text as string)
+      } else if (chosen.length && str(v, 'script')) {
         const file = path.resolve(ctx.root, str(v, 'script')!)
         fs.writeFileSync(file, compare.syncScript(r, chosen))
         out.script = file

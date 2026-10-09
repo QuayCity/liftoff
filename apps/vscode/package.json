@@ -50,6 +50,11 @@
         {
           "id": "liftoff.model",
           "name": "Schema Model"
+        },
+        {
+          "id": "liftoff.compare",
+          "name": "Compare",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -67,6 +72,10 @@
       {
         "view": "liftoff.model",
         "contents": "See what the dev database has that the schema-model files do not, and pull it in to commit.\n[Compare with Dev](command:liftoff.model.compare)\nEdited the files by hand? [Check Schema Model](command:liftoff.model.check)"
+      },
+      {
+        "view": "liftoff.compare",
+        "contents": "Compare the schema of any two: environments, the schema model, what the migrations build, a snapshot, or any database by URL. Then open the script, write a migration, or apply it.\n[Compare\u2026](command:liftoff.compare)\n[Save a Snapshot\u2026](command:liftoff.snapshot)"
       }
     ],
     "commands": [
@@ -173,6 +182,52 @@
         "title": "Run This Script Only",
         "category": "LiftOff",
         "icon": "$(play)"
+      },
+      {
+        "command": "liftoff.compare",
+        "title": "Compare\u2026",
+        "category": "LiftOff",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "liftoff.compare.again",
+        "title": "Compare Again",
+        "category": "LiftOff",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "liftoff.compare.swap",
+        "title": "Swap Source and Target",
+        "category": "LiftOff",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "liftoff.compare.open",
+        "title": "Show the Difference",
+        "category": "LiftOff"
+      },
+      {
+        "command": "liftoff.compare.script",
+        "title": "Open the Sync Script",
+        "category": "LiftOff",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "liftoff.compare.migration",
+        "title": "Write the Differences as a Migration",
+        "category": "LiftOff"
+      },
+      {
+        "command": "liftoff.compare.apply",
+        "title": "Apply to the Target",
+        "category": "LiftOff",
+        "icon": "$(play)"
+      },
+      {
+        "command": "liftoff.snapshot",
+        "title": "Save a Snapshot\u2026",
+        "category": "LiftOff",
+        "icon": "$(device-camera)"
       }
     ],
     "menus": {
@@ -211,6 +266,41 @@
           "command": "liftoff.settings",
           "when": "view == liftoff.environments && liftoff.hasProject",
           "group": "navigation@2"
+        },
+        {
+          "command": "liftoff.compare",
+          "when": "view == liftoff.compare",
+          "group": "navigation@1"
+        },
+        {
+          "command": "liftoff.compare.again",
+          "when": "view == liftoff.compare",
+          "group": "navigation@2"
+        },
+        {
+          "command": "liftoff.compare.swap",
+          "when": "view == liftoff.compare",
+          "group": "navigation@3"
+        },
+        {
+          "command": "liftoff.compare.script",
+          "when": "view == liftoff.compare && liftoff.compared",
+          "group": "navigation@4"
+        },
+        {
+          "command": "liftoff.compare.apply",
+          "when": "view == liftoff.compare && liftoff.compared",
+          "group": "1_act@1"
+        },
+        {
+          "command": "liftoff.compare.migration",
+          "when": "view == liftoff.compare && liftoff.compared",
+          "group": "1_act@2"
+        },
+        {
+          "command": "liftoff.snapshot",
+          "when": "view == liftoff.compare",
+          "group": "2_snapshot@1"
         }
       ],
       "view/item/context": [
@@ -285,6 +375,10 @@
         },
         {
           "command": "liftoff.runOnly",
+          "when": "false"
+        },
+        {
+          "command": "liftoff.compare.open",
           "when": "false"
         }
       ]

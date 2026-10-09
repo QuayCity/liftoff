@@ -30,6 +30,10 @@ Your database migrations, next to your code.
   edits everything: the project, comparison filters, placeholders and every environment, including
   whether it is shared through git or stays on your computer. Passwords go to your operating
   system's keychain, never into `liftoff.toml`; `${env.NAME}` references are kept as written.
+- **Compare anything with anything.** **LiftOff: Compare…** shows how two schemas differ: two
+  environments, the schema model, what the migrations build, a snapshot saved earlier, or any
+  database by URL. Tick the differences you want, see each one in the diff editor, then open the
+  sync script, write it as a migration, or apply it to the target.
 - **PostgreSQL and SQL Server.**
 
 The extension comes with the `liftoff` program and runs it for you; nothing is sent anywhere but

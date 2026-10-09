@@ -5,6 +5,7 @@
 import * as path from 'node:path'
 import * as vscode from 'vscode'
 import { findBinary, LiftoffError, runCli } from './cli'
+import { registerCompare, type CompareView } from './compareView'
 import { importFlyway, type ImportAnswers } from './flywayImport'
 import { newProject, type NewProjectAnswers } from './newProject'
 import { registerSchemaModel, type SchemaModelView } from './modelView'
@@ -72,6 +73,8 @@ export class Liftoff implements vscode.TreeDataProvider<Item> {
   projectDir: string | undefined
   /** the Schema Model view (modelView.ts) */
   schemaModel: SchemaModelView | undefined
+  /** the Compare view (compareView.ts) */
+  compare: CompareView | undefined
   /** folders with a Flyway config and no liftoff.toml, for the import */
   flywayDirs: string[] = []
   /** what `info` last returned per environment; only environments someone opened are loaded */
@@ -361,6 +364,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
   )
   await lo.load()
   lo.schemaModel = registerSchemaModel(context, lo)
+  lo.compare = registerCompare(context, lo)
   // Returned for the integration tests.
   return lo
 }
