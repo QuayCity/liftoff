@@ -52,6 +52,16 @@ function scratchService(engine: string): { service: string; url: string; prepare
 }
 
 /** The pull-request job: the schema model must build, and its changes need a migration script. */
+/** Every pull request: the scripts it adds must be numbered after everything on the branch it goes into. */
+function orderJob(o: CiOptions): string {
+  return (
+    "  migration-order:\n    name: 'New migration scripts come after the base branch'\n    if: github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n" +
+    '    steps:\n      - uses: actions/checkout@v7\n        with:\n          fetch-depth: 0\n' +
+    `      - name: Install LiftOff\n        run: ${yamlStr(o.install)}\n` +
+    '      - name: Check the numbering\n        env:\n          BASE: ${{ github.base_ref }}\n        run: liftoff renumber --check --after "origin/$BASE"\n'
+  )
+}
+
 function modelJob(cfg: Config, o: CiOptions, migrations: string): string {
   const generate = o.model === 'generate'
   const sc = scratchService(cfg.project.engine)
@@ -62,8 +72,10 @@ function modelJob(cfg: Config, o: CiOptions, migrations: string): string {
     '    env:\n' +
     `      LIFTOFF_ENV_CI_SCRATCH_URL: ${yamlStr(sc.url)}\n      LIFTOFF_ENV_CI_SCRATCH_ROLE: scratch\n`
   y += '    steps:\n      - uses: actions/checkout@v7\n'
-  // To commit back, check out the pull request's own branch (pull requests from forks cannot be written to).
-  if (generate) y += '        with:\n          ref: ${{ github.head_ref }}\n'
+  // To commit back, check out the pull request's own branch (pull requests from forks cannot be written to),
+  // with history, so new scripts can be numbered after the base branch. A token of your own
+  // (LIFTOFF_PUSH_TOKEN) makes GitHub run the checks again on the commit; its own token does not.
+  if (generate) y += '        with:\n          ref: ${{ github.head_ref }}\n          fetch-depth: 0\n          token: ${{ secrets.LIFTOFF_PUSH_TOKEN || github.token }}\n'
   y += `      - name: Install LiftOff\n        run: ${yamlStr(o.install)}\n`
   y += sc.prepare
   y += '      - name: The schema model builds\n        run: liftoff model --check --scratch ci_scratch\n'
@@ -74,6 +86,7 @@ function modelJob(cfg: Config, o: CiOptions, migrations: string): string {
   y +=
     '      - name: Write the migration script for the schema model changes\n' +
     "        run: liftoff generate --from model --scratch ci_scratch --description 'pull request ${{ github.event.number }}'\n" +
+    '      - name: Number the new scripts after the base branch\n        env:\n          BASE: ${{ github.base_ref }}\n        run: liftoff renumber --after "origin/$BASE"\n' +
     '      - name: Commit it to the pull request\n        run: |\n' +
     `          if [ -n "$(git status --porcelain -- ${migrations})" ]; then\n` +
     "            git config user.name 'liftoff[bot]'\n" +
@@ -105,19 +118,25 @@ export function githubActions(cfg: Config, o: CiOptions): string {
   let y =
     `# Written by LiftOff. Add these repository secrets: ${o.stages.map((s) => envVar(s, 'PASSWORD')).join(', ')}\n` +
     `# (and ${o.stages.map((s) => envVar(s, 'URL')).join(', ')} if the connection URL is not in liftoff.toml).\n` +
+    '# Pull requests: make "New migration scripts come after the base branch" a required check, and turn on\n' +
+    '# "Require branches to be up to date before merging", so every script is numbered after what merged first.\n' +
+    (o.model === 'generate'
+      ? '# Optional secret LIFTOFF_PUSH_TOKEN (a fine-grained token with contents: write): with it, the checks run\n# again on the commit that adds the migration script (GitHub does not start them for its own token).\n'
+      : '') +
     'name: Database migrations\n' +
     `on:\n  push:\n    branches: [${yamlStr(o.branch)}]\n    paths: [${yamlStr(`${migrations}/**`)}, 'liftoff.toml']\n` +
-    (withModel ? `  pull_request:\n    paths: ['schema-model/**', ${yamlStr(`${migrations}/**`)}, 'liftoff.toml']\n` : '') +
+    `  pull_request:\n    paths: [${withModel ? "'schema-model/**', " : ''}${yamlStr(`${migrations}/**`)}, 'liftoff.toml']\n` +
     '  workflow_dispatch:\n' +
     // Deployments queue up; pull-request checks run side by side.
     "concurrency:\n  group: liftoff-${{ github.event_name == 'pull_request' && github.ref || 'migrations' }}\n  cancel-in-progress: false\n" +
     'jobs:\n' +
+    orderJob(o) +
     (withModel ? modelJob(cfg, o, migrations) : '')
   let previous: string | undefined
   for (const s of o.stages) {
     const job = s.toLowerCase().replace(/[^a-z0-9]/g, '-')
     y += `  ${job}:\n    name: ${yamlStr(`Migrate ${s}`)}\n    runs-on: ubuntu-latest\n`
-    if (withModel) y += "    if: github.event_name != 'pull_request'\n"
+    y += "    if: github.event_name != 'pull_request'\n"
     if (previous) y += `    needs: ${previous}\n`
     // A GitHub environment of the same name holds approvals and its own secrets.
     y += `    environment: ${yamlStr(s)}\n`

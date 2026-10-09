@@ -12,6 +12,7 @@ import { Config, defaultSchema, init, PROJECT_FILE, readSettings, saveSettings, 
 import { engineOf, isSqlServerUrl, open } from '../core/db.ts'
 import * as compare from '../core/compare.ts'
 import { DataSession } from '../core/datacompare.ts'
+import { versionsAfter } from '../core/renumber.ts'
 import * as diff from '../core/diff.ts'
 import { asLiftoffError, configError, driftError, LiftoffError, modelAheadError } from '../core/errors.ts'
 import * as flyway from '../core/flyway.ts'
@@ -594,6 +595,25 @@ const COMMANDS: Record<string, Command> = {
       } finally {
         await s.close()
       }
+    },
+  },
+  renumber: {
+    help: "Move the migration scripts this branch adds after everything on another branch (e.g. origin/main), with their undo scripts; with --check, only say which are not",
+    options: {
+      after: { type: 'string', help: 'The branch the new scripts must come after, e.g. origin/main', value: 'REF' },
+      check: { type: 'boolean', help: 'Change nothing; fail (exit 12) when a new script is not numbered after REF' },
+    },
+    async run(ctx, v) {
+      const cfg = load(ctx)
+      const after = str(v, 'after')
+      if (!after) throw new UsageError('renumber needs --after, e.g. --after origin/main')
+      const r = versionsAfter(cfg, after, !flag(v, 'check'))
+      const lines = flag(v, 'check')
+        ? [`${r.added.length} new script(s), all numbered after ${after}${r.latest ? ` (its newest is ${r.latest})` : ''}`]
+        : r.renamed.length
+          ? [...r.renamed.map((x) => `${x.from} -> ${x.to}`), 'If one of these already ran on a database (e.g. recorded on dev), run `liftoff repair` there and record the new name with `liftoff mark-applied`.']
+          : [`Nothing to renumber: the new scripts come after ${after}`]
+      return [r, lines.join('\n')]
     },
   },
   snapshot: {

@@ -44,5 +44,13 @@ test('pull requests: the schema model job (generate and check), deployments only
   assert.ok(chk.includes('liftoff check --model --scratch ci_scratch') && !chk.includes('contents: write'), chk)
   const ms = githubActions(new Config(os.tmpdir(), { ...cfg.project, engine: 'sqlserver' }, cfg.environments), { ...base, model: 'check' })
   assert.ok(ms.includes('mcr.microsoft.com/mssql/server') && ms.includes("CREATE DATABASE scratch"), ms)
-  assert.ok(!githubActions(cfg, base).includes('pull_request:'), 'off by default')
+  // Every workflow checks the numbering of new scripts on pull requests; the schema model job is extra.
+  const plain = githubActions(cfg, base)
+  assert.ok(plain.includes("  pull_request:\n    paths: ['db/migrations/**', 'liftoff.toml']") && !plain.includes('schema-model'), plain)
+  assert.ok(plain.includes('fetch-depth: 0') && plain.includes('liftoff renumber --check --after "origin/$BASE"'), plain)
+  assert.ok(plain.includes('BASE: ${{ github.base_ref }}'), 'the branch name goes in as a variable, not into the script')
+  // Writing the script: renumber before committing, with the optional token that lets checks run again.
+  assert.ok(gen.indexOf('liftoff renumber --after "origin/$BASE"') > gen.indexOf('liftoff generate --from model'), gen)
+  assert.ok(gen.indexOf('liftoff renumber --after "origin/$BASE"') < gen.indexOf('git commit'), gen)
+  assert.ok(gen.includes('token: ${{ secrets.LIFTOFF_PUSH_TOKEN || github.token }}') && gen.includes('LIFTOFF_PUSH_TOKEN (a fine-grained token'), gen)
 })

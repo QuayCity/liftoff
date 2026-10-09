@@ -147,5 +147,22 @@ export function pull(root: string): void {
   git(root, ['pull', '--ff-only'])
 }
 
+/**
+ * The file names under `dir` on a branch or commit (e.g. origin/main), without checking it out.
+ * Unknown refs get a hint: CI checkouts are shallow unless asked for history.
+ */
+export function filesAt(root: string, ref: string, dir: string): string[] {
+  let out: string
+  try {
+    out = git(fs.existsSync(dir) ? dir : root, ['ls-tree', '-r', '--name-only', ref, '--', '.'])
+  } catch (e) {
+    if (e instanceof GitError && /not a valid object name|invalid object|unknown revision/i.test(e.message)) {
+      throw configError(`git does not know '${ref}'; fetch it first (in GitHub Actions: actions/checkout with fetch-depth: 0)`)
+    }
+    throw e
+  }
+  return out.split('\n').filter(Boolean).map((p) => p.split('/').pop()!)
+}
+
 /** For tests: run git and return its output. */
 export const run = git
