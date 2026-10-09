@@ -23,7 +23,35 @@ export type MigrationInfo = {
   kind: 'versioned' | 'repeatable' | 'undo' | 'baseline'; version: string | null; description: string; script: string
   state: State; installed_on: string | null; execution_time_ms: number | null; checksum_mismatch: boolean
 }
-export type MigrateResult = { environment: string; applied: { script: string; version: string | null; execution_time_ms: number; transactional: boolean }[]; execution_time_ms: number }
+export type MigrateResult = {
+  environment: string; applied: { script: string; version: string | null; execution_time_ms: number; transactional: boolean }[]; execution_time_ms: number
+  /** after a run with `only`: older versioned scripts that still have not run */
+  left_behind?: string[]
+}
+
+/** Whether a script can be run on its own (`migrate --only`); the core checks again. */
+export function pickable(i: MigrationInfo): boolean {
+  if (i.kind === 'versioned') return i.state === 'pending' || i.state === 'ignored'
+  if (i.kind === 'repeatable') return i.state === 'pending' || i.state === 'outdated' || i.state === 'applied'
+  return false
+}
+
+/** 1.10 after 1.9; missing parts count as 0. */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split(/[._]/).map(Number)
+  const pb = b.split(/[._]/).map(Number)
+  for (let k = 0; k < Math.max(pa.length, pb.length); k++) {
+    const d = (pa[k] ?? 0) - (pb[k] ?? 0)
+    if (d) return d
+  }
+  return 0
+}
+
+/** Versioned scripts older than `i` that have not run: running `i` alone leaves them behind. */
+export function olderNotRun(infos: MigrationInfo[], i: MigrationInfo): MigrationInfo[] {
+  if (i.kind !== 'versioned' || i.version === null) return []
+  return infos.filter((o) => o.kind === 'versioned' && o !== i && o.version !== null && (o.state === 'pending' || o.state === 'ignored') && compareVersions(o.version, i.version!) < 0)
+}
 export type Step = { phase: number; order?: number; sql: string }
 export type Change = {
   id: string; object_type: string; name: string; kind: 'added' | 'changed' | 'removed'; destructive: boolean
@@ -77,7 +105,8 @@ type Api = {
   /** `path` and `name` when editing a saved environment: its saved password and URL fill the gaps */
   envTestDraft(env: EnvInput, path?: string, name?: string): Promise<ServerInfo>
   migrationsInfo(path: string, env: string): Promise<MigrationInfo[]>
-  migrate(path: string, env: string, outOfOrder: boolean, allowNonEmpty?: boolean): Promise<MigrateResult>
+  /** `only`: run these scripts and nothing else (a cherry-pick) */
+  migrate(path: string, env: string, outOfOrder: boolean, allowNonEmpty?: boolean, only?: string[]): Promise<MigrateResult>
   saveReport(path: string, report: CheckReport): Promise<string | null>
   modelStatus(path: string): Promise<ModelChange[]>
   modelSave(path: string, changes: ModelChange[]): Promise<number>
@@ -123,7 +152,7 @@ const real: Api = {
   envTest: (path, name) => invoke('env_test', { path, name }),
   envTestDraft: (env, path, name) => invoke('env_test_draft', { env, path, name }),
   migrationsInfo: (path, env) => invoke('migrations_info', { path, env }),
-  migrate: (path, env, outOfOrder, allowNonEmpty = false) => invoke('migrate', { path, env, outOfOrder, allowNonEmpty }),
+  migrate: (path, env, outOfOrder, allowNonEmpty = false, only) => invoke('migrate', { path, env, outOfOrder, allowNonEmpty, only }),
   modelStatus: (path) => invoke('model_status', { path }),
   modelSave: (path, changes) => invoke('model_save', { path, changes }),
   modelFiles: (path) => invoke('model_files', { path }),
@@ -308,7 +337,15 @@ const fakeApi: Api = {
     fake.gitRejectPush = false
   },
   saveReport: async (_p, report) => `C:/Users/me/liftoff-checks-${report.environment}.html`,
-  migrate: async (_p, env) => {
+  migrate: async (_p, env, _o, _a, only) => {
+    if (only) {
+      // The preview keeps state as "the first n ran"; a cherry-pick only shows its log and result.
+      const infos = fakeInfo(env)
+      const picked = infos.filter((i) => only.includes(i.script))
+      for (const p of picked) emit('info', `Applied ${p.script} in 48 ms`)
+      const behind = picked.flatMap((p) => olderNotRun(infos, p)).filter((i) => !picked.includes(i)).map((i) => i.script)
+      return { environment: env, applied: picked.map((p) => ({ script: p.script, version: p.version, execution_time_ms: 48, transactional: true })), execution_time_ms: 48, left_behind: [...new Set(behind)] }
+    }
     const pending = fakeInfo(env).filter((i) => i.state === 'pending')
     emit('info', `Connected to ${env} (shop as me, PostgreSQL 16.4)`)
     for (const p of pending) {

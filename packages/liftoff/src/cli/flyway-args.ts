@@ -53,6 +53,7 @@ export function translate(args: string[]): { args: string[]; adhoc: Adhoc } {
     else if (key === 'outputType') out.push('--output-type', v().toLowerCase())
     else if (key === 'workingDirectory') out.push('--project-dir', v())
     else if (key === 'target') tail.push('--target', v())
+    else if (key === 'cherryPick') for (const p of v().split(',').map((s) => s.trim()).filter(Boolean)) tail.push('--only', p)
     else if (key === 'outOfOrder') {
       if (yes) tail.push('--out-of-order')
     } else if (key === 'baselineVersion') tail.push('--version', v())

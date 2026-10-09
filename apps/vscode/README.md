@@ -8,6 +8,8 @@ Your database migrations, next to your code.
   check a database for drift, or test its connection, from the environment's menu.
 - **Warnings where you type.** A script that was edited after it ran somewhere gets a warning in the
   editor, so the change goes into a new script instead.
+- **Run one script on its own.** Right-click a script that has not run: **Run This Script Only**
+  runs it and nothing else, and tells you first which older scripts it leaves behind.
 - **Schema Model view.** Change your dev database (or a remote one) the way you always do, then
   see here what it has that the `schema-model/` files do not, object by object. Click one for a
   side-by-side diff; pull one, a selection, or all of them into the files, and commit from Source

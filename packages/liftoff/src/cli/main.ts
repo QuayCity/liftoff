@@ -253,6 +253,7 @@ const COMMANDS: Record<string, Command> = {
     options: {
       'out-of-order': { type: 'boolean', help: 'Also run scripts older than the latest applied version' },
       target: { type: 'string', help: 'Stop after this version' },
+      only: { type: 'string', multiple: true, help: "Run only this script and nothing else: a version (5, 1.2), a file name, or a repeatable script's name (repeatable). Older scripts may be picked", value: 'SCRIPT' },
       'dry-run': { type: 'boolean', help: 'Print the SQL that would run instead of running it' },
       'allow-non-empty': { type: 'boolean', help: 'Run every script on a database that has tables but no history (normally refused)' },
       'rerun-repeatables': { type: 'boolean', help: 'Also re-run repeatable scripts that have not changed' },
@@ -262,7 +263,7 @@ const COMMANDS: Record<string, Command> = {
       const r = await runner.migrate(
         cfg,
         ctx.env,
-        { outOfOrder: flag(v, 'out-of-order'), target: str(v, 'target'), dryRun: flag(v, 'dry-run'), allowNonEmpty: flag(v, 'allow-non-empty'), rerunRepeatables: flag(v, 'rerun-repeatables') },
+        { outOfOrder: flag(v, 'out-of-order'), target: str(v, 'target'), dryRun: flag(v, 'dry-run'), allowNonEmpty: flag(v, 'allow-non-empty'), rerunRepeatables: flag(v, 'rerun-repeatables'), only: v.only as string[] | undefined },
         log,
       )
       return [r, r.dry_run_sql ?? `Applied ${r.applied.length} migration(s) to ${r.environment} in ${r.execution_time_ms} ms`]

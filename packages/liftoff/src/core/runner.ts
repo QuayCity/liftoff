@@ -173,6 +173,8 @@ export type MigrateResult = {
   execution_time_ms: number
   /** with `dryRun`: everything that would be sent to the database; nothing ran */
   dry_run_sql: string | null
+  /** with `only`: versioned scripts older than one that ran, still not run (a plain migrate now needs --out-of-order for them) */
+  left_behind?: string[]
 }
 
 export type MigrateOptions = {
@@ -188,6 +190,11 @@ export type MigrateOptions = {
   rerunRepeatables?: boolean
   /** run versioned scripts only (squash builds its baseline without the repeatables) */
   skipRepeatables?: boolean
+  /**
+   * Run these scripts and nothing else (a cherry-pick): each a version (`5`, `1.2`), a file name,
+   * or a repeatable script's name (`customer_totals`). Older versioned scripts may be picked.
+   */
+  only?: string[]
 }
 
 const waiting = (log: Log) => () => log('info', 'Another run holds the lock on this database; waiting')
@@ -200,6 +207,7 @@ export async function migrate(cfg: Config, envName: string | undefined, opts: Mi
     target = parseVersion(opts.target)
     if (!target) throw configError(`target '${opts.target}' must be numbers separated by . or _`)
   }
+  if (opts.only && opts.target !== undefined) throw configError('use --only or --target, not both')
   const scripts = scan(cfg.migrationsDir())
   // Placeholder values are checked before anything runs (an unset variable fails here).
   if (cfg.usesPlaceholders()) cfg.placeholders(cfg.pick(envName)[0])
@@ -227,6 +235,7 @@ export async function migrate(cfg: Config, envName: string | undefined, opts: Mi
 
 /** The scripts migrate would run, in order. */
 function plan(infos: MigrationInfo[], opts: MigrateOptions, target: Version | undefined): MigrationInfo[] {
+  if (opts.only) return picked(infos, opts.only)
   return infos.filter((i) => {
     let runs = false
     if (i.kind === 'versioned') runs = i.state === 'pending' || (i.state === 'ignored' && !!opts.outOfOrder)
@@ -234,6 +243,46 @@ function plan(infos: MigrationInfo[], opts: MigrateOptions, target: Version | un
     const v = i.version === null ? undefined : parseVersion(i.version)
     return runs && !(target && v && compareVersions(v, target) > 0)
   })
+}
+
+const notPickable: Partial<Record<State, string>> = {
+  applied: 'has already run',
+  failed: 'failed on a previous run; fix it and run `liftoff repair` first',
+  below_baseline: 'is covered by the baseline of this database',
+  missing: 'has run, but its file is missing',
+  future: 'has run (a newer version than these files)',
+  baseline: 'is the baseline marker',
+}
+
+/** `--only`: the scripts it names, in the usual order. Each must be one that can run now. */
+function picked(infos: MigrationInfo[], only: string[]): MigrationInfo[] {
+  const chosen = new Set<MigrationInfo>()
+  const name = (s: string) => s.trim().toLowerCase().replace(/[_\s]+/g, ' ')
+  for (const sel of only) {
+    const v = parseVersion(sel.trim().replace(/^v/i, ''))
+    const match = infos.find(
+      (i) =>
+        i.script.toLowerCase() === sel.trim().toLowerCase() ||
+        (i.kind === 'versioned' && v && i.version !== null && compareVersions(parseVersion(i.version), v) === 0) ||
+        (i.kind === 'repeatable' && name(i.description) === name(sel)),
+    )
+    if (!match || (match.kind !== 'versioned' && match.kind !== 'repeatable')) {
+      throw configError(`--only ${sel}: no script with that version or name`)
+    }
+    const why = match.kind === 'versioned' && match.state === 'applied' ? notPickable.applied : match.kind === 'versioned' ? notPickable[match.state] : match.state === 'missing' ? notPickable.missing : undefined
+    if (why) throw configError(`--only ${sel}: ${match.script} ${why}`)
+    chosen.add(match)
+  }
+  return infos.filter((i) => chosen.has(i))
+}
+
+/** Versioned scripts older than the newest one that ran, still not run (after an --only run). */
+function leftBehind(infos: MigrationInfo[], ran: MigrationInfo[]): string[] {
+  const newest = ran.filter((i) => i.kind === 'versioned').map((i) => parseVersion(i.version!)).sort(compareVersions).at(-1)
+  if (!newest) return []
+  return infos
+    .filter((i) => i.kind === 'versioned' && (i.state === 'pending' || i.state === 'ignored') && !ran.includes(i) && compareVersions(parseVersion(i.version!), newest) < 0)
+    .map((i) => i.script)
 }
 
 /** The newest B script at or below `target`. */
@@ -253,11 +302,11 @@ function dryRun(cfg: Config, engine: EngineName, name: string, scripts: Script[]
   const d = dialect[engine]
   const q = engine === 'SQL Server' ? quoteTsql : quoteIdent
   let infos = compute(scripts, rows)
-  validate(infos, opts)
+  validate(infos, { ...opts, outOfOrder: opts.outOfOrder || !!opts.only })
   const [schema, table] = [q(cfg.historySchema()), q(cfg.project.history_table)]
   let sql = `-- Dry run for ${name}: nothing below has been executed.\n-- History table: ${schema}.${table}\n`
   const result: MigrateResult = { environment: name, applied: [], execution_time_ms: 0, dry_run_sql: null }
-  const b = rows.length === 0 ? baselineScript(scripts, target) : undefined
+  const b = rows.length === 0 && !opts.only ? baselineScript(scripts, target) : undefined
   if (b) {
     sql += `\n-- ${b.fileName} (empty database: built from the baseline script)\n${d.begin};\n${sqlFor(cfg, name, b).trimEnd()}\nCOMMIT;\n`
     result.applied.push({ script: b.fileName, version: b.version?.text ?? null, execution_time_ms: 0, transactional: true })
@@ -289,12 +338,14 @@ async function migrateLocked(c: Conn, cfg: Config, name: string, scripts: Script
   const result: MigrateResult = { environment: name, applied: [], execution_time_ms: 0, dry_run_sql: null }
 
   // Scripts that create what already exists fail half-way; ask for a baseline instead.
-  if (!rows.length && !opts.allowNonEmpty && !baselineScript(scripts, target) && (await c.userObjects(cfg.project.schemas, table)) > 0) {
+  // (--only never builds from a B script: it runs what it names.)
+  const useBaseline = !opts.only
+  if (!rows.length && !opts.allowNonEmpty && !(useBaseline && baselineScript(scripts, target)) && (await c.userObjects(cfg.project.schemas, table)) > 0) {
     throw notBaselinedError(name)
   }
 
   // A database without any history starts from the latest B script, when there is one.
-  const b = rows.length === 0 ? baselineScript(scripts, target) : undefined
+  const b = rows.length === 0 && useBaseline ? baselineScript(scripts, target) : undefined
   if (b) {
     log('info', `Empty database: building it from ${b.fileName}`)
     const t = Date.now()
@@ -307,9 +358,16 @@ async function migrateLocked(c: Conn, cfg: Config, name: string, scripts: Script
     rows = await c.readHistory(schema, table)
   }
   const infos = compute(scripts, rows)
-  validate(infos, opts)
+  // Being older than what ran stops a plain migrate; with --only, only the picked scripts run.
+  validate(infos, { ...opts, outOfOrder: opts.outOfOrder || !!opts.only })
 
   const todo = plan(infos, opts, target)
+  if (opts.only) {
+    result.left_behind = leftBehind(infos, todo)
+    if (result.left_behind.length) {
+      log('warn', `Not run, and older than what ran: ${result.left_behind.join(', ')}. A plain migrate now needs --out-of-order to run them.`)
+    }
+  }
   if (!todo.length && !result.applied.length) log('info', `${name} is up to date`)
   for (const i of todo) {
     const s = scripts.find((s) => s.fileName === i.script)!

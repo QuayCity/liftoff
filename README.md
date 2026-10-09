@@ -10,7 +10,8 @@ Free and open source (MIT). PostgreSQL and SQL Server.
 
 - **Versioned migrations.** `V1__orders.sql`, `U1__orders.sql` (undo), `R__views.sql` (repeatable),
   `B5__baseline.sql`. A history table per database, locking so two runs never collide, checks that
-  scripts were not edited after they ran.
+  scripts were not edited after they ran. A hotfix? `migrate --only 5` runs one script and nothing
+  else.
 - **Schema model.** One file per database object in `schema-model/`, so git shows the history of
   every table and view. Pull changes into it from a dev database, or edit it by hand.
 - **Migrations written for you.** `liftoff generate` compares the dev database (or the schema

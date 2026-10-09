@@ -43,3 +43,12 @@ test('schema-model changes are described from the dev side, problems grouped per
   const grouped = modelProblems([{ path: 'a.sql', message: 'one' }, { path: 'b.sql', message: 'x' }, { path: 'a.sql', message: 'two' }])
   assert.deepEqual([...grouped], [['a.sql', ['one', 'two']], ['b.sql', ['x']]])
 })
+
+test('which scripts can run on their own, and what running one leaves behind', async () => {
+  const { pickable, olderNotRun } = await import('../model.js')
+  const infos = [row('V1__a.sql', 'applied'), row('V1.9__b.sql', 'ignored'), row('V1.10__c.sql', 'pending'), row('V2__d.sql', 'pending'), row('V3__e.sql', 'failed')]
+  assert.deepEqual(infos.filter(pickable).map((i) => i.script), ['V1.9__b.sql', 'V1.10__c.sql', 'V2__d.sql'])
+  assert.deepEqual(olderNotRun(infos, infos[3]).map((i) => i.script), ['V1.9__b.sql', 'V1.10__c.sql'], '1.10 is older than 2, newer than 1.9')
+  assert.deepEqual(olderNotRun(infos, infos[1]), [])
+  assert.ok(pickable({ ...row('R__v.sql', 'applied'), kind: 'repeatable', version: null }), 'a repeatable can be run again on purpose')
+})

@@ -53,6 +53,32 @@ export type MigrateResult = {
   applied: { script: string; version: string | null; execution_time_ms: number; transactional: boolean }[]
   execution_time_ms: number
   dry_run_sql: string | null
+  /** after `--only`: older versioned scripts that still have not run */
+  left_behind?: string[]
+}
+
+/** Whether `migrate --only` can run this script now (the CLI checks again). */
+export function pickable(i: MigrationInfo): boolean {
+  if (i.kind === 'versioned') return i.state === 'pending' || i.state === 'ignored'
+  if (i.kind === 'repeatable') return i.state === 'pending' || i.state === 'outdated' || i.state === 'applied'
+  return false
+}
+
+/** 1.10 after 1.9; missing parts count as 0. */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split(/[._]/).map(Number)
+  const pb = b.split(/[._]/).map(Number)
+  for (let k = 0; k < Math.max(pa.length, pb.length); k++) {
+    const d = (pa[k] ?? 0) - (pb[k] ?? 0)
+    if (d) return d
+  }
+  return 0
+}
+
+/** Versioned scripts older than `i` that have not run: running `i` alone leaves them behind. */
+export function olderNotRun(infos: MigrationInfo[], i: MigrationInfo): MigrationInfo[] {
+  if (i.kind !== 'versioned' || i.version === null) return []
+  return infos.filter((o) => o.kind === 'versioned' && o !== i && o.version !== null && (o.state === 'pending' || o.state === 'ignored') && compareVersions(o.version, i.version!) < 0)
 }
 
 /** A change found by `liftoff check --drift` */

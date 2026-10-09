@@ -167,6 +167,12 @@
         "command": "liftoff.newProject",
         "title": "New Project",
         "category": "LiftOff"
+      },
+      {
+        "command": "liftoff.runOnly",
+        "title": "Run This Script Only",
+        "category": "LiftOff",
+        "icon": "$(play)"
       }
     ],
     "menus": {
@@ -257,6 +263,11 @@
           "command": "liftoff.editEnvironment",
           "when": "view == liftoff.environments && viewItem == environment",
           "group": "3_edit@1"
+        },
+        {
+          "command": "liftoff.runOnly",
+          "when": "view == liftoff.environments && viewItem == migration.pickable",
+          "group": "1_run@1"
         }
       ],
       "commandPalette": [
@@ -270,6 +281,10 @@
         },
         {
           "command": "liftoff.editEnvironment",
+          "when": "false"
+        },
+        {
+          "command": "liftoff.runOnly",
           "when": "false"
         }
       ]

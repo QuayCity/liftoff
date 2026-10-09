@@ -1,7 +1,7 @@
 // Environments workspace: S08 (migrations per target) + S12 (manage targets) + S10 (run log, in place).
 import { Database, Pencil, Plus, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, errorText, isErrorReport, type EnvView, type Generated, type MigrationInfo, type Project, type State } from '../api'
+import { api, errorText, isErrorReport, olderNotRun, pickable, type EnvView, type Generated, type MigrationInfo, type Project, type State } from '../api'
 import { Button, Checkbox, Field, IconButton, Input, cx } from '../ui/controls'
 import { CommandBar, DataTable, EnvironmentColumn, LogConsole, type Env, type LogLine } from '../ui/data'
 import { Badge, Card, CodeBlock, EmptyState, InlineAlert, StatePill, type MigrationState } from '../ui/display'
@@ -42,6 +42,8 @@ export function Environments({ project, onProject }: { project: Project; onProje
   const [drift, setDrift] = useState<Record<string, boolean>>({})
   const [importFor, setImportFor] = useState<string | null>(null)
   const [notBaselined, setNotBaselined] = useState<string | null>(null)
+  // A script picked to run on its own, waiting for confirmation.
+  const [pick, setPick] = useState<{ env: EnvView; info: MigrationInfo } | null>(null)
 
   const load = useCallback(async (name: string) => {
     setStatus((s) => ({ ...s, [name]: { ...s[name], loading: true } }))
@@ -102,6 +104,13 @@ export function Environments({ project, onProject }: { project: Project; onProje
       }
       throw e
     }
+  })
+
+  /** One script and nothing else (`migrate --only`). */
+  const runOnly = (name: string, script: string) => op(name, async () => {
+    const r = await api.migrate(project.root, name, false, false, [script])
+    const behind = r.left_behind?.length ? `; not run yet, and older: ${r.left_behind.join(', ')}` : ''
+    return `Ran ${script} on ${name}${behind}`
   })
 
   const command = (name: string, id: string) => {
@@ -213,6 +222,13 @@ export function Environments({ project, onProject }: { project: Project; onProje
                   { header: 'State', cell: (r) => <span className="inline-flex items-center gap-2"><StatePill state={pillState(r.state)} />{r.checksum_mismatch && <span className="text-xs text-danger">changed after it ran</span>}</span> },
                   { header: 'Ran on', cell: (r) => local(r.installed_on), className: 'text-muted whitespace-nowrap' },
                   { header: 'Took', cell: (r) => (r.execution_time_ms != null ? `${r.execution_time_ms} ms` : '—'), className: 'text-right tabular-nums' },
+                  {
+                    header: 'Run',
+                    cell: (r) => pickable(r) && (
+                      <Button size="sm" variant="ghost" aria-label={`Run only ${r.script}`} disabled={!!running} onClick={() => setPick({ env: sel, info: r })}>Run only this</Button>
+                    ),
+                    className: 'text-right',
+                  },
                 ]}
               />
             </Card>
@@ -251,6 +267,27 @@ export function Environments({ project, onProject }: { project: Project; onProje
       <ConnectionDialog key={dialog ? dialog.editing?.name ?? 'new' : 'closed'} open={!!dialog} onOpenChange={(o) => !o && setDialog(null)} project={project} editing={dialog?.editing} onSaved={onProject} />
       <CaptureDialog key={`capture:${captured?.g.file_name ?? ''}`} captured={captured} project={project} onClose={() => setCaptured(null)}
         onDone={(msg, tone) => { setCaptured(null); toast({ tone, title: msg }); if (captured) load(captured.env) }} />
+      <Dialog open={!!pick} onOpenChange={(o) => !o && setPick(null)} size="sm" title={`Run only ${pick?.info.script ?? ''} on ${pick?.env.name ?? ''}?`}
+        description="Nothing else runs. Other pending scripts stay pending."
+        footer={<>
+          <Button onClick={() => setPick(null)}>Cancel</Button>
+          <Button variant={pick?.env.role === 'prod' ? 'danger' : 'primary'} onClick={() => { const p = pick!; setPick(null); runOnly(p.env.name, p.info.script) }}>Run this script only</Button>
+        </>}>
+        {pick && (() => {
+          const older = olderNotRun(status[pick.env.name]?.info ?? [], pick.info)
+          return (
+            <div className="flex flex-col gap-3 text-sm">
+              {older.length > 0 && (
+                <InlineAlert tone="warning" title={`${older.length} older script${older.length > 1 ? 's' : ''} will not run`}>
+                  <ul className="list-disc pl-5 font-mono text-xs">{older.map((o) => <li key={o.script}>{o.script}</li>)}</ul>
+                  <p className="mt-2">Run pending will then ask to run them out of order. If {pick.info.script} depends on them, it fails.</p>
+                </InlineAlert>
+              )}
+              {pick.env.role === 'prod' && <InlineAlert tone="danger" title={`${pick.env.name} is a production database`}>The script runs there as soon as you confirm.</InlineAlert>}
+            </div>
+          )
+        })()}
+      </Dialog>
       <Dialog open={!!notBaselined} onOpenChange={(o) => !o && setNotBaselined(null)} size="sm" title={`${notBaselined ?? ''} already has tables`}
         description="It has no migration history, so running every script would try to create what is already there."
         footer={<>

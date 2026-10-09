@@ -161,7 +161,7 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
 
   /* F04: run */
   migrations_info: (a) => runner.info(load(a.path), s(a, 'env')),
-  migrate: (a, h) => runner.migrate(load(a.path), s(a, 'env'), { outOfOrder: b(a, 'outOfOrder'), allowNonEmpty: b(a, 'allowNonEmpty') }, h.log),
+  migrate: (a, h) => runner.migrate(load(a.path), s(a, 'env'), { outOfOrder: b(a, 'outOfOrder'), allowNonEmpty: b(a, 'allowNonEmpty'), only: a.only as string[] | undefined }, h.log),
   validate: (a) => runner.validateEnv(load(a.path), s(a, 'env')),
   baseline: (a, h) => runner.baseline(load(a.path), s(a, 'env'), s(a, 'version'), s(a, 'description'), h.log),
   repair: (a, h) => runner.repair(load(a.path), s(a, 'env'), h.log),

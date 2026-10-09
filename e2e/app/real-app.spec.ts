@@ -106,6 +106,26 @@ test('F01-E4 editing an environment keeps ${env.X} in its URL, its password, and
   await expect(column('test').getByText('Connected')).toBeVisible()
 })
 
+test('F15-H2 run only one script on test: Postgres gets that one, not the older one', async () => {
+  fs.writeFileSync(path.join(project, 'migrations/V2__notes.sql'), 'create table notes (id int);\n')
+  fs.writeFileSync(path.join(project, 'migrations/V3__tags.sql'), 'create table tags (id int);\n')
+  await details('test').getByRole('combobox', { name: 'Command' }).selectOption('info')
+  await details('test').getByRole('button', { name: 'Refresh status' }).click()
+  const table = details('test').getByRole('table', { name: 'Migrations on test' })
+  await table.getByRole('button', { name: 'Run only V3__tags.sql' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Run only V3__tags.sql on test?' })
+  await expect(dialog.getByText('V2__notes.sql')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Run this script only' }).click()
+  await expect(page.getByText('Ran V3__tags.sql on test; not run yet, and older: V2__notes.sql').first()).toBeVisible()
+  expect(psql('shop_test', "select string_agg(script, ',' order by script) from liftoff_schema_history where success")).toBe('V1__orders.sql,V3__tags.sql')
+  // Tidy up for the tests after this one.
+  psql('shop_test', "drop table tags; delete from liftoff_schema_history where script = 'V3__tags.sql'")
+  fs.rmSync(path.join(project, 'migrations/V2__notes.sql'))
+  fs.rmSync(path.join(project, 'migrations/V3__tags.sql'))
+  await details('test').getByRole('button', { name: 'Refresh status' }).click()
+  await details('test').getByRole('combobox', { name: 'Command' }).selectOption('migrate')
+})
+
 test('F04-E2 a failing script is rolled back and its Postgres error is shown', async () => {
   fs.writeFileSync(path.join(project, 'migrations/V2__broken.sql'), 'create table half (id int);\nselect * from no_such_table;\n')
   await details('test').getByRole('button', { name: 'Refresh' }).click()

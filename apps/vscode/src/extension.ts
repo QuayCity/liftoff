@@ -12,6 +12,8 @@ import { SettingsPanel } from './settingsPanel'
 import {
   describe,
   groupProblems,
+  olderNotRun,
+  pickable,
   problemsFor,
   stateIcon,
   summary,
@@ -36,9 +38,10 @@ class EnvironmentItem extends vscode.TreeItem {
 }
 
 class MigrationItem extends vscode.TreeItem {
-  constructor(readonly info: MigrationInfo, file: vscode.Uri | undefined) {
+  constructor(readonly info: MigrationInfo, file: vscode.Uri | undefined, readonly env: Environment) {
     super(info.script, vscode.TreeItemCollapsibleState.None)
-    this.contextValue = 'migration'
+    // Scripts that can run on their own get "Run This Script Only".
+    this.contextValue = pickable(info) ? 'migration.pickable' : 'migration'
     this.description = describe(info)
     const warn = info.checksum_mismatch || info.state === 'failed'
     this.iconPath = new vscode.ThemeIcon(stateIcon[info.state], warn ? new vscode.ThemeColor('list.warningForeground') : undefined)
@@ -116,6 +119,11 @@ export class Liftoff implements vscode.TreeDataProvider<Item> {
     this.changed.fire(undefined)
   }
 
+  /** What `info` last returned for an environment. */
+  infosFor(name: string): MigrationInfo[] {
+    return this.infos.get(name) ?? []
+  }
+
   /** Reads one environment's migrations again, and its editor warnings. */
   async loadEnvironment(name: string): Promise<MigrationInfo[]> {
     const infos = await this.run<MigrationInfo[]>(['info'], name)
@@ -169,7 +177,7 @@ export class Liftoff implements vscode.TreeDataProvider<Item> {
     try {
       const infos = await this.loadEnvironment(item.env.name)
       if (!infos.length) return [new MessageItem('No migration scripts yet', 'info')]
-      return infos.map((i) => new MigrationItem(i, i.state === 'missing' || i.state === 'future' ? undefined : this.scriptUri(i.script)))
+      return infos.map((i) => new MigrationItem(i, i.state === 'missing' || i.state === 'future' ? undefined : this.scriptUri(i.script), item.env))
     } catch (e) {
       return [new MessageItem(message(e))]
     }
@@ -234,6 +242,29 @@ async function migrate(lo: Liftoff, item?: EnvironmentItem): Promise<MigrateResu
   if (result) {
     const n = result.applied.length
     vscode.window.showInformationMessage(n ? `Applied ${n} migration${n === 1 ? '' : 's'} to ${env.name}` : `${env.name} is up to date`)
+  }
+  await lo.reloadOpened()
+  return result
+}
+
+/** Runs one script and nothing else on an environment (`migrate --only`), after saying what that means. */
+async function runOnly(lo: Liftoff, item: MigrationItem, confirmed = false): Promise<MigrateResult | undefined> {
+  const { info, env } = item
+  if (!confirmed) {
+    const older = olderNotRun(lo.infosFor(env.name), info)
+    const lines = [
+      older.length
+        ? `Older scripts that have not run on ${env.name} stay that way: ${older.map((o) => o.script).join(', ')}. Run Pending will then ask for --out-of-order. If ${info.script} depends on them, it fails.`
+        : `Nothing else runs; other pending scripts stay pending.`,
+      ...(env.role === 'prod' ? ['', `${env.name} is a production database.`] : []),
+    ]
+    const go = await vscode.window.showWarningMessage(`Run only ${info.script} on ${env.name}?`, { modal: true, detail: lines.join('\n') }, 'Run This Script Only')
+    if (go !== 'Run This Script Only') return undefined
+  }
+  const result = await withProgress(lo, `Running ${info.script} on ${env.name}`, () => lo.run<MigrateResult>(['migrate', '--only', info.script], env.name))
+  if (result) {
+    const behind = result.left_behind?.length ? ` Not run yet, and older: ${result.left_behind.join(', ')}.` : ''
+    vscode.window.showInformationMessage(`Ran ${info.script} on ${env.name}.${behind}`)
   }
   await lo.reloadOpened()
   return result
@@ -309,6 +340,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
     vscode.commands.registerCommand('liftoff.refresh', () => lo.load()),
     vscode.commands.registerCommand('liftoff.migrate', (item?: EnvironmentItem) => migrate(lo, item)),
     vscode.commands.registerCommand('liftoff.dryRun', (item?: EnvironmentItem) => dryRun(lo, item)),
+    // `confirmed` is for the tests, which cannot press the dialog's button.
+    vscode.commands.registerCommand('liftoff.runOnly', (item: MigrationItem, confirmed?: boolean) => runOnly(lo, item, confirmed === true)),
     vscode.commands.registerCommand('liftoff.validate', (item?: EnvironmentItem) => validate(lo, item)),
     vscode.commands.registerCommand('liftoff.checkDrift', (item?: EnvironmentItem) => checkDrift(lo, item)),
     vscode.commands.registerCommand('liftoff.testConnection', (item?: EnvironmentItem) => testConnection(lo, item)),

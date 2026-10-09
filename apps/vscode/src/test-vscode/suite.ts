@@ -41,6 +41,20 @@ export async function run(): Promise<void> {
   const after = await lo.getChildren(envItem)
   assert.match(String(after[0].description), /^applied · /)
 
+  // Run This Script Only: V3 alone; V2 is older, stays behind, and can then be picked too.
+  fs.writeFileSync(path.join(workspace, 'migrations', 'V2__notes.sql'), 'create table notes (id int);\n')
+  fs.writeFileSync(path.join(workspace, 'migrations', 'V3__tags.sql'), 'create table tags (id int);\n')
+  let items = await lo.getChildren(envItem)
+  const v3 = items.find((i) => i.label === 'V3__tags.sql')!
+  assert.equal(v3.contextValue, 'migration.pickable')
+  assert.equal(items.find((i) => i.label === 'V1__orders.sql')?.contextValue, 'migration', 'an applied script cannot be picked')
+  let picked = await vscode.commands.executeCommand<MigrateResult>('liftoff.runOnly', v3, true)
+  assert.deepEqual([picked?.applied.map((a) => a.script), picked?.left_behind], [['V3__tags.sql'], ['V2__notes.sql']])
+  items = await lo.getChildren(envItem)
+  assert.match(String(items.find((i) => i.label === 'V2__notes.sql')?.description), /skipped/)
+  picked = await vscode.commands.executeCommand<MigrateResult>('liftoff.runOnly', items.find((i) => i.label === 'V2__notes.sql'), true)
+  assert.deepEqual(picked?.applied.map((a) => a.script), ['V2__notes.sql'])
+
   // Editing a script that already ran puts a warning on it once it is saved.
   const file = vscode.Uri.file(path.join(workspace, 'migrations', 'V1__orders.sql'))
   const doc = await vscode.workspace.openTextDocument(file)

@@ -71,6 +71,7 @@ test('Flyway-style arguments', () => {
   assert.deepEqual(t.adhoc.schemas, ['sales', 'public'])
   assert.equal(t.adhoc.locations, 'sql')
   assert.deepEqual(translate(a('-placeholders.app_user=svc migrate')).args, a('--placeholder app_user=svc migrate'))
+  assert.deepEqual(translate(a('migrate -cherryPick=2,R__report')).args, a('migrate --only 2 --only R__report'))
   assert.deepEqual(translate(a('--environment staging check -drift -dryrun')).args, a('--environment staging check --drift --dry-run'))
   assert.deepEqual(translate(a('-e dev info')).args, a('-e dev info'), 'a short LiftOff flag (-e, -C) is not a Flyway option')
   assert.throws(() => translate(a('-callbacks=db/callbacks migrate')), /does not support/)
@@ -187,6 +188,20 @@ test('the CI contract', { skip: !base && 'set LIFTOFF_TEST_PG' }, async () => {
   assert.equal(r.code, 12, r.stderr)
   assert.ok(r.stderr.includes('V1__orders.sql changed after it was applied'), r.stderr)
   fs.writeFileSync(path.join(dir, 'migrations/V1__orders.sql'), 'create table orders (id int primary key, note text);\n')
+
+  // Cherry-pick: --only runs that script alone; with --target it is a mistake.
+  fs.writeFileSync(path.join(dir, 'migrations/V2__notes.sql'), 'create table notes (id int);\n')
+  fs.writeFileSync(path.join(dir, 'migrations/V3__tags.sql'), 'create table tags (id int);\n')
+  r = liftoff(dir, ['-e', 'test', 'migrate', '--only', '3', '--output-type', 'json'])
+  assert.equal(r.code, 0, r.stderr)
+  assert.deepEqual([json(r).result.applied.map((x: { script: string }) => x.script), json(r).result.left_behind], [['V3__tags.sql'], ['V2__notes.sql']])
+  assert.match(r.stderr, /V2__notes\.sql\. A plain migrate now needs --out-of-order/)
+  r = liftoff(dir, ['-e', 'test', 'migrate', '--only', '2', '--target', '3'])
+  assert.equal(r.code, 2, r.stderr)
+  assert.equal(liftoff(dir, ['-e', 'test', 'migrate', '--only', '2']).code, 0)
+  fs.rmSync(path.join(dir, 'migrations/V2__notes.sql'))
+  fs.rmSync(path.join(dir, 'migrations/V3__tags.sql'))
+  await sql(pgEnv('shop_test'), 'shop_test', "drop table notes; drop table tags; delete from liftoff_schema_history where version in ('2', '3')")
 
   // F09-N1: clean is refused on a test database.
   assert.equal(liftoff(dir, ['-e', 'test', 'clean']).code, 2)
