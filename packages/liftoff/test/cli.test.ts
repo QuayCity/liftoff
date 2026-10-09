@@ -223,6 +223,21 @@ test('the CI contract', { skip: !base && 'set LIFTOFF_TEST_PG' }, async () => {
   r = liftoff(dir, ['compare', '--source', 'migrations', '--target', 'test', '--output-type', 'json'])
   assert.deepEqual(json(r).result.changes, [], 'applied: test (the same database as live) matches the migrations again')
 
+  // Data compare: a row only in test, then the script removes it.
+  await sql(pgEnv('shop_test'), 'shop_test', "insert into orders values (99, 'only in test')")
+  fs.appendFileSync(path.join(dir, 'liftoff.toml'), `\n[environments.copy]\nurl = "${base}/shop_scratch"\nrole = "test"\n`)
+  await sql(pgEnv('shop_scratch'), 'shop_scratch', `${pgSchemaReset} create table orders (id int primary key, note text);`)
+  r = liftoff(dir, ['data-compare', '--source', 'copy', '--target', 'test', '--table', 'public.orders', '--rows', 'public.orders', '--kind', 'only_in_target', '--script', 'rows.sql', '--output-type', 'json'])
+  assert.equal(r.code, 0, r.stderr)
+  const dc = json(r).result
+  assert.deepEqual([dc.tables[0].only_in_target, dc.rows.rows[0].key, dc.rows.rows[0].target], [1, ['99'], ['99', 'only in test']])
+  assert.match(fs.readFileSync(path.join(dir, 'rows.sql'), 'utf8'), /DELETE FROM public\.orders WHERE id = '99'::integer;/)
+  assert.equal(liftoff(dir, ['data-compare', '--source', 'copy', '--target', 'test', '--kind', 'odd']).code, 2)
+  r = liftoff(dir, ['data-compare', '--source', 'copy', '--target', 'test', '--table', 'public.orders', '--apply', '--output-type', 'json'])
+  assert.equal(r.code, 0, r.stderr)
+  r = liftoff(dir, ['data-compare', '--source', 'copy', '--target', 'test', '--table', 'public.orders', '--output-type', 'json'])
+  assert.equal(json(r).result.tables[0].only_in_target, 0)
+
   // F09-N1: clean is refused on a test database.
   assert.equal(liftoff(dir, ['-e', 'test', 'clean']).code, 2)
 

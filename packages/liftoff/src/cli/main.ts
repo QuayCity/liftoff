@@ -11,6 +11,7 @@ import * as ci from '../core/ci.ts'
 import { Config, defaultSchema, init, PROJECT_FILE, readSettings, saveSettings, type Environment, type Role, type SettingsChange } from '../core/config.ts'
 import { engineOf, isSqlServerUrl, open } from '../core/db.ts'
 import * as compare from '../core/compare.ts'
+import { DataSession } from '../core/datacompare.ts'
 import * as diff from '../core/diff.ts'
 import { asLiftoffError, configError, driftError, LiftoffError, modelAheadError } from '../core/errors.ts'
 import * as flyway from '../core/flyway.ts'
@@ -510,6 +511,89 @@ const COMMANDS: Record<string, Command> = {
         lines.push(`Applied ${chosen.length} change(s) to ${a.target}. Its migration history was not changed, so it now differs from its scripts.`)
       }
       return [out, lines.join('\n')]
+    },
+  },
+  'data-compare': {
+    help: 'Compare the rows of the tables two databases share (by key), fast on big tables; then show the differing rows, write a sync script, or apply it',
+    options: {
+      source: { type: 'string', help: 'The database whose rows are right: an environment or a URL', value: 'SIDE' },
+      target: { type: 'string', help: 'The database to compare (and change): an environment or a URL', value: 'SIDE' },
+      table: { type: 'string', multiple: true, help: 'Only this table, as schema.name (repeatable)', value: 'TABLE' },
+      rows: { type: 'string', help: 'Also show the differing rows of this table', value: 'TABLE' },
+      kind: { type: 'string', default: 'different', help: 'With --rows: only_in_source, only_in_target or different' },
+      offset: { type: 'string', default: '0', help: 'With --rows: skip this many' },
+      limit: { type: 'string', default: '50', help: 'With --rows: show this many' },
+      script: { type: 'string', help: 'Write the INSERT/UPDATE/DELETE statements that make the target match to this file (- to print them)', value: 'FILE' },
+      apply: { type: 'boolean', help: 'Run those statements on the target, in one transaction' },
+      'confirm-production': { type: 'boolean', help: 'Needed with --apply when the target is a production environment' },
+      'no-insert': { type: 'boolean', help: 'Leave out rows only in the source' },
+      'no-update': { type: 'boolean', help: 'Leave out rows that differ' },
+      'no-delete': { type: 'boolean', help: 'Leave out rows only in the target' },
+    },
+    async run(ctx, v) {
+      const cfg = load(ctx)
+      const [src, tgt] = [str(v, 'source'), str(v, 'target')]
+      if (!src || !tgt) throw new UsageError('data-compare needs --source and --target')
+      const target = compare.parseSide(tgt)
+      if (flag(v, 'apply') && compare.isProduction(cfg, target) && !flag(v, 'confirm-production')) {
+        throw new UsageError(`${tgt} is a production environment; add --confirm-production to apply to it`)
+      }
+      const kind = str(v, 'kind')!
+      if (!['only_in_source', 'only_in_target', 'different'].includes(kind)) throw new UsageError(`--kind must be only_in_source, only_in_target or different, not '${kind}'`)
+      const tables = v.table as string[] | undefined
+      const what = { insert: !flag(v, 'no-insert'), update: !flag(v, 'no-update'), delete: !flag(v, 'no-delete') }
+      const s = await DataSession.open(cfg, compare.parseSide(src), target, tables, log)
+      try {
+        const r = s.result
+        const out: Record<string, unknown> = { ...r }
+        const lines = [
+          `${r.target} -> ${r.source} (${r.engine}), ${(r.ms / 1000).toFixed(1)} s`,
+          ...r.tables.map((t) =>
+            t.skipped
+              ? `  ${t.table}: not compared, ${t.skipped}`
+              : `  ${t.table}: ${t.only_in_source + t.only_in_target + t.different === 0 ? 'same' : `${t.only_in_source} only in the source, ${t.only_in_target} only in the target, ${t.different} different`} (${t.source_rows} / ${t.target_rows} rows)`,
+          ),
+        ]
+        if (str(v, 'rows')) {
+          const page = await s.page(str(v, 'rows')!, kind as 'different', Number(str(v, 'offset')), Number(str(v, 'limit')))
+          out.rows = page
+          lines.push('', `${str(v, 'rows')}, ${kind}: ${page.rows.length} of ${page.total}`)
+          for (const row of page.rows) {
+            lines.push(`  key ${row.key.join(', ')}`)
+            page.columns.forEach((c, i) => {
+              const [a, b] = [row.source?.[i], row.target?.[i]]
+              if (row.source && row.target && a === b) return
+              lines.push(`    ${c}: ${row.source ? (a ?? 'NULL') : '-'}  |  ${row.target ? (b ?? 'NULL') : '-'}`)
+            })
+          }
+        }
+        const file = str(v, 'script')
+        if (file === '-') {
+          let text = ''
+          for await (const chunk of s.script(tables, what)) text += chunk
+          out.script_text = text
+          lines.push('', text)
+        } else if (file) {
+          // Written as it is made: millions of rows never sit in memory.
+          const path_ = path.resolve(ctx.root, file)
+          const fd = fs.openSync(path_, 'w')
+          try {
+            for await (const chunk of s.script(tables, what)) fs.writeSync(fd, chunk)
+          } finally {
+            fs.closeSync(fd)
+          }
+          out.script = path_
+          lines.push(`Wrote ${path_}`)
+        }
+        if (flag(v, 'apply')) {
+          const a = await s.apply(tables, what, log)
+          out.applied = a
+          lines.push(`Applied ${a.statements} statement(s) to ${r.target}`)
+        }
+        return [out, lines.join('\n')]
+      } finally {
+        await s.close()
+      }
     },
   },
   snapshot: {
