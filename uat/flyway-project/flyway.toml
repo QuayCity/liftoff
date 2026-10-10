@@ -1,0 +1,33 @@
+# A project as the other migration tool would have it: the flyway scenario imports it.
+databaseType = "SqlServer"
+id = "uat-flyway-project"
+name = "shop"
+
+[flyway]
+locations = ["filesystem:sql"]
+cleanDisabled = true
+baselineOnMigrate = true
+validateOnMigrate = true
+
+[flyway.placeholders]
+tableOwner = "dbo"
+
+[environments.development]
+url = "jdbc:sqlserver://localhost:61433;databaseName=fw_development;encrypt=true;trustServerCertificate=true"
+user = "sa"
+password = "${env.LIFTOFF_UAT_PASSWORD}"
+
+[environments.shadow]
+url = "jdbc:sqlserver://localhost:61433;databaseName=fw_shadow;encrypt=true;trustServerCertificate=true"
+user = "sa"
+password = "${env.LIFTOFF_UAT_PASSWORD}"
+
+[environments.test]
+url = "jdbc:sqlserver://localhost:61433;databaseName=fw_test;encrypt=true;trustServerCertificate=true"
+user = "sa"
+password = "${env.LIFTOFF_UAT_PASSWORD}"
+
+[environments.production]
+url = "jdbc:sqlserver://localhost:61433;databaseName=fw_production;encrypt=true;trustServerCertificate=true"
+user = "sa"
+password = "${env.LIFTOFF_UAT_PASSWORD}"

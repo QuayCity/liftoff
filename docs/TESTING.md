@@ -2,6 +2,9 @@
 
 # Trying LiftOff by hand
 
+The full acceptance test plan, with scripts that set up SQL Server and every scenario, is
+[uat/UAT.md](../uat/UAT.md). This page is the short version.
+
 How to set LiftOff up on a fresh machine and try every part yourself: the CLI, the desktop app
 and the VS Code extension. The automated tests are in [CONTRIBUTING.md](../CONTRIBUTING.md).
 

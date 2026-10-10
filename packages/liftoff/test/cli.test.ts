@@ -107,6 +107,18 @@ test('BUG-011: no password at all says where to put one', { skip: !base && 'set 
   assert.match(r.stderr, /no password for 'test'.*LIFTOFF_ENV_TEST_PASSWORD/s)
 })
 
+test("baseline's own --version is not the program's -V", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-bl-'))
+  init(dir, 'bl', 'postgresql')
+  fs.appendFileSync(path.join(dir, 'liftoff.toml'), '\n[environments.down]\nurl = "postgres://postgres:x@localhost:1/none"\nrole = "test"\n')
+  for (const args of [['-e', 'down', 'baseline'], ['-e', 'down', 'baseline', '--version', '3'], ['-e', 'down', '-baselineVersion=3', 'baseline']]) {
+    const r = liftoff(dir, args)
+    assert.equal(r.code, 10, `${args.join(' ')}: ${r.stdout}${r.stderr}`) // it tried to connect
+  }
+  assert.match(liftoff(dir, ['baseline', '--help']).stdout, /--version <VERSION>/)
+  assert.match(liftoff(dir, ['-V']).stdout, /^liftoff \d/)
+})
+
 test('BUG-013: an unreachable server says why', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-down-'))
   init(dir, 'down', 'postgresql')

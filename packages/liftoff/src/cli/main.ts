@@ -168,7 +168,9 @@ const COMMANDS: Record<string, Command> = {
           `  migrations: ${r.migrations}   schemas: ${r.schemas.join(', ')}`,
           ...r.notes.map((n) => `  note: ${n}`),
           ...r.not_converted.map((n) => `  not converted: ${n}`),
-          `Next, per database: liftoff -e <environment> import-flyway-history --table ${r.flyway_table}`,
+          Config.load(ctx.root).project.engine === 'sqlserver'
+            ? 'Next, per database that already ran the scripts: liftoff -e <environment> baseline --version <the latest version it ran>'
+            : `Next, per database: liftoff -e <environment> import-flyway-history --table ${r.flyway_table}`,
         ]
         return [r, text.join('\n')]
       }
@@ -786,7 +788,7 @@ function help(name?: string): string {
       ...(c.positional ? ['', 'Arguments:', `  <${c.positional.name}>  ${c.positional.help}`] : []),
       '',
       'Options:',
-      ...optionLines({ ...c.options, ...GLOBAL }),
+      ...optionLines({ ...c.options, ...GLOBAL, ...c.options }), // a command option wins over a global one of the same name
     ].join('\n')
   }
   return [
@@ -828,7 +830,7 @@ async function main(argv: string[]): Promise<number> {
     const { values, positionals } = parseArgs({ args, options: spec, allowPositionals: true, strict: true })
     const v = values as Values
     json = v['output-type'] === 'json'
-    if (v.version) {
+    if (v.version === true) { // baseline has its own --version (a string)
       process.stdout.write(`liftoff ${VERSION}\n`)
       return 0
     }

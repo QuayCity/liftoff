@@ -31,6 +31,20 @@ test('interpolation and environment-variable overrides', () => {
   assert.equal(env.url, 'y')
 })
 
+test('a ${env.X} password is kept as written, in the user file, never in the keychain', () => {
+  const dir = tmp()
+  init(dir, 'shop', 'sqlserver')
+  const env: Environment = { url: 'sqlserver://h;databaseName=db', user: 'sa', password: '${env.LO_TEST_PW}', role: 'prod', allow_clean: false, placeholders: {} }
+  assert.equal(saveEnvironment(dir, 'live', env, true, true), 'user_file')
+  assert.ok(fs.readFileSync(path.join(dir, USER_FILE), 'utf8').includes('password = "${env.LO_TEST_PW}"'))
+  process.env.LO_TEST_PW = 'from-the-variable'
+  try {
+    assert.equal(Config.load(dir).env('live').password, 'from-the-variable')
+  } finally {
+    delete process.env.LO_TEST_PW
+  }
+})
+
 test('init, load, and the password stays out of the shared file', () => {
   const dir = tmp()
   init(dir, 'shop', 'postgresql')

@@ -42,6 +42,7 @@ test('converts flyway.conf, then flyway.toml', () => {
   assert.deepEqual(r.environments, ['default'])
   assert.ok(!r.not_converted.some((n) => n.includes('placeholders')), JSON.stringify(r.not_converted))
   assert.equal(Config.load(dir).project.placeholders.owner, 'app')
+  assert.deepEqual(Config.load(dir).project.filters, [{ action: 'exclude', object: 'table', pattern: 'schema_version' }], 'the Flyway history table is not compared')
   assert.ok(r.not_converted.some((n) => n.includes('classpath:db/extra')))
   const shared = fs.readFileSync(path.join(dir, PROJECT_FILE), 'utf8')
   assert.ok(shared.includes('postgres://localhost:5432/shop') && !shared.includes('DB_PW'), shared)
@@ -62,6 +63,7 @@ test('converts flyway.conf, then flyway.toml', () => {
   assert.ok(r2.notes.some((n) => n.includes('flyway.conf was also found')), JSON.stringify(r2.notes))
   const cfg = Config.load(dir)
   assert.equal(cfg.project.migrations, 'migrations')
+  assert.deepEqual(cfg.project.filters.map((f) => f.pattern), ['flyway_schema_history'])
   assert.deepEqual(['development', 'shadow', 'production'].map((e) => cfg.env(e).role), ['dev', 'scratch', 'prod'])
 })
 

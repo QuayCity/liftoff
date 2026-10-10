@@ -218,8 +218,11 @@ export function convert(root: string, name: string, useKeychain = keychainEnable
 
   if (write) {
     initWith(root, name, engine, r.migrations, schemas)
-    if (Object.keys(placeholders).length) saveProject(root, { ...Config.load(root).project, placeholders })
+    // Flyway's history table stays in the databases; it is not part of the schema to compare or migrate.
+    const filters = [{ action: 'exclude' as const, object: 'table', pattern: r.flyway_table }]
+    saveProject(root, { ...Config.load(root).project, placeholders, filters })
   }
+  r.notes.push(`${r.flyway_table} is left out of comparisons (a filter in liftoff.toml), so no migration creates or drops it`)
   if (r.flyway_table !== DEFAULT_TABLE) r.notes.push(`Flyway's history table is ${r.flyway_table}; pass it to the history import`)
 
   for (const [envName, fields] of p.envs) {

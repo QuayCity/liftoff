@@ -146,7 +146,7 @@ export class Config {
   pickRole(name: string | undefined, role: Role): [string, Environment] {
     if (name !== undefined) return [name, this.env(name)]
     const found = [...this.environments].find(([, e]) => e.role === role)
-    if (!found) throw configError(`no environment with role '${role}'; add one or name it explicitly`)
+    if (!found) throw configError(`no environment with role '${role}'; add one or name it explicitly${role === 'scratch' ? ' (`liftoff create-scratch` makes one next to the dev database)' : ''}`)
     return found
   }
 
@@ -299,7 +299,10 @@ export function saveEnvironment(root: string, name: string, env: Environment, sh
   if (!/^[A-Za-z0-9_-]+$/.test(name)) throw configError('environment names use letters, digits, - and _ only')
   let password = env.password
   let store: PasswordStore = 'none'
-  if (password !== undefined) {
+  // `${env.X}` is a reference, not a secret: it goes to a file, where it is expanded (the keychain would keep the text as is).
+  const reference = password?.includes('${env.') ?? false
+  if (reference) store = 'user_file'
+  if (password !== undefined && !reference) {
     if (useKeychain && keychainSet(root, name, password)) {
       password = undefined
       store = 'keychain'
@@ -513,14 +516,12 @@ export function saveSettings(root: string, change: SettingsChange, useKeychain =
     let password = e.password === '' ? undefined : e.password
     // A password kept in a file has to be written again (the entry is replaced); one in the keychain stays there.
     password ??= old?.password
-    // `${env.X}` passwords stay in the file, where they are expanded; the keychain would keep the text as is.
-    const keychain = useKeychain && !(password ?? '').includes('${')
     saveEnvironment(
       root,
       e.name,
       { url, user: e.user ?? undefined, password, role: e.role, allow_clean: e.allow_clean, placeholders: e.placeholders ?? old?.placeholders ?? {} },
       shared,
-      keychain,
+      useKeychain,
     )
     // The user file wins over the project file, so a stale copy in the other file must go.
     const other = path.join(root, shared ? USER_FILE : PROJECT_FILE)
