@@ -14,9 +14,9 @@
     </symbol>
     <symbol id="database" viewBox="0 0 20 22">
       <path d="M2 5 L2 17 A8 3 0 0 0 18 17 L18 5" fill="#F4EBD9" stroke="#1B1F3B" stroke-width="1.8" stroke-linejoin="round"/>
-      <path d="M2 9.4 A8 3 0 0 0 18 9.4" fill="none" stroke="#D94B3D" stroke-width="1.8"/>
-      <path d="M2 13.4 A8 3 0 0 0 18 13.4" fill="none" stroke="#D94B3D" stroke-width="1.8"/>
-      <ellipse cx="10" cy="5" rx="8" ry="3" fill="#D94B3D" stroke="#1B1F3B" stroke-width="1.8"/>
+      <path d="M2 9.4 A8 3 0 0 0 18 9.4" fill="none" stroke="#4FA3C7" stroke-width="1.8"/>
+      <path d="M2 13.4 A8 3 0 0 0 18 13.4" fill="none" stroke="#4FA3C7" stroke-width="1.8"/>
+      <ellipse cx="10" cy="5" rx="8" ry="3" fill="#4FA3C7" stroke="#1B1F3B" stroke-width="1.8"/>
     </symbol>
   </defs>
   <circle cx="32" cy="32" r="30" fill="#1B1F3B"/>
