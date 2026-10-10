@@ -97,7 +97,7 @@ role = "prod"
 | a change made in dev | `liftoff -e dev migrate`, then add a table in try_dev, then `liftoff diff` | `added public.<table>` |
 | write the migration | `liftoff generate --description "my change"` | `migrations/V0004__my_change.sql` |
 | schema compare | `liftoff compare --source test --target prod` | What test has and prod does not (orders and the view), listed as added |
-| data compare | put different rows in try_test and try_prod, then `liftoff data-compare --source test --target prod` | Counts per table; `--help` shows how to see the rows or write a sync script |
+| data compare | put different rows in try_test and try_prod, then `liftoff data-compare --source test --target prod` | Counts per table; `--help` shows how to see the rows or write a sync script; with `--save-diff rows.json`, later `--from-diff rows.json --rows public.orders` pages without comparing again |
 | pre-deploy check | `liftoff -e prod check` | What would run, and any drift |
 | squash old scripts | `liftoff rebaseline` | One B script replaces them (commit the scripts to git first) |
 | near V9999 | `liftoff rebaseline --restart` | B0001 with a restart marker; new scripts start at V0001 again |
@@ -161,6 +161,8 @@ left. Try:
   environment's menu; right-click a pending script and choose **Run This Script Only**.
 - **Schema Model:** change try_dev, see the objects that differ, pull them into `schema-model/`.
 - **Compare:** pick two sides and compare.
+- **Compare Data…** (in the Compare view's `…` menu): pick two databases with different rows; click
+  a count to page through those rows, then open the sync script or apply it.
 - **Settings:** the gear opens the project settings in an editor tab.
 - **Import a Flyway project:** open a folder with `flyway.toml` and follow the steps.
 - **New project:** open an empty folder; the sidebar offers to create one.

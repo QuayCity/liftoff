@@ -6,6 +6,7 @@ import * as path from 'node:path'
 import * as vscode from 'vscode'
 import { findBinary, LiftoffError, runCli } from './cli'
 import { registerCompare, type CompareView } from './compareView'
+import { registerDataCompare } from './dataCompare'
 import { importFlyway, type ImportAnswers } from './flywayImport'
 import { newProject, type NewProjectAnswers } from './newProject'
 import { registerSchemaModel, type SchemaModelView } from './modelView'
@@ -467,6 +468,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
   await lo.load()
   lo.schemaModel = registerSchemaModel(context, lo)
   lo.compare = registerCompare(context, lo)
+  registerDataCompare(context, lo)
   // Returned for the integration tests.
   return lo
 }

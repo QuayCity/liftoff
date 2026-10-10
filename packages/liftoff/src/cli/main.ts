@@ -578,6 +578,8 @@ const COMMANDS: Record<string, Command> = {
       'no-insert': { type: 'boolean', help: 'Leave out rows only in the source' },
       'no-update': { type: 'boolean', help: 'Leave out rows that differ' },
       'no-delete': { type: 'boolean', help: 'Leave out rows only in the target' },
+      'save-diff': { type: 'string', help: 'Also save the differing keys to this file, for --from-diff', value: 'FILE' },
+      'from-diff': { type: 'string', help: 'Compare nothing: use the differences saved with --save-diff (for --rows, --script, --apply)', value: 'FILE' },
     },
     async run(ctx, v) {
       const cfg = load(ctx)
@@ -591,10 +593,15 @@ const COMMANDS: Record<string, Command> = {
       if (!['only_in_source', 'only_in_target', 'different'].includes(kind)) throw new UsageError(`--kind must be only_in_source, only_in_target or different, not '${kind}'`)
       const tables = v.table as string[] | undefined
       const what = { insert: !flag(v, 'no-insert'), update: !flag(v, 'no-update'), delete: !flag(v, 'no-delete') }
-      const s = await DataSession.open(cfg, compare.parseSide(src), target, tables, log)
+      const from = str(v, 'from-diff')
+      const s = from ? await DataSession.resume(cfg, compare.parseSide(src), target, path.resolve(ctx.root, from)) : await DataSession.open(cfg, compare.parseSide(src), target, tables, log)
       try {
         const r = s.result
         const out: Record<string, unknown> = { ...r }
+        if (str(v, 'save-diff')) {
+          out.diff_file = path.resolve(ctx.root, str(v, 'save-diff')!)
+          s.save(out.diff_file as string)
+        }
         const lines = [
           `${r.target} -> ${r.source} (${r.engine}), ${(r.ms / 1000).toFixed(1)} s`,
           ...r.tables.map((t) =>

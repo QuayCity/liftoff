@@ -76,7 +76,7 @@
       },
       {
         "view": "liftoff.compare",
-        "contents": "Compare the schema of any two: environments, the schema model, what the migrations build, a snapshot, or any database by URL. Then open the script, write a migration, or apply it.\n[Compare\u2026](command:liftoff.compare)\n[Save a Snapshot\u2026](command:liftoff.snapshot)"
+        "contents": "Compare the schema of any two: environments, the schema model, what the migrations build, a snapshot, or any database by URL. Then open the script, write a migration, or apply it.\n[Compare…](command:liftoff.compare)\n[Compare Data…](command:liftoff.dataCompare)\n[Save a Snapshot…](command:liftoff.snapshot)"
       }
     ],
     "commands": [
@@ -225,6 +225,12 @@
         "icon": "$(play)"
       },
       {
+        "command": "liftoff.dataCompare",
+        "title": "Compare Data\u2026",
+        "category": "LiftOff",
+        "icon": "$(table)"
+      },
+      {
         "command": "liftoff.snapshot",
         "title": "Save a Snapshot\u2026",
         "category": "LiftOff",
@@ -307,6 +313,11 @@
           "command": "liftoff.compare.migration",
           "when": "view == liftoff.compare && liftoff.compared",
           "group": "1_act@2"
+        },
+        {
+          "command": "liftoff.dataCompare",
+          "when": "view == liftoff.compare",
+          "group": "2_snapshot@0"
         },
         {
           "command": "liftoff.snapshot",

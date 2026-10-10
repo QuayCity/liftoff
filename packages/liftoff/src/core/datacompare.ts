@@ -13,6 +13,8 @@
 // A fingerprint match is a hash match: the chance that different rows give the same 60-bit sum
 // is about one in 10^18.
 
+import * as fs from 'node:fs'
+import * as path from 'node:path'
 import type { Config, Environment } from './config.ts'
 import { compares } from './config.ts'
 import { open, type Conn } from './db.ts'
@@ -434,7 +436,10 @@ function databaseOf(cfg: Config, side: Side): [string, Environment] {
   throw configError(`data compare needs two databases; ${sideLabel(side)} has no rows`)
 }
 
-/** A data comparison that stays open: its differences can be read page by page and turned into SQL. */
+const DIFF_FORMAT = 'liftoff-data-diff'
+type DiffFile = { format: string; version: number; result: DataComparison; diffs: TableDiff[] }
+
+/** A data comparison that stays open:its differences can be read page by page and turned into SQL. */
 export class DataSession {
   readonly result: DataComparison
   readonly diffs: Map<string, TableDiff>
@@ -450,9 +455,8 @@ export class DataSession {
     this.fks = fks
   }
 
-  /** Connects to both sides and compares every table both have (or only `tables`). Close it when done. */
-  static async open(cfg: Config, source: Side, target: Side, only?: string[], log: Log = quiet): Promise<DataSession> {
-    const started = Date.now()
+  /** Connects to both sides; `then` runs with both open and closes them when it throws. */
+  private static async connect<T>(cfg: Config, source: Side, target: Side, then: (a: Conn, b: Conn) => Promise<T>): Promise<T> {
     if (JSON.stringify(source) === JSON.stringify(target)) throw configError('the source and the target are the same')
     const [an, ae] = databaseOf(cfg, source)
     const [bn, be] = databaseOf(cfg, target)
@@ -461,6 +465,18 @@ export class DataSession {
     try {
       b = await open(bn, be)
       if (a.engine !== b.engine) throw configError(`${sideLabel(source)} is ${a.engine} and ${sideLabel(target)} is ${b.engine}; data compare needs the same engine on both sides`)
+      return await then(a, b)
+    } catch (e) {
+      await a.close()
+      await b?.close()
+      throw e
+    }
+  }
+
+  /** Connects to both sides and compares every table both have (or only `tables`). Close it when done. */
+  static open(cfg: Config, source: Side, target: Side, only?: string[], log: Log = quiet): Promise<DataSession> {
+    const started = Date.now()
+    return DataSession.connect(cfg, source, target, async (a, b) => {
       const { tables, skipped } = await plan(cfg, a, b, only)
       const results: TableResult[] = [...skipped]
       const diffs = new Map<string, TableDiff>()
@@ -474,11 +490,35 @@ export class DataSession {
       const fks = await dialectOf(a).foreignKeys(a, cfg.project.schemas)
       const r: DataComparison = { source: sideLabel(source), target: sideLabel(target), engine: a.engine, tables: results, ms: Date.now() - started }
       return new DataSession(a, b, r, diffs, fks)
+    })
+  }
+
+  /**
+   * Writes the comparison and the differing keys to a file, so the rows can be paged later without
+   * comparing again (`resume`). Only side labels go in, never a URL or a password.
+   */
+  save(file: string): void {
+    const doc: DiffFile = { format: DIFF_FORMAT, version: 1, result: this.result, diffs: [...this.diffs.values()] }
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify(doc))
+  }
+
+  /** Opens a comparison saved with `save`: connects to both sides again, compares nothing. */
+  static resume(cfg: Config, source: Side, target: Side, file: string): Promise<DataSession> {
+    let doc: DiffFile
+    try {
+      doc = JSON.parse(fs.readFileSync(file, 'utf8'))
     } catch (e) {
-      await a.close()
-      await b?.close()
-      throw e
+      throw configError(`cannot read the saved data comparison ${file}: ${e instanceof Error ? e.message : String(e)}`)
     }
+    if (doc.format !== DIFF_FORMAT) throw configError(`${file} is not a saved data comparison`)
+    if (doc.result.source !== sideLabel(source) || doc.result.target !== sideLabel(target)) {
+      throw configError(`${file} compares ${doc.result.source} with ${doc.result.target}, not ${sideLabel(source)} with ${sideLabel(target)}`)
+    }
+    return DataSession.connect(cfg, source, target, async (a, b) => {
+      const fks = await dialectOf(a).foreignKeys(a, cfg.project.schemas)
+      return new DataSession(a, b, doc.result, new Map(doc.diffs.map((d) => [tableName(d.table), d])), fks)
+    })
   }
 
   private diff(table: string): TableDiff {

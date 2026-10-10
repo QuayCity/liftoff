@@ -102,22 +102,23 @@ export class CompareView implements vscode.TreeDataProvider<Item>, vscode.TextDo
     return this.run()
   }
 
-  private async pickSide(title: string, not?: string): Promise<string | undefined> {
+  /** Asks for a side; `databasesOnly` leaves out the model, the migrations and snapshots (data compare). */
+  async pickSide(title: string, not?: string, databasesOnly = false): Promise<string | undefined> {
     const envs = this.lo.project?.environments ?? []
-    const hasScratch = envs.some((e) => e.role === 'scratch')
+    const hasScratch = !databasesOnly && envs.some((e) => e.role === 'scratch')
     type Choice = vscode.QuickPickItem & { side?: string; ask?: 'snapshot' | 'url' }
     const items: Choice[] = [
       { label: 'Environments', kind: vscode.QuickPickItemKind.Separator },
       ...envs.map((e) => ({ label: e.name, description: `${e.role} · ${e.engine}`, side: e.name })),
-      { label: 'This project', kind: vscode.QuickPickItemKind.Separator },
       ...(hasScratch
         ? [
+            { label: 'This project', kind: vscode.QuickPickItemKind.Separator },
             { label: 'The schema model', description: 'built on the scratch database', side: 'model' },
             { label: 'What the migrations build', description: 'on the scratch database', side: 'migrations' },
           ]
         : []),
       { label: 'Elsewhere', kind: vscode.QuickPickItemKind.Separator },
-      { label: 'A snapshot file…', description: 'saved earlier with LiftOff: Save Snapshot', ask: 'snapshot' as const },
+      ...(databasesOnly ? [] : [{ label: 'A snapshot file…', description: 'saved earlier with LiftOff: Save Snapshot', ask: 'snapshot' as const }]),
       { label: 'A database URL…', description: 'any database, also outside this project', ask: 'url' as const },
     ].filter((i) => !('side' in i) || i.side !== not)
     const pick = await vscode.window.showQuickPick(items, { title, ignoreFocusOut: true })

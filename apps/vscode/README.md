@@ -36,6 +36,9 @@ Your database migrations, next to your code.
   environments, the schema model, what the migrations build, a snapshot saved earlier, or any
   database by URL. Tick the differences you want, see each one in the diff editor, then open the
   sync script, write it as a migration, or apply it to the target.
+- **Compare data.** **LiftOff: Compare Data…** compares the rows of two databases, fast on big
+  tables, and shows the rows that differ in a grid, a page at a time. Then open the INSERT /
+  UPDATE / DELETE script or apply it to the target.
 - **PostgreSQL and SQL Server.**
 
 The extension comes with the `liftoff` program and runs it for you; nothing is sent anywhere but

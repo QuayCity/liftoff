@@ -1,4 +1,4 @@
-/* The settings page, in the colours of the user's VS Code theme. */
+/* The settings and data compare pages, in the colours of the user's VS Code theme. */
 body {
   color: var(--vscode-foreground);
   background: var(--vscode-editor-background);
@@ -70,3 +70,17 @@ footer {
 .status.error { color: var(--vscode-errorForeground); }
 .status.warn { color: var(--vscode-editorWarning-foreground); }
 .status.ok { color: var(--vscode-testing-iconPassed, var(--vscode-foreground)); }
+
+/* Data compare */
+main.wide { max-width: none; }
+.actions .muted { align-self: center; }
+.scroll { overflow-x: auto; }
+table.grid { border-collapse: collapse; margin-top: 12px; }
+.grid th, .grid td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); white-space: pre; max-width: 32em; overflow: hidden; text-overflow: ellipsis; }
+.grid td.num { text-align: right; }
+.grid tr.target td { border-bottom-width: 2px; }
+.grid td.changed { background: var(--vscode-diffEditor-insertedTextBackground); }
+.grid tr.target td.changed { background: var(--vscode-diffEditor-removedTextBackground); }
+.null { color: var(--vscode-descriptionForeground); font-style: italic; }
+button.link { color: var(--vscode-textLink-foreground); background: transparent; padding: 0; border: 0; text-decoration: underline; }
+button.link:hover:not(:disabled) { background: transparent; color: var(--vscode-textLink-activeForeground); }

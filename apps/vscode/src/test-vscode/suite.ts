@@ -7,6 +7,7 @@ import type { Liftoff } from '../extension'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import type { CompareResult } from '../compareView'
+import type { DataComparePanel } from '../dataCompare'
 import type { ConvertReport } from '../flywayImport'
 import type { MigrateResult, ModelChange } from '../model'
 import type { SettingsPanel } from '../settingsPanel'
@@ -139,6 +140,17 @@ export async function run(): Promise<void> {
   assert.ok(snap && fs.existsSync(snap))
   const again = await vscode.commands.executeCommand<CompareResult>('liftoff.compare', { source: `snapshot:${snap}`, target: 'dev' })
   assert.equal(again?.changes.length, 0, 'a snapshot matches what it was taken from')
+
+  // Compare Data: orders has a key and the same rows; notes and tags have no key. Pages and the
+  // script come from the saved keys.
+  const data = await vscode.commands.executeCommand<DataComparePanel>('liftoff.dataCompare', { source: 'test', target: 'dev' })
+  assert.deepEqual(
+    data?.result?.tables.map((t) => [t.table, t.skipped ? 'skipped' : t.only_in_source + t.only_in_target + t.different]),
+    [['public.notes', 'skipped'], ['public.orders', 0], ['public.tags', 'skipped']],
+  )
+  assert.deepEqual(await data!.rows('public.orders', 'different'), { columns: ['id'], key: ['id'], total: 0, rows: [] })
+  assert.match((await data!.script()) ?? '', /Makes the rows of dev match test/)
+  data!.panel.dispose()
 
   // Rebaseline into an archive folder (the workspace is not a git repository, so not deleted).
   const rb = await vscode.commands.executeCommand<{ baseline: string; removed: string[] }>('liftoff.rebaseline', { description: 'start here', archive: 'old' })
