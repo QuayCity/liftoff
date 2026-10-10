@@ -200,7 +200,7 @@ export class CompareView implements vscode.TreeDataProvider<Item>, vscode.TextDo
       const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Applying to ${this.result!.target}` }, () =>
         this.lo.run<CompareResult>(['compare', ...this.sideArgs(), ...this.chosenArgs(), '--apply', ...(env?.role === 'prod' ? ['--confirm-production'] : [])]),
       )
-      void vscode.window.showInformationMessage(`Applied ${this.checked.size} change(s) to ${r.applied?.target ?? this.result!.target}.`)
+      void vscode.window.showInformationMessage(`Applied ${this.checked.size} change${this.checked.size === 1 ? '' : 's'} to ${r.applied?.target ?? this.result!.target}.`)
       await this.run()
       return r
     } catch (e) {

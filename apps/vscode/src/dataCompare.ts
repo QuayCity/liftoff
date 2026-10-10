@@ -149,7 +149,7 @@ export class DataComparePanel {
       const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Applying to ${this.result.target}` }, () =>
         this.lo.run<DataCompareResult>([...this.sideArgs(), '--from-diff', this.diffFile, '--apply', ...(env?.role === 'prod' ? ['--confirm-production'] : [])]),
       )
-      void vscode.window.showInformationMessage(`Applied ${r.applied?.statements ?? 0} statement(s) to ${r.target}.`)
+      void vscode.window.showInformationMessage(`Applied ${r.applied?.statements ?? 0} statement${r.applied?.statements === 1 ? '' : 's'} to ${r.target}.`)
       await this.compare()
       return r
     } catch (e) {
