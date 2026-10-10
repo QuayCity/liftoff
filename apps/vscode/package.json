@@ -1,7 +1,7 @@
 {
   "name": "liftoff",
-  "displayName": "LiftOff",
-  "description": "Change your dev database or the schema-model files, pull the change into git, and let the pipeline write and run the migration.",
+  "displayName": "LiftOff: Database Migrations",
+  "description": "Plain-SQL migrations, written from your dev database and run from VS Code.",
   "version": "0.1.0",
   "publisher": "liftoff",
   "license": "MIT",
@@ -23,8 +23,17 @@
   "keywords": [
     "database",
     "migrations",
+    "migration",
+    "sql",
     "postgresql",
-    "sql server"
+    "postgres",
+    "sql server",
+    "mssql",
+    "schema",
+    "schema compare",
+    "data compare",
+    "pgbouncer",
+    "devops"
   ],
   "main": "./out/extension.js",
   "activationEvents": [

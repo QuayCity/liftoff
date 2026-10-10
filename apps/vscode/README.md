@@ -2,7 +2,7 @@
 
 # LiftOff for VS Code
 
-Your database migrations, next to your code.
+Plain-SQL database migrations, written from your dev database, next to your code.
 
 - **Environments sidebar.** Every environment in `liftoff.toml`, with each migration script and
   whether it ran there: pending, applied, failed, or edited since it ran. Click a script to open it.
@@ -24,10 +24,11 @@ Your database migrations, next to your code.
   committed to it, so the script is reviewed with the change (or, if you prefer, the pull request
   fails until someone adds one). Merging deploys, stage by stage. Small team without a pipeline?
   **Generate Migration from Schema Model** does the same step on your machine.
-- **Import a Flyway project.** Open a folder with `flyway.toml` or `flyway.conf` and the sidebar
-  offers the import: a few steps to choose the environments and their roles, a summary of anything
-  that does not carry over, then (on PostgreSQL) copying Flyway's history so LiftOff knows what
-  already ran. Your Flyway files stay as they are.
+- **Bring an existing project.** Open a folder that another migration tool already manages, with
+  `V1__name.sql` scripts and that tool's config file, and the sidebar offers the import: a few
+  steps to choose the environments and their roles, a summary of anything that does not carry
+  over, then (on PostgreSQL) copying the old history table so LiftOff knows what already ran. The
+  old files stay as they are.
 - **Project settings in an editor tab.** **LiftOff: Project Settings** (the gear in the sidebar)
   edits everything: the project, comparison filters, placeholders and every environment, including
   whether it is shared through git or stays on your computer. Passwords go to your operating

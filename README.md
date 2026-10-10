@@ -7,34 +7,82 @@
 
 # LiftOff
 
-Database migrations for teams that work the way teams actually work: change your dev database
-(or the schema-model files), pull the change into git from VS Code, and let the pipeline write the
-migration script into the pull request and deploy it, stage by stage.
+**Plain-SQL database migrations, written from your dev database.**
 
-Free and open source (MIT). PostgreSQL and SQL Server.
+Change your dev database the way you always do. LiftOff writes the migration script, shows exactly
+what it will change, and runs it on every environment. One file to install, nothing else to set
+up. PostgreSQL and SQL Server. Free and open source (MIT).
+
+**[Get started →](#quick-start)**
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/changes-dark.png">
+  <img src="docs/images/changes.png" alt="The desktop app comparing a dev database with the migration scripts: three tables and a view differ; the dropped table is unticked and marked data loss; the orders table is shown side by side with its new column and index.">
+</picture>
+
+## Why LiftOff
+
+- **Writing every migration by hand is slow and easy to get wrong.** A column renamed in dev, an
+  index added in a hurry, a view changed: someone has to remember it all and write it down as
+  SQL. LiftOff compares and writes the script; you review it.
+- **Real PostgreSQL setups need care.** A script with `CREATE INDEX CONCURRENTLY` cannot run in a
+  transaction, and a migration lock has to work behind PgBouncer in transaction pooling and on
+  Aurora Limitless. LiftOff handles both.
+- **Setup should be one step.** One program, on a laptop or a CI runner, whatever language the
+  rest of your stack is written in.
+
+## How it works
+
+1. **Change your dev database** the way you always do: a GUI, `psql`, an ORM.
+2. **`liftoff generate --description "add customers"`** compares it with what your migrations
+   build and writes the next script, `V0004__add_customers.sql`, with an undo script if you ask.
+   Review it like any other code.
+3. **`liftoff -e prod check`, then `liftoff -e prod migrate`.** Check shows drift, what the
+   pending scripts change and the exact SQL. Or let the pipeline do both (`liftoff ci`).
 
 ## What it does
 
-- **Versioned migrations.** `V1__orders.sql`, `U1__orders.sql` (undo), `R__views.sql` (repeatable),
-  `B5__baseline.sql`. A history table per database, locking so two runs never collide, checks that
-  scripts were not edited after they ran. A hotfix? `migrate --only 5` runs one script and nothing
-  else.
+**What it fixes**
+
+- **One file, nothing to set up.** The `liftoff` program carries what it needs: no runtime or
+  database drivers to install, on your machine or a CI runner. The desktop app and the VS Code
+  extension run the same program.
+- **Safe on real PostgreSQL.** Scripts that cannot run in a transaction (`CREATE INDEX
+  CONCURRENTLY`, `VACUUM`) run outside one, and waiting for the lock never holds a transaction open,
+  so they do not hang. Behind PgBouncer, RDS Proxy or on Aurora Limitless, `lock = "table"` in
+  `liftoff.toml` uses a lease row instead of an advisory lock.
+- **The migration is written for you.** From the dev database or the schema-model files, with
+  views, functions, triggers and the rest. `--dry-run` everywhere: see the SQL before it runs.
+- **Undo is included.** `generate --undo` writes the undo script; `liftoff -e test undo` runs it.
+- **Years of scripts, one clean start.** `liftoff rebaseline` replaces old scripts with one
+  baseline script, checked to build the same schema; `liftoff squash --up-to 120` folds in part
+  of them.
+- **Placeholders per environment.** `${owner}` in a script, a value per environment in
+  `liftoff.toml`, secrets from environment variables.
+- **Reports only when you ask.** `check --report report.html` writes one; nothing else lands on
+  disk.
+
+**And everything you expect**
+
+- **Versioned migrations.** `V0001__orders.sql`, `U0001__orders.sql` (undo), `R__views.sql`
+  (repeatable), `B0001__baseline.sql`. A history table per database, checks that scripts were not
+  edited after they ran. A hotfix? `migrate --only 5` runs one script and nothing else.
 - **Schema model.** One file per database object in `schema-model/`, so git shows the history of
-  every table and view. Pull changes into it from a dev database, or edit it by hand.
-- **Migrations written for you.** `liftoff generate` compares the dev database (or the schema
-  model) with what your migrations build and writes the next script, with an undo script if you
-  want one.
-- **Checks before a deploy.** Drift (someone changed production by hand), what the pending scripts
-  change, the exact SQL that will run, as text, JSON or an HTML report.
+  every table and view.
+- **Compare.** The schema of any two: environments, the schema model, what the migrations build, a
+  saved snapshot, any database by URL. The rows of two databases too, fast on big tables, with the
+  INSERT / UPDATE / DELETE script that makes them match.
 - **Pipelines.** `liftoff ci` writes a GitHub Actions workflow: pull requests get their migration
-  script written (or required), merges deploy through your environments with approvals.
-- **Three ways in.** The `liftoff` command line (one file, no runtime to install), a desktop app,
-  and a VS Code extension.
-- **Coming from Flyway?** LiftOff reads Flyway-style script names and checksums, accepts Flyway's
-  `-key=value` options, converts `flyway.toml` / `flyway.conf`, and imports an existing
-  `flyway_schema_history` table once.
-- **Offline.** The CLI never calls the internet; your CI runners do not need to reach anything but
-  your databases.
+  script written (or required) and numbered after main; merges deploy through your environments.
+- **Three ways in.** The command line (every command also answers in JSON), a desktop app, and a
+  VS Code extension.
+- **Offline.** The program never calls the internet. Your CI runners only need to reach your
+  databases.
+
+## Price
+
+Free. MIT licence, no editions, no account, no licence key, no seat count. Everything on this page
+is included.
 
 ## Quick start
 
@@ -76,6 +124,31 @@ main branch; when the pipeline writes the script, it renumbers it (`liftoff renu
 build the same schema) and takes the old ones out of the folder; git still has them. From
 `V9990` on, migrate and the apps say it is time for `liftoff rebaseline --restart`: the baseline
 becomes `B0001` again, and each existing database goes through the same check on its next run.
+
+## Questions
+
+**I already use Flyway. Can I bring my project?** Yes. `liftoff init --from-flyway` converts
+`flyway.toml` / `flyway.conf` (the originals stay), the scripts keep their names and checksums,
+Flyway-style `-key=value` options are accepted, and `import-flyway-history` copies an existing
+`flyway_schema_history` table once (PostgreSQL; on SQL Server, baseline instead).
+
+**My database was never under a migration tool.** `liftoff -e prod adopt`, as above.
+
+**What does generating or comparing need?** A scratch database: an empty database on any server
+you have, which LiftOff rebuilds from your scripts to compare against. `liftoff create-scratch`
+makes one next to your dev database.
+
+**Does it send anything anywhere?** No. No telemetry, no sign-in, no update checks. Passwords go to
+your operating system's keychain or come from environment variables, never into `liftoff.toml`.
+
+**Is it ready for production?** It is new (version 0.1). The tests run against real PostgreSQL,
+PgBouncer and SQL Server on every change. Try it on a test environment first, and
+[open an issue](../../issues) for anything that surprises you.
+
+## Get started
+
+Download `liftoff` for your platform from [Releases](../../releases), or the VS Code
+extension (`liftoff-vscode-<platform>.vsix`, the program included) from the same page, then follow the [quick start](#quick-start).
 
 ## The repository
 
