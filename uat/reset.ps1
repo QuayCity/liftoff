@@ -2,11 +2,12 @@
 # its project folder emptied and filled. Run it before each scenario, and again to start over.
 #
 #   .\uat\reset.ps1 all
-#   .\uat\reset.ps1 greenfield      (or changes, deploy, model, adopt, flyway, compare, data, branches)
+#   .\uat\reset.ps1 greenfield      (or changes, deploy, model, adopt, flyway, compare, data, branches,
+#                                    desktop and vscode: the apps' own empty start for § 12 and § 13)
 #
 # Databases are <prefix>_<name> on the UAT container; folders are under $UatRoot (~\liftoff-uat).
 
-param([Parameter(Mandatory)][ValidateSet('all', 'greenfield', 'changes', 'deploy', 'model', 'adopt', 'flyway', 'compare', 'data', 'branches')][string]$Scenario)
+param([Parameter(Mandatory)][ValidateSet('all', 'greenfield', 'changes', 'deploy', 'model', 'adopt', 'flyway', 'compare', 'data', 'branches', 'desktop', 'vscode')][string]$Scenario)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'env.ps1')
 
@@ -139,6 +140,17 @@ $scenarios = [ordered]@{
     "Shop project in $dir at V0003, git branch main with one commit"
   }
 }
+
+# The apps' own start (§ 12 desktop, § 13 VS Code): empty databases and an empty git repository.
+function New-AppStart([string]$Name, [string]$Prefix, [string[]]$Databases) {
+  Reset-Databases $Prefix $Databases
+  $dir = Reset-Folder $Name
+  git -C $dir init -q -b main
+  "Empty git repository $dir; empty databases $(($Databases | ForEach-Object { "${Prefix}_$_" }) -join ', ')"
+}
+# The desktop app makes its scratch database itself; VS Code cannot, so it gets one.
+$scenarios.desktop = { New-AppStart 'desktop' 'dk' 'dev', 'test', 'prod' }
+$scenarios.vscode = { New-AppStart 'vscode' 'vs' 'dev', 'scratch', 'test', 'prod' }
 
 $todo = if ($Scenario -eq 'all') { $scenarios.Keys } else { @($Scenario) }
 New-Item -ItemType Directory -Force $UatRoot | Out-Null

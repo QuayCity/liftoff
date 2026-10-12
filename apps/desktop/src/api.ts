@@ -9,6 +9,8 @@ export type Filter = { action: 'include' | 'exclude'; object: string; pattern: s
 export type LockMode = 'advisory' | 'table'
 export type Engine = 'postgresql' | 'sqlserver'
 export const engineName = (engine: string) => (engine === 'sqlserver' ? 'SQL Server' : 'PostgreSQL')
+/** An example connection URL for the project's engine, for placeholders and help. */
+export const urlExample = (engine: string) => (engine === 'sqlserver' ? 'sqlserver://localhost:1433;databaseName=shop;encrypt=true;trustServerCertificate=true' : 'postgres://localhost:5432/shop')
 /** The engine a connection URL points at. */
 export const engineOfUrl = (url: string): Engine => (/^(jdbc:)?sqlserver:\/\//i.test(url.trim()) ? 'sqlserver' : 'postgresql')
 export type ProjectSettings = { name: string; engine: string; migrations: string; schemas: string[]; history_table: string; filters: Filter[]; lock: LockMode }

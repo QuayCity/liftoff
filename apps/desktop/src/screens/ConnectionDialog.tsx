@@ -1,6 +1,6 @@
 // S03 connection dialog: add or edit an environment, test before saving.
 import { useState } from 'react'
-import { api, engineName, engineOfUrl, errorText, type EnvView, type Project, type Role, type ServerInfo } from '../api'
+import { api, engineName, engineOfUrl, errorText, urlExample, type EnvView, type Project, type Role, type ServerInfo } from '../api'
 import { Button, Checkbox, Field, Input, PasswordInput, RadioGroup, Select } from '../ui/controls'
 import { InlineAlert } from '../ui/display'
 import { Dialog } from '../ui/overlays'
@@ -80,8 +80,8 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
           <Field label="Name" error={nameError || undefined}>{(a) => <Input {...a} value={name} disabled={!!editing} onChange={(e) => setName(e.target.value)} placeholder="staging" />}</Field>
           <Field label="Role">{(a) => <Select {...a} value={role} onChange={(e) => setRole(e.target.value as Role)}>{roles.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}</Select>}</Field>
         </div>
-        <Field label="Connection URL" error={urlError || undefined} help="postgres://host:5432/database or sqlserver://host:1433;databaseName=database;encrypt=true. Use ${env.NAME} to read a value from an environment variable.">
-          {(a) => <Input {...a} mono value={url} onChange={(e) => setUrl(e.target.value)} placeholder="postgres://localhost:5432/shop" spellCheck={false} />}
+        <Field label="Connection URL" error={urlError || undefined} help={`${engineName(project.engine)}, e.g. ${urlExample(project.engine)}. Use \${env.NAME} to read a value from an environment variable.`}>
+          {(a) => <Input {...a} mono value={url} onChange={(e) => setUrl(e.target.value)} placeholder={urlExample(project.engine)} spellCheck={false} />}
         </Field>
         <div className="grid grid-cols-2 gap-4">
           <Field label="User">{(a) => <Input {...a} value={user} onChange={(e) => setUser(e.target.value)} autoComplete="off" />}</Field>

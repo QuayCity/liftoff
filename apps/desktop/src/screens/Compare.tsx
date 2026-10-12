@@ -3,7 +3,7 @@
 // next migration, or apply them to the target.
 import { ArrowLeftRight, Camera, CheckCircle2, GitCompareArrows } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { api, errorText, type Change, type CompareResult, type Generated, type Project } from '../api'
+import { api, errorText, urlExample, type Change, type CompareResult, type Generated, type Project } from '../api'
 import { Button, Checkbox, Field, IconButton, Input, Select } from '../ui/controls'
 import { ChangeList, LogConsole, type LogLine } from '../ui/data'
 import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
@@ -286,7 +286,7 @@ function SidePicker({ label, help, value, onChange, project, hasScratch, databas
         )}
       </Field>
       {value.kind === 'url' && (
-        <Input mono aria-label={`${label} database URL`} placeholder="postgres://user@host:5432/db" value={value.url} onChange={(e) => onChange({ kind: 'url', url: e.target.value })} />
+        <Input mono aria-label={`${label} database URL`} placeholder={urlExample(project.engine)} value={value.url} onChange={(e) => onChange({ kind: 'url', url: e.target.value })} />
       )}
       {value.kind === 'snapshot' && <Button size="sm" variant="ghost" onClick={() => void choose('snapshot')}>Choose another snapshot…</Button>}
     </div>

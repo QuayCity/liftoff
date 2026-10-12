@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, engineName, inDesktop, type Project } from './api'
+import { api, engineName, errorText, inDesktop, type Project } from './api'
 import { Compare } from './screens/Compare'
 import { Changes } from './screens/Changes'
 import { Environments } from './screens/Environments'
@@ -8,6 +8,7 @@ import { Settings } from './screens/Settings'
 import { Scripts } from './screens/Scripts'
 import { Commit } from './screens/Commit'
 import { Pipelines } from './screens/Pipelines'
+import { InlineAlert } from './ui/display'
 import { StatusBar, TitleBar, workspaces, type Workspace } from './ui/shell'
 
 const params = new URLSearchParams(location.search)
@@ -46,6 +47,24 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
     }
   }, [settingsDirty, project.root])
 
+  // liftoff.toml edited elsewhere (an editor, git pull): read the project again when the window
+  // gets focus back. Not while Settings has unsaved edits, which would be overwritten.
+  const [reloadError, setReloadError] = useState<string | null>(null)
+  useEffect(() => {
+    const reload = () => {
+      if (settingsDirty) return
+      api.projectOpen(project.root).then(
+        (p) => {
+          setReloadError(null)
+          if (JSON.stringify(p) !== JSON.stringify(project)) onProject(p)
+        },
+        (e) => setReloadError(errorText(e)),
+      )
+    }
+    window.addEventListener('focus', reload)
+    return () => window.removeEventListener('focus', reload)
+  }, [project, onProject, settingsDirty])
+
   // Ctrl/Cmd + 1..5 switches workspace.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -71,6 +90,7 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
       />
       <main className="min-h-0 flex-1 overflow-auto">
         <h1 className="sr-only">{`${view}: ${project.name}`}</h1>
+        {reloadError && <div className="p-4 pb-0"><InlineAlert tone="danger" title="Could not read the project files again">{reloadError} The screens show the project as it was; fix the file and come back to this window.</InlineAlert></div>}
         {view === 'Environments' && <Environments project={project} onProject={onProject} />}
         {view === 'Changes' && <Changes project={project} onProject={onProject} onEnvironments={() => setView('Environments')} />}
         {view === 'Settings' && <Settings project={project} onProject={onProject} onDirty={setSettingsDirty} />}

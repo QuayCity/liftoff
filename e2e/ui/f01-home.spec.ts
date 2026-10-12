@@ -34,6 +34,18 @@ test.describe('F01 Home and projects', () => {
     await expectNoA11yViolations(page, 'New project dialog')
   })
 
+  test('F01-H3 a new SQL Server project suggests SQL Server connection URLs', async ({ page }) => {
+    await page.getByRole('button', { name: 'New project…' }).click()
+    const dialog = page.getByRole('dialog', { name: 'New project' })
+    await dialog.getByRole('button', { name: 'Choose…' }).click()
+    await dialog.getByLabel('Project name').fill('mssql-shop')
+    await dialog.getByLabel('Database engine').selectOption('sqlserver')
+    await dialog.getByRole('button', { name: 'Create project' }).click()
+    await page.getByRole('button', { name: 'Add environment' }).first().click()
+    const url = page.getByRole('dialog', { name: 'Add environment' }).getByLabel('Connection URL')
+    await expect(url).toHaveAttribute('placeholder', /^sqlserver:\/\//)
+  })
+
   test('F01-E4 keyboard only: open New project, Esc closes and focus returns', async ({ page }) => {
     const trigger = page.getByRole('button', { name: 'New project…' })
     await trigger.focus()

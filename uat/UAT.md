@@ -100,8 +100,8 @@ Mark the **Result** column as ✅ (pass), ❌ (fail) or ⚠️ (works, but somet
 | 9 | Data compare | `data` | row differences, fast; browse, script and apply them |
 | 10 | Branches, rebaseline, pipelines | `branches` | numbering across branches, squash and rebaseline, the generated CI workflow |
 | 11 | Settings, secrets, connections | `greenfield` | where passwords go, `${env.X}`, clear connection errors |
-| 12 | Desktop app | per step | the same flows in the desktop app |
-| 13 | VS Code extension | per step | the same flows in VS Code |
+| 12 | Desktop app | `desktop` (+ adopt, flyway, compare, data) | stands alone: a new project start to finish in the app, then existing databases, Flyway, compare and data compare |
+| 13 | VS Code extension | `vscode` (+ adopt, flyway, compare, data) | stands alone: the same in VS Code |
 | 14 | Fixed while preparing this plan | none | regression checks for bugs found on 2026-10-10 |
 | 15 | Later: PostgreSQL | none | what to add when testing PostgreSQL |
 
@@ -565,107 +565,266 @@ Use the greenfield project after § 2 (or `.\uat\reset.ps1 greenfield` and steps
 
 ## 12. Desktop app
 
-In a window with env.ps1 loaded:
+This section stands on its own. It needs nothing from the CLI scenarios: each part starts with
+its own reset, and every value to type is given here.
+
+### Start the app
+
+Do this once per test session, in PowerShell from the repository:
 
 ```powershell
+.\uat\setup.ps1 -Desktop -NoBuild    # once: installs the desktop app's packages
+. .\uat\env.ps1
 cd apps\desktop; npm start
 ```
 
-Reset the scenario named in each block first. Open its folder with **Open folder…** from
-`$UatRoot`.
+Keep a second PowerShell window open with `. .\uat\env.ps1` loaded: you change the databases
+from there with `uatsql`.
 
-### 12a. Start page and new project (`greenfield`)
+Values used below (61433 is the UAT port; use yours if you changed it):
 
-| # | do | expect | result |
-| --- | --- | --- | --- |
-| 12.1 | start the app | the start page, with the logo; Recent is empty or lists earlier folders | ☐ |
-| 12.2 | **New project…** → SQL Server → folder `$UatRoot\greenfield` → **Create project** | the project opens on Environments | ☐ |
-| 12.3 | **Add environment** → name dev, role dev, URL from `greenfield-environments.toml`, user sa, the password → **Test connection** → **Save** | `Connected`; dev is listed. The password is not in `liftoff.toml` | ☐ |
-| 12.4 | add test and prod the same way; for one of them type `${env.LIFTOFF_UAT_PASSWORD}` as the password | it is kept as written in the file and works | ☐ |
-| 12.5 | **Try the sample** (from the start page, into a new empty folder, SQL Server) | the sample opens with its 5 scripts | ☐ |
+| field | value |
+| --- | --- |
+| Connection URL | `sqlserver://localhost:61433;databaseName=<database>;encrypt=true;trustServerCertificate=true` |
+| User | `sa` |
+| Password | `Liftoff!Uat2026`, or `${env.LIFTOFF_UAT_PASSWORD}` where a step says so |
 
-### 12b. Changes and scripts (`changes`)
+### 12A. A new project, start to finish
 
-| # | do | expect | result |
-| --- | --- | --- | --- |
-| 12.6 | make the 3.2 changes in ch_dev, then open **Changes** | 4 objects differ; each shows **Side by side** | ☐ |
-| 12.7 | untick one; **Write migration…** with a description and **Also write an undo script** | only the ticked objects are in V0004; U0004 is written; **Review the migration** shows the SQL first | ☐ |
-| 12.8 | drop a table in dev, then Changes | it is marked as possibly losing data; writing the migration shows **This migration may lose data** | ☐ |
-| 12.9 | **Object history…** on customers | the git commits that changed it, with the change | ☐ |
-| 12.10 | **Scripts** → **New script** | a hand-written script with the next number | ☐ |
-| 12.11 | **Commit** | the changed files, a message box, **Commit**; then git log has it | ☐ |
-
-### 12c. Environments and checks (`deploy`)
+`.\uat\reset.ps1 desktop`. You start with an empty git repository `$UatRoot\desktop` and empty
+databases dk_dev, dk_test and dk_prod.
 
 | # | do | expect | result |
 | --- | --- | --- | --- |
-| 12.12 | Environments → test | each script's state per environment | ☐ |
-| 12.13 | add `V0004` and `V0005` files, then **Migrations** (run pending) on test | both run | ☐ |
-| 12.14 | **Run this script only** on V0005 for prod | it says V0004 stays behind, then runs V0005 only | ☐ |
-| 12.15 | the 4.2 hand change on prod, then **Checks** → **Check for drift** | drift on customers | ☐ |
-| 12.16 | **Preview pending changes**, **Dry-run script**, **Save report…** | each works; the report opens | ☐ |
+| 12.1 | start the app | the start page, with the logo: **New project…**, **Open folder…**, **Create sample…** and Recent | ☐ |
+| 12.2 | **New project…**: Folder **Choose…** `$UatRoot\desktop`, Project name `desktop`, Database engine **SQL Server**, then **Create project** | the project opens on Environments. There are no environments yet, and **Add environment** is offered | ☐ |
+| 12.3 | **Add environment** | the Connection URL box shows a **SQL Server** example (`sqlserver://localhost:1433;databaseName=shop;…`), not a `postgres://` one. The help line names SQL Server | ☐ |
+| 12.4 | Name `dev`, Role **Dev**, URL with `dk_dev`, user `sa`, password `Liftoff!Uat2026`, **Just me**. **Test connection**, then **Save** | **Connected** (version, user and database); dev is listed. `liftoff.user.toml` has dev **without** a password; Windows Credential Manager has it (`cmdkey /list`) | ☐ |
+| 12.5 | add `test`: Role **Test**, URL with `dk_test`, user `sa`, password `${env.LIFTOFF_UAT_PASSWORD}`, **Everyone on the project** | Test connection works. `liftoff.toml` has test's URL and user; `liftoff.user.toml` has `password = "${env.LIFTOFF_UAT_PASSWORD}"`, as typed | ☐ |
+| 12.6 | add `prod` the same way, Role **Production**, `dk_prod` | listed with the production role | ☐ |
+| 12.7 | add one with a wrong password, **Test connection** | **Couldn't connect** with the server's login error; **Save** still possible, but nothing is broken. Cancel it | ☐ |
+| 12.8 | **Changes** | **A scratch database is needed**, offering **Create one…** | ☐ |
+| 12.9 | **Create one…** and confirm | dk_dev_scratch is created and saved as environment `scratch` (role Scratch) | ☐ |
+| 12.10 | change dev from the second window (block A below), then **Changes** | compares dev with **Migrations**: `dbo.customers` and `dbo.orders` added | ☐ |
+| 12.11 | click `dbo.orders` | **Side by side**: nothing on the left, the CREATE TABLE on the right | ☐ |
+| 12.12 | **Write migration…**: description `customers and orders`; tick **Also write an undo script**; leave **Record it as applied on dev** ticked | **Review the migration** shows the script and the undo script. **Save to migrations** writes `migrations\V0001__customers_and_orders.sql` and `U0001…` | ☐ |
+| 12.13 | **Environments** → dev | V0001 is applied (recorded, not run) | ☐ |
+| 12.14 | → test → **Migrations** tab → **Run pending** | V0001 runs; its state becomes applied, with the time | ☐ |
+| 12.15 | → prod → **Checks** tab → **Preview pending changes** | the two tables, as added | ☐ |
+| 12.16 | **Dry-run script** | the SQL that would run, history insert included; dk_prod is unchanged | ☐ |
+| 12.17 | **Save report…** | an HTML file you can open in a browser | ☐ |
+| 12.18 | → prod → **Run pending** | V0001 is applied (Run pending does not ask first, even on production; the checks above are the review) | ☐ |
+| 12.19 | from the second window: `uatsql dk_prod "ALTER TABLE dbo.customers ADD hotfix bit NULL"`, then prod → **Checks** → **Check for drift** | drift: `dbo.customers` changed | ☐ |
+| 12.20 | `uatsql dk_prod "ALTER TABLE dbo.customers DROP COLUMN hotfix"`, check again | **No drift** | ☐ |
+| 12.21 | **Commit**: the changed files, message `first migration`, **Commit** | the commit is made (`git -C $UatRoot\desktop log --oneline`) | ☐ |
+| 12.22 | **Push** | a clear message that the repository has no remote; no crash | ☐ |
+| 12.23 | block B below, then **Changes** | `dbo.customers` changed (phone) and procedure `dbo.customer_count` added | ☐ |
+| 12.24 | untick the procedure; **Write migration…** `phone` | V0002 has only the phone column | ☐ |
+| 12.25 | **Changes** again | the procedure is still listed (it was not written) | ☐ |
+| 12.26 | drop a table in dev: `uatsql dk_dev "DROP TABLE dbo.orders"`, then **Changes** | `dbo.orders` removed, marked as possibly losing data. **Write migration…** warns **This migration may lose data**. Cancel; `uatsql dk_dev` the table back from V0001, or reset | ☐ |
+| 12.27 | → test → **Run only this** on V0002 | it explains what stays behind, then **Run this script only** runs V0002 alone | ☐ |
+| 12.28 | test's menu → **Undo latest** | V0002 is undone with U0002 if you wrote one; otherwise a clear "no undo script" message | ☐ |
+| 12.29 | commit, then **Changes** → **Object history…** on `dbo.customers` | the commits that changed it, each with its change | ☐ |
+| 12.30 | **Scripts** → **New script**: description `seed`, SQL `SELECT 1;` → **Create script** | `V0003__seed.sql` (the next number) | ☐ |
+| 12.31 | commit; **Scripts** → **Squash or rebaseline…** → Up to version `2` | `B0002__…sql` replaces V0001–V0002; V0003 stays. test and prod show them covered by the baseline | ☐ |
+| 12.32 | **Pipelines** → GitHub Actions; Deploy to, in this order: test, then prod; Branch that deploys `main` | a **Workflow preview** and the **Repository secrets to add**; writing it creates `.github\workflows\liftoff.yml` | ☐ |
+| 12.33 | **Settings** (the gear) → **Comparison filters** → **Add filter**: Leave out, table, `audit_*` → **Save settings** | `liftoff.toml` has the filter. `uatsql dk_dev "CREATE TABLE dbo.audit_log (id int)"`: Changes does not list it | ☐ |
+| 12.34 | change a setting without saving, then click another tab | **Unsaved changes**: it asks before leaving | ☐ |
+| 12.35 | **Files changed outside the app.** Open `$UatRoot\desktop\liftoff.toml` in Notepad. Change `name = "desktop"` to `name = "desktop app"`, save, then click back into LiftOff | the title bar shows **desktop app** without reopening the project | ☐ |
+| 12.36 | add an environment by hand in Notepad (block C below), save, click back into LiftOff | **Environments** lists `qa` | ☐ |
+| 12.37 | break the file: delete one `]` from a `[environments.…]` line, save, click back | a red banner **Could not read the project files again**, naming the problem. The screens keep the last good state | ☐ |
+| 12.38 | put the `]` back, save, click back | the banner is gone | ☐ |
+| 12.39 | close the project (title bar), then reopen it from **Recent** | it opens on the workspace you last used | ☐ |
+| 12.40 | **Recent** → **Remove** | gone from the list; the folder is untouched | ☐ |
 
-### 12d. Adopt and baseline (`adopt`)
+Block A (dev, for 12.10):
+
+```powershell
+uatsql dk_dev @"
+CREATE TABLE dbo.customers (id int IDENTITY PRIMARY KEY, email nvarchar(320) NOT NULL UNIQUE, created_at datetime2 NOT NULL DEFAULT SYSUTCDATETIME());
+CREATE TABLE dbo.orders (id int IDENTITY PRIMARY KEY, customer_id int NOT NULL REFERENCES dbo.customers (id), total decimal(10,2) NOT NULL DEFAULT 0);
+"@
+```
+
+Block B (dev, for 12.23):
+
+```powershell
+uatsql dk_dev @"
+ALTER TABLE dbo.customers ADD phone nvarchar(30) NULL;
+GO
+CREATE PROCEDURE dbo.customer_count AS SELECT COUNT(*) FROM dbo.customers
+"@
+```
+
+Block C (liftoff.toml, for 12.36):
+
+```toml
+[environments.qa]
+url = "sqlserver://localhost:61433;databaseName=dk_test;encrypt=true;trustServerCertificate=true"
+user = "sa"
+password = "${env.LIFTOFF_UAT_PASSWORD}"
+role = "test"
+```
+
+### 12B. An existing database
+
+`.\uat\reset.ps1 adopt`. The databases:
+
+| database | holds |
+| --- | --- |
+| lg_prod | a legacy schema with rows, and no history: 4 tables, a view, a function, a procedure and a trigger |
+| lg_test | the same schema |
+| lg_stage | the schema without the view and the procedure |
+| lg_qa | `products.name` is 50 characters instead of 100, plus an extra column `customers.loyalty_points` |
+| lg_new | empty |
+| lg_scratch | empty |
 
 | # | do | expect | result |
 | --- | --- | --- | --- |
-| 12.17 | create a SQL Server project in `$UatRoot\adopt` with the adopt environments | Environments lists them | ☐ |
-| 12.18 | run migrations on prod | **Starting from an existing database?**: the adopt offer, with the captured schema | ☐ |
-| 12.19 | adopt it, then run qa | the differences dialog lists customers and products; **Record anyway** records the baseline | ☐ |
-| 12.20 | **Baseline…** on another database | sets the baseline at the version you type | ☐ |
+| 12.41 | **New project…** → `$UatRoot\adopt`, name `adopt`, **SQL Server** → **Create project** | an empty project | ☐ |
+| 12.42 | open `$UatRoot\adopt\liftoff.toml` in Notepad and paste the content of `$UatRoot\adopt-environments.toml` at the end. Save, then click back into LiftOff | six environments appear (prod, scratch, test, stage, qa, new) without reopening | ☐ |
+| 12.43 | → prod | **Starting from an existing database?**: prod has tables and the project has no scripts | ☐ |
+| 12.44 | **Adopt as B0001** | B0001 is written from prod, checked on scratch and recorded on prod. Prod's rows are untouched | ☐ |
+| 12.45 | → test → **Run pending** | recorded at B0001; nothing is created | ☐ |
+| 12.46 | → stage → **Run pending** | the missing view and procedure are created; then at B0001 | ☐ |
+| 12.47 | → qa → **Run pending** | a dialog lists the objects that differ (customers, products), with **Cancel** and **Record anyway** | ☐ |
+| 12.48 | **Record anyway**, then qa → **Checks** → **Check for drift** | B0001 recorded; the drift shows customers and products | ☐ |
+| 12.49 | → new → **Run pending** | built from B0001 | ☐ |
+| 12.50 | `.\uat\reset.ps1 adopt` and steps 12.41–12.42 again; then prod's menu → **Baseline…** → Version `1`, a description → **Set baseline** | prod is at baseline 1, without a script | ☐ |
 
-### 12e. Flyway import (`flyway`)
+### 12C. A Flyway project
+
+`.\uat\reset.ps1 flyway`. The folder `$UatRoot\flyway` holds:
+- `flyway.toml` with environments development, shadow, test and production;
+- the scripts `sql\V1__…`, `V2__…`, `V3__…` and `R__customer_totals.sql`.
+
+The databases:
+
+| database | holds |
+| --- | --- |
+| fw_development | V1–V3 and the repeatable, with a `flyway_schema_history` table |
+| fw_production | the same as fw_development |
+| fw_test | V1 and V2 only |
+| fw_shadow | empty |
 
 | # | do | expect | result |
 | --- | --- | --- | --- |
-| 12.21 | **Open folder…** `$UatRoot\flyway` | it offers to convert the Flyway project (**Convert settings…**) | ☐ |
-| 12.22 | convert with the suggested roles | the same result as 7.4–7.6, including the filter for Flyway's history table | ☐ |
-| 12.23 | the history import (**Import**, Flyway history table) on production | a clear message that it is PostgreSQL only and to baseline instead; not a crash | ☐ |
+| 12.51 | **Open folder…** → `$UatRoot\flyway` | **This folder has a Flyway project**, with **Convert settings…** | ☐ |
+| 12.52 | **Convert settings…** | **Flyway settings converted**: the 4 environments with their roles (development → Dev, shadow → Scratch, production → Production). A note that `flyway_schema_history` is left out of comparisons. **2 settings not carried over** (baselineOnMigrate, validateOnMigrate), each with the reason | ☐ |
+| 12.53 | **Open project** | the project opens; `flyway.toml` and `sql\` are unchanged | ☐ |
+| 12.54 | → production → menu → **Import Flyway history…** | a clear message that this is PostgreSQL only, and to baseline on SQL Server instead. No crash | ☐ |
+| 12.55 | → production → **Baseline…** → Version `3` → **Set baseline** | V1–V3 shown as below the baseline; the repeatable pending | ☐ |
+| 12.56 | the same on development (`3`) and test (`2`), then test → **Run pending** | V3 and the repeatable run on test | ☐ |
+| 12.57 | `uatsql fw_development "ALTER TABLE dbo.orders ADD placed_at datetime2 NULL"`, then **Changes** | only `dbo.orders` changed. Flyway's history table is **not** listed | ☐ |
+| 12.58 | **Write migration…** `order date` | `sql\V0004__order_date.sql` | ☐ |
 
-### 12f. Compare, data compare, scripts, pipelines, settings
+### 12D. Schema compare
+
+`.\uat\reset.ps1 compare`, then **Open folder…** → `$UatRoot\compare`. The project is at V0003
+everywhere, and two databases have extra changes:
+- cp_dev also has table `suppliers`, column `customers.phone`, `orders.total` widened, an index,
+  view `big_orders`, procedure `add_supplier` and function `customer_order_count`;
+- cp_test also has table `old_notes`, with a row.
 
 | # | do | expect | result |
 | --- | --- | --- | --- |
-| 12.24 | (`compare`) **Compare** → source dev, target test | the 7 differences; **Swap source and target** works | ☐ |
-| 12.25 | **Save script…**, **Write migration…**, **Apply** (on test) | each works; Apply on prod asks you to type its name | ☐ |
-| 12.26 | **Snapshot the source…**, then compare against the snapshot | works without the database | ☐ |
-| 12.27 | (`data`) Compare → **Data** → source, target | the counts from § 9; **Hide tables that are the same**; click a count to page through the rows (**Previous**/**Next**); NULL styled | ☐ |
-| 12.28 | untick **Delete rows only in the target**, **Save script…**, then **Apply** | the script has no DELETEs; apply works; prod needs its name typed | ☐ |
-| 12.29 | (`branches`) **Scripts** → **Squash or rebaseline…** → up to version 3 | the same result as 10.7 | ☐ |
-| 12.30 | **Pipelines** → GitHub Actions → test then prod | a workflow preview and the repository secrets to add; writes `.github\workflows\liftoff.yml` | ☐ |
-| 12.31 | **Settings** → **Add filter** (leave out table `audit_*`) → **Save settings** | `liftoff.toml` has the filter; Changes and Compare ignore matching tables | ☐ |
-| 12.32 | close and reopen the app | the project is under Recent | ☐ |
+| 12.59 | **Compare** → **Schema** → Source `dev`, Target `test` | 7 differences: customers and orders changed (orders marked **May lose data**); suppliers, big_orders, add_supplier and customer_order_count added; old_notes removed (may lose data) | ☐ |
+| 12.60 | click a difference | the side-by-side view | ☐ |
+| 12.61 | **Swap source and target** | the same 7, in the other direction | ☐ |
+| 12.62 | swap back. Untick old_notes, then **Save script…** | a .sql file with the 6 ticked ones and no DROP of old_notes | ☐ |
+| 12.63 | **Write migration…** (with **Also write an undo script**) | V0004 and U0004 in migrations | ☐ |
+| 12.64 | **Apply** on test | applied; comparing again finds nothing | ☐ |
+| 12.65 | Target `prod` → **Apply** | you must type `prod` before it applies | ☐ |
+| 12.66 | **Snapshot the source…**, then Source = the snapshot (**A snapshot file…**) | compares without connecting to dev | ☐ |
+| 12.67 | Target → **A database URL…** | the box shows a SQL Server example. Paste the URL with `cp_test`: the comparison works | ☐ |
+
+### 12E. Data compare
+
+`.\uat\reset.ps1 data`, then **Open folder…** → `$UatRoot\data`. The environments are source,
+target and prod. Target and prod differ from source in known rows:
+
+| table | only in source | only in target | different |
+| --- | --- | --- | --- |
+| dbo.customers | 30 | 20 | 25 |
+| dbo.products | 1 | 1 | 3 |
+| dbo.order_lines | 2 | 1 | 5 |
+| dbo.events (200,000 rows) | 0 | 0 | 3 |
+| dbo.audit_log | no key: skipped | | |
+
+| # | do | expect | result |
+| --- | --- | --- | --- |
+| 12.68 | **Compare** → **Data** → Source `source`, Target `target` | the counts above, in seconds; audit_log listed as not compared, with the reason | ☐ |
+| 12.69 | **Hide tables that are the same** | no change here (every table differs); after an apply it hides them | ☐ |
+| 12.70 | click customers' **different** count | the rows, source and target, changed cells marked, NULL styled, Unicode intact. **Previous** / **Next** page through | ☐ |
+| 12.71 | untick **Delete rows only in the target** → **Save script…** | INSERT and UPDATE statements only; products use IDENTITY_INSERT | ☐ |
+| 12.72 | **Apply** | applied to target; comparing again gives 0 everywhere | ☐ |
+| 12.73 | Target `prod` → **Apply** | you must type `prod` first | ☐ |
 
 ---
 
 ## 13. VS Code extension
 
-Install it with `.\uat\setup.ps1 -VSCode -NoBuild`. Then, in a window with env.ps1 loaded,
-`code $UatRoot\<scenario>`. The LiftOff rocket is in the activity bar.
+This section stands on its own too. Each part starts with its own reset.
+
+### Start VS Code
+
+```powershell
+.\uat\setup.ps1 -VSCode -NoBuild    # once: packages and installs the extension
+. .\uat\env.ps1
+code $UatRoot\vscode                # always start VS Code from a window with env.ps1 loaded
+```
+
+Reload VS Code windows that were already open (**Developer: Reload Window**). The LiftOff rocket
+is in the activity bar. Use the connection values from § 12 (with `vs_` databases).
+
+### 13A. A new project, start to finish
+
+`.\uat\reset.ps1 vscode`. You start with an empty git repository `$UatRoot\vscode` and empty
+databases vs_dev, vs_scratch, vs_test and vs_prod.
+
+| # | do | expect | result |
+| --- | --- | --- | --- |
+| 13.1 | open the LiftOff sidebar | **There is no LiftOff project in this workspace yet**, with **Create LiftOff Project** | ☐ |
+| 13.2 | **Create LiftOff Project** → **SQL Server** → **Empty project** → name `vscode` | `liftoff.toml`, `migrations\` and `schema-model\`; the sidebar shows the project | ☐ |
+| 13.3 | the gear (**Project Settings**) | a settings tab. A new environment's URL box shows a `sqlserver://` example | ☐ |
+| 13.4 | add `dev` (Dev, vs_dev, password `Liftoff!Uat2026`), `scratch` (Scratch, vs_scratch), `test` (Test, vs_test, password `${env.LIFTOFF_UAT_PASSWORD}`) and `prod` (Production, vs_prod). Save | saved. The plain password is not in `liftoff.toml` or `liftoff.user.toml`; the `${env…}` one is kept as typed | ☐ |
+| 13.5 | each environment's menu → **Test Connection** | connected, for all four | ☐ |
+| 13.6 | `uatsql vs_dev` with block A from § 12. Then the **Schema Model** view → **Compare with Dev** | customers and orders listed | ☐ |
+| 13.7 | click one (**Show the Difference**), then **Pull All into Schema Model** | a diff editor; the files appear under `schema-model\dbo\tables\`; Source Control shows them | ☐ |
+| 13.8 | **Generate Migration from Schema Model** → description `customers and orders` | `migrations\V0001__customers_and_orders.sql` opens (with U0001 when `liftoff.generateUndo` is on) | ☐ |
+| 13.9 | Environments view | V0001 under each environment, pending (dev too: it already has the tables) | ☐ |
+| 13.10 | test → **Show the SQL That Would Run** | the SQL in an editor | ☐ |
+| 13.11 | test → **Run Pending Migrations** | V0001 applied on test | ☐ |
+| 13.12 | open V0001 and add a comment, save | a warning in the editor: the script already ran on test | ☐ |
+| 13.13 | test → **Validate** | reports the edited script | ☐ |
+| 13.14 | undo the edit, save | the warning is gone | ☐ |
+| 13.15 | add `migrations\V0002__a.sql` (`CREATE TABLE dbo.a (id int);`) and `V0003__b.sql` (`CREATE TABLE dbo.b (id int);`); right-click V0003 under prod → **Run This Script Only** | it says V0001 and V0002 stay behind, then runs V0003 alone | ☐ |
+| 13.16 | `uatsql vs_test "ALTER TABLE dbo.customers ADD hotfix bit NULL"`; test → **Check for Drift** | drift on dbo.customers | ☐ |
+| 13.17 | **Show Log** | the CLI calls, with no password anywhere | ☐ |
+| 13.18 | break a model file: `CREAT TABLE` in `schema-model\dbo\tables\orders.sql`, then **Check Schema Model** | the error on that file, in Problems | ☐ |
+| 13.19 | turn on `liftoff.checkModelOnSave`, fix the file and save | the problem disappears on save | ☐ |
+| 13.20 | open `liftoff.toml`, add block C from § 12 (with `vs_test`), save | `qa` appears in the Environments view at once | ☐ |
+| 13.21 | do the same in `liftoff.user.toml` | the change shows at once too | ☐ |
+| 13.22 | **Set Up Pipeline** → test, then prod | `.github\workflows\liftoff.yml` written | ☐ |
+| 13.23 | commit everything (Source Control), then **Rebaseline Project…** → up to 1 | `B0001…` replaces V0001; the environments show it covered | ☐ |
+
+### 13B. Existing database, Flyway, compare, data
 
 | # | reset | do | expect | result |
 | --- | --- | --- | --- | --- |
-| 13.1 | greenfield | open the empty folder | the sidebar offers **Create LiftOff Project** | ☐ |
-| 13.2 | greenfield | **New Project** → SQL Server | `liftoff.toml` created; the sidebar shows the project | ☐ |
-| 13.3 | greenfield | the gear (**Project Settings**) → add dev, test and prod; a password in one, `${env.LIFTOFF_UAT_PASSWORD}` in another | a settings tab; saving writes `liftoff.toml` without the plain password; **Test Connection** works for both | ☐ |
-| 13.4 | changes | the Environments view | every script per environment: applied, pending, failed or edited | ☐ |
-| 13.5 | changes | open an applied script and edit it | a warning in the editor that it already ran | ☐ |
-| 13.6 | deploy | add V0004 and V0005; environment menu → **Show the SQL That Would Run**, then **Run Pending Migrations** | the SQL in an editor, then both run | ☐ |
-| 13.7 | deploy | right-click a pending script → **Run This Script Only** | warns which older scripts stay behind, then runs one | ☐ |
-| 13.8 | deploy | **Validate**, **Check for Drift** (after the 4.2 hand change), **Show Log** | results in notifications; the log shows the CLI calls without passwords | ☐ |
-| 13.9 | model | change md_dev (5.3); Schema Model view → **Compare Dev with Schema Model** | customers and tags listed | ☐ |
-| 13.10 | model | click one (**Show the Difference**), then **Pull into Schema Model**, then **Pull All** | a diff editor; the files are written; Source Control shows them | ☐ |
-| 13.11 | model | break a model file, then **Check Schema Model** | the error on the file that caused it, in Problems | ☐ |
-| 13.12 | model | **Generate Migration from Schema Model** | the next V script, opened | ☐ |
-| 13.13 | compare | **Compare…** → dev → test | the 7 differences; tick a few; **Show the Difference**, **Open the Sync Script**, **Write the Differences as a Migration**, **Apply to the Target** | ☐ |
-| 13.14 | compare | **Swap Source and Target**, **Compare Again**, **Save a Snapshot…** | each works | ☐ |
-| 13.15 | data | Compare view `…` → **Compare Data…** → source → target | the counts table; click a count to open the rows grid (100 per page, Previous/Next, changed cells marked, NULL styled) | ☐ |
-| 13.16 | data | in the grid: open the script, then apply to target; then to prod | apply on prod asks you to type `prod` | ☐ |
-| 13.17 | adopt | create the project, environments; run migrations on prod | it offers **Adopt Existing Database…**; afterwards B0001 is listed | ☐ |
-| 13.18 | flyway | open the folder | the sidebar offers **Import Flyway Project**; the wizard: environments and roles, what does not carry over, then (on SQL Server) baseline instead of the history copy | ☐ |
-| 13.19 | branches | **Rebaseline Project…** | the same result as 10.7 | ☐ |
-| 13.20 | branches | **Set Up Pipeline** | writes the workflow, as in 10.16 | ☐ |
-| 13.21 | any | settings `liftoff.cliPath`, `liftoff.devEnvironment`, `liftoff.checkModelOnSave`, `liftoff.generateUndo` | each changes the behaviour it names | ☐ |
+| 13.24 | adopt | `code $UatRoot\adopt` → **Create LiftOff Project** (SQL Server, empty, `adopt`). Paste `$UatRoot\adopt-environments.toml` into `liftoff.toml` and save | six environments appear | ☐ |
+| 13.25 | adopt | prod → **Run Pending Migrations** | it offers **Adopt Existing Database…**; afterwards B0001 is listed and recorded on prod | ☐ |
+| 13.26 | adopt | stage → **Run Pending Migrations**; qa → **Run Pending Migrations** | stage gets its missing view and procedure; qa stops with the list of differing objects and offers to record anyway | ☐ |
+| 13.27 | flyway | `code $UatRoot\flyway` | **This folder has a Flyway project…** with **Import Flyway Project** | ☐ |
+| 13.28 | flyway | the wizard: environments and roles, what does not carry over | `liftoff.toml` written, with the filter for `flyway_schema_history`. On SQL Server it says to baseline instead of copying the history; `flyway.toml` is unchanged | ☐ |
+| 13.29 | compare | `code $UatRoot\compare` → **Compare…** → dev → test | the 7 differences from 12.59; tick a few | ☐ |
+| 13.30 | compare | **Show the Difference**, **Open the Sync Script**, **Write the Differences as a Migration**, **Apply to the Target** | each works; apply on prod asks you to type `prod` | ☐ |
+| 13.31 | compare | **Swap Source and Target**, **Compare Again**, **Save a Snapshot…** | each works | ☐ |
+| 13.32 | compare | **Compare…** → **A database URL** as target | it accepts a `sqlserver://` URL | ☐ |
+| 13.33 | data | `code $UatRoot\data` → Compare view `…` → **Compare Data…** → source → target | the counts table from 12E | ☐ |
+| 13.34 | data | click a count | the rows grid: 100 per page, Previous / Next, changed cells marked, NULL styled | ☐ |
+| 13.35 | data | open the script, then apply to target; then compare with prod and apply | the script opens in an editor; prod needs `prod` typed | ☐ |
+| 13.36 | any | settings `liftoff.cliPath` (point at another liftoff.exe), `liftoff.devEnvironment` | the extension uses that program / that dev environment | ☐ |
 
 ---
 
@@ -681,6 +840,9 @@ this plan; these steps check that they stay fixed.
 | 14.3 | after converting a Flyway project, `generate` and `diff` listed Flyway's own history table, and the migration would have created it on every database | 7.14 | ☐ |
 | 14.4 | the conversion's hint suggested `import-flyway-history` on SQL Server, which does not support it | 7.4 | ☐ |
 | 14.5 | with no scratch environment, `diff` / `generate` did not say how to make one | 2.6 | ☐ |
+| 14.6 | (UAT feedback, 2026-10-12) the desktop app did not notice `liftoff.toml` changed outside it; the project had to be closed and reopened. It now reads the project again whenever its window gets focus | 12.35–12.38, 12.42 | ☐ |
+| 14.7 | (UAT feedback) the desktop app's Add environment dialog and Compare's URL box showed a `postgres://` example in a SQL Server project | 12.3, 12.67 | ☐ |
+| 14.8 | VS Code reloaded the project when `liftoff.toml` was saved, but not `liftoff.user.toml` | 13.21 | ☐ |
 
 Observations to judge during UAT (not bugs yet):
 

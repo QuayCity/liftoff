@@ -459,9 +459,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
       SettingsPanel.show(context, lo, typeof target === 'string' ? target : target?.env?.name),
     ),
     vscode.commands.registerCommand('liftoff.editEnvironment', (item?: EnvironmentItem) => SettingsPanel.show(context, lo, item?.env?.name)),
-    // Saving a script or liftoff.toml re-reads what is open, so warnings follow the edit.
+    // Saving a script or liftoff.toml (or liftoff.user.toml) re-reads what is open, so warnings follow the edit.
     vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (path.basename(doc.fileName) === 'liftoff.toml') void lo.load()
+      if (['liftoff.toml', 'liftoff.user.toml'].includes(path.basename(doc.fileName))) void lo.load()
       else if (doc.fileName.endsWith('.sql')) void lo.reloadOpened()
     }),
   )
