@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, engineName, errorText, inDesktop, type Project } from './api'
 import { Compare } from './screens/Compare'
 import { Changes } from './screens/Changes'
@@ -37,9 +37,11 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
   })()
   const [view, setViewRaw] = useState<View>((params.get('ws') as View) || remembered || 'Environments')
   const [settingsDirty, setSettingsDirty] = useState(false)
+  const reloadRef = useRef(() => {})
   const setView = useCallback((v: View) => {
     if (settingsDirty && v !== 'Settings' && !window.confirm('Leave Settings without saving your changes?')) return
     setViewRaw(v)
+    reloadRef.current()
     try {
       localStorage.setItem(`liftoff:view:${project.root}`, v)
     } catch {
@@ -48,7 +50,8 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
   }, [settingsDirty, project.root])
 
   // liftoff.toml edited elsewhere (an editor, git pull): read the project again when the window
-  // gets focus back. Not while Settings has unsaved edits, which would be overwritten.
+  // gets focus back, and on every workspace switch (a script saved in Changes ends "no scripts yet").
+  // Not while Settings has unsaved edits, which would be overwritten.
   const [reloadError, setReloadError] = useState<string | null>(null)
   useEffect(() => {
     const reload = () => {
@@ -61,6 +64,7 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
         (e) => setReloadError(errorText(e)),
       )
     }
+    reloadRef.current = reload
     window.addEventListener('focus', reload)
     return () => window.removeEventListener('focus', reload)
   }, [project, onProject, settingsDirty])

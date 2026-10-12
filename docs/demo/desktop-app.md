@@ -97,7 +97,8 @@ CREATE TABLE dbo.customers (
 ```
 
 **Do:** click **Changes**. The first time it says **A scratch database is needed**: click
-**Create one…** and confirm.
+**Create one…**, tick **I understand LiftOff erases and rebuilds it on every comparison**, and
+**Create**. Then click **Compare** (top right).
 
 **Say:** "The scratch database is an empty database LiftOff may erase. It runs the scripts there
 to know what they build, so it can compare that with dev."
@@ -105,31 +106,34 @@ to know what they build, so it can compare that with dev."
 **See:** `dbo.customers`, added. Click it to show it **side by side**: nothing on the left (the
 scripts do not make it yet), the table on the right.
 
-**Do:** **Write migration…**:
+**Do,** at the bottom of the screen:
 - Description: `customers`;
 - tick **Also write an undo script**;
-- leave **Record it as applied on dev** ticked.
+- click **Write migration…**.
 
 **See:** **Review the migration** shows the script LiftOff wrote: `CREATE TABLE`, the primary key
-and the unique constraint.
+and the unique constraint. Below it, **Record it as applied on dev** is ticked.
 
 **Say:** "It is plain SQL. I review it like code, and I may edit it. The undo script reverses it.
 Dev is marked as having it already, because I made the change there by hand."
 
-**Do:** **Save to migrations**. Then **Commit**, message `customers`, **Commit**.
+**Do:** **Save to migrations**. Then the **Commit** workspace: the project files are ticked
+(`liftoff.toml`, `.gitignore` and the two scripts; `liftoff.user.toml` is not listed, git ignores
+it). Commit message `customers`, then **Commit 4 files**.
 
 ## 3. Deploy to test and production
 
-**Do:** **Environments** → **test**. **See:** V0001 **pending**.
+**Do:** **Environments**. Each environment has a card: connected, how many scripts are pending,
+when it last ran, drift. Click **test**'s name on its card. **See:** V0001 **pending**.
 
-**Do:** **Run pending**. **See:** the log, then V0001 **applied**, with the time.
+**Do:** **Run pending** (on the card, or below the list). **See:** the log, then V0001 **applied**, with the time.
 
 **Say:** "Each script runs in a transaction, and the database keeps a history of what ran. Run it
 again and nothing happens."
 
 **Say:** "Before production I want to know three things, without changing anything."
 
-**Do:** **Environments** → **prod** → the **Checks** tab. Click each in turn:
+**Do:** click **prod**'s name, then the **Checks** tab. Click each in turn:
 
 | click | see | say |
 | --- | --- | --- |
@@ -154,15 +158,18 @@ CREATE INDEX ix_customers_name ON dbo.customers (name);
 **Do:** **prod** → **Checks** → **Check for drift**.
 
 **See:** **1 object changed outside the scripts**: "Someone changed prod by hand. Turn the change
-into a script, or undo it, before deploying." `dbo.customers` is listed; click it to see the index
-side by side.
+into a script, or undo it, before deploying." `dbo.customers` is listed, side by side: what the
+applied scripts build on the left, prod on the right, with the extra index marked. The prod card
+now says **Drift: Detected**.
 
 **Say:** "A pipeline runs the same check and stops here, before deploying on top of an unknown
 state."
 
-**Do:** **Compare**: Source **prod**, Target **test**, **Compare**.
+**Do:** the **Compare** workspace: Source **prod (prod)**, Target **test (test)**, then **Compare**.
 
-**See:** `dbo.customers` differs; click it to see the index.
+**See:** **1 difference: what would make test match prod**, `dbo.customers` side by side, and the
+SQL: `CREATE NONCLUSTERED INDEX [ix_customers_name] …`. At the bottom: **Save script…**,
+**Write migration…** and **Apply to test…**.
 
 **Say:** "Compare works between any two databases, the scripts, the schema model or a snapshot. It
 can also save a script or write a migration from what it finds. The team now decides: turn the
@@ -179,15 +186,18 @@ hotfix into a script, or remove it. Here we remove it."
 ALTER TABLE dbo.customers ADD phone nvarchar(30) NULL;
 ```
 
-**Do:** **Changes**. **See:** `dbo.customers`, changed. **Write migration…**, description
-`phone`, tick **Also write an undo script**, **Save to migrations**.
+**Do:** **Changes** → **Compare**. **See:** `dbo.customers`, changed: the new column side by side.
+Description `phone`, tick **Also write an undo script**, **Write migration…**, **Save to
+migrations**.
 
 **Do:** **Environments** → **test** → **Run pending**. **See:** V0002 **applied**.
 
 **Say:** "That is the daily loop: change dev, look at **Changes**, write the migration, review,
 commit, deploy. And if a change was wrong:"
 
-**Do:** **Undo latest**. **See:** V0002 is **pending** again.
+**Do:** in the list next to the **Run pending** button below the scripts, pick **Undo latest**,
+then click the button (it now says **Undo latest**). **See:** the log says it ran `U0002__phone.sql`,
+and V0002 is **pending** again.
 
 ## 6. Wrap up
 

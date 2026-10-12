@@ -97,7 +97,7 @@ environment variable `SHOP_TEST_PASSWORD`, and keeps the reference as typed. Use
 ## Step 5: a scratch database
 
 Click **Changes**. It says **A scratch database is needed**: to know what the migration scripts
-build, LiftOff runs them on an empty database it may erase at will. **Create one…** and confirm.
+build, LiftOff runs them on an empty database it may erase at will. **Create one…**, tick **I understand LiftOff erases and rebuilds it on every comparison**, and **Create**.
 It creates `shop_dev_scratch` next to dev and saves it as environment `scratch`.
 
 ## Step 6: make the first change in dev
@@ -119,21 +119,17 @@ CREATE TABLE dbo.orders (
 );
 ```
 
-Back in the app, **Changes** compares dev with **Migration scripts** (the toggle at the top). It
-lists `dbo.customers` and `dbo.orders` as added. Click `dbo.orders`: **side by side**, nothing on
+Back in the app, **Changes** → **Compare** (top right) compares dev with **Migration scripts** (the
+toggle at the top). It lists `dbo.customers` and `dbo.orders` as added. Click `dbo.orders`: **side by side**, nothing on
 the left (the scripts do not make it yet), the `CREATE TABLE` on the right.
 
 ## Step 7: write the migration
 
-Leave both ticked and click **Write migration…**:
+Leave both ticked. At the bottom of the screen, type the Description `customers and orders`, tick
+**Also write an undo script**, and click **Write migration…**.
 
-| field | value |
-| --- | --- |
-| Description | `customers and orders` |
-| Also write an undo script | ticked |
-| Record it as applied on dev, which already has these changes | ticked (the default) |
-
-**Review the migration** shows the script and the undo script. Read them as you would read code,
+**Review the migration** shows the script, the undo script (unfold it), and **Record it as applied
+on dev, which already has these changes**, ticked. Read them as you would read code,
 then **Save to migrations**. The folder now has `V0001__customers_and_orders.sql` and
 `U0001__customers_and_orders.sql`.
 
@@ -187,7 +183,8 @@ from step 6 on dev.
 **Environments** → **test**. Next to V0002, **Run only this** explains which older scripts would
 stay behind (none here), then **Run this script only**.
 
-Changed your mind? **Undo latest** runs `U0002` if you wrote one (tick **Also write an undo
+Changed your mind? Pick **Undo latest** in the list next to the button below the scripts, then
+click the button: it runs `U0002` if you wrote one (tick **Also write an undo
 script**), and V0002 is pending again. Without an undo script it says so.
 
 ## Step 13: the schema model (optional)

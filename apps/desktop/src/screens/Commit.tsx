@@ -21,8 +21,9 @@ export function Commit({ project }: { project: Project }) {
       const s = await api.gitStatus(project.root)
       setStatus(s)
       setError(null)
-      // Migration scripts and project settings are pre-selected; anything else is the user's call.
-      setSelected(new Set(s.files.filter((f) => /^(migrations|schema-model)\/|liftoff\.toml$/.test(f.path)).map((f) => f.path)))
+      // Migration scripts, project settings and .gitignore (it keeps liftoff.user.toml out) are pre-selected;
+      // anything else is the user's call.
+      setSelected(new Set(s.files.filter((f) => /^(migrations|schema-model)\/|liftoff\.toml$|^\.gitignore$/.test(f.path)).map((f) => f.path)))
       setActive((a) => (a && s.files.some((f) => f.path === a) ? a : s.files[0]?.path ?? null))
     } catch (e) {
       setStatus(null)

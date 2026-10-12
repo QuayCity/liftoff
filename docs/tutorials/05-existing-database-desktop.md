@@ -40,7 +40,7 @@ password); what changes:
 **Test connection** on each before **Save**. The login used on production needs to read the
 schema and create one table, the history table; to deploy later, it needs to change the schema.
 
-Then a scratch database: click **Changes** → **Create one…** and confirm. It creates an empty
+Then a scratch database: click **Changes** → **Create one…**, tick **I understand LiftOff erases and rebuilds it on every comparison**, and **Create**. It creates an empty
 `shop_dev_scratch` that LiftOff may erase at will; it checks the capture there.
 
 > You can also paste environments into `liftoff.toml` with a text editor: the app reads the file
