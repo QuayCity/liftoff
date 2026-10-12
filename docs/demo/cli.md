@@ -5,7 +5,7 @@ story: a new database, a change written as a migration, deployed to test and pro
 someone changing production by hand.
 
 Each part has what to **do** (copy the commands), what the audience will **see**, and what to
-**say**. The desktop app has [its own demo](desktop-app.md).
+**say**. The [desktop app](desktop-app.md) and [VS Code](vscode.md) have their own demos.
 
 | part | minutes |
 | --- | ---: |

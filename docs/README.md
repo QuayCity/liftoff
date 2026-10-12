@@ -39,8 +39,9 @@ that fits your situation.
 
 ## Showing LiftOff to others
 
-Two 30-minute demo walkthroughs, with what to do, see and say:
-[on the command line](demo/cli.md) and [in the desktop app](demo/desktop-app.md).
+Three 30-minute demo walkthroughs, with what to do, see and say:
+[on the command line](demo/cli.md), [in the desktop app](demo/desktop-app.md) and
+[in VS Code](demo/vscode.md).
 
 More:
 - [Trying LiftOff by hand](TESTING.md), for contributors;
