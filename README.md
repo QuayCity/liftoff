@@ -153,8 +153,15 @@ PgBouncer and SQL Server on every change. Try it on a test environment first, an
 
 ## Get started
 
-Download `liftoff` for your platform from [Releases](../../releases), or the VS Code
-extension (`liftoff-vscode-<platform>.vsix`, the program included) from the same page, then follow the [quick start](#quick-start).
+From [Releases](../../releases), download one of:
+
+- **the desktop app**: `LiftOff-Setup-<version>.exe` (Windows, a setup wizard that also puts `liftoff`
+  on your PATH), `LiftOff-<version>-arm64.dmg` (macOS) or `LiftOff-<version>-x86_64.AppImage` (Linux);
+- **the VS Code extension**: `liftoff-vscode-<platform>.vsix`;
+- **the command-line program only**: `liftoff-<platform>`, one file.
+
+Each includes everything it needs. Then follow the [quick start](#quick-start) or a
+[tutorial](docs/tutorials/README.md). Details: [Installing](docs/guide/installing.md).
 
 ## The repository
 

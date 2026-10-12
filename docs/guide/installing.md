@@ -1,7 +1,8 @@
 # Installing
 
 LiftOff comes in three parts. The command-line program, `liftoff`, does all the work. The VS Code
-extension and the desktop app run it for you.
+extension and the desktop app run it for you, and each comes with its own copy, so install only
+the one you want: the desktop app's installer gives you the app and the `liftoff` command.
 
 ## What you need
 
@@ -71,18 +72,51 @@ The LiftOff rocket appears in the activity bar on the left. See [The VS Code ext
 
 ## The desktop app
 
-The desktop app is not packaged as an installer yet. To run it from the source code, you need
-Node.js 24 and git:
+Download the installer for your platform from the same Releases page. It includes the `liftoff`
+program, so this is the only download you need.
+
+| platform | file | install |
+| --- | --- | --- |
+| Windows (x64) | `LiftOff-Setup-<version>.exe` | run it and follow the wizard |
+| macOS (Apple silicon) | `LiftOff-<version>-arm64.dmg` | open it and drag LiftOff to Applications |
+| Linux (x64) | `LiftOff-<version>-x86_64.AppImage` | `chmod +x` it and run it |
+
+**Windows.** The wizard installs for your user only, so it needs no administrator rights. You
+choose the folder (default `%LOCALAPPDATA%\Programs\LiftOff`), and it adds:
+- LiftOff to the Start menu and the desktop;
+- the `liftoff` command to your PATH, so it works in any new terminal;
+- an uninstaller under **Settings > Apps**, which also takes `liftoff` off the PATH. Your projects
+  and saved passwords are not touched.
+
+For a silent install (a script, or software deployment):
+`LiftOff-Setup-<version>.exe /S /D=C:\Tools\LiftOff`.
+
+**Not signed yet.** Until the installers are code-signed, Windows SmartScreen says "Windows
+protected your PC" the first time: click **More info** > **Run anyway**. On macOS, right-click
+LiftOff in Applications > **Open** the first time, or run `xattr -dr com.apple.quarantine
+/Applications/LiftOff.app`.
+
+The command-line program inside the app is at `resources\bin\liftoff.exe` in the install folder
+on Windows, and `LiftOff.app/Contents/Resources/bin/liftoff` on macOS. On macOS and Linux, link it
+onto your PATH yourself if you want it in a terminal, e.g.
+`sudo ln -s /Applications/LiftOff.app/Contents/Resources/bin/liftoff /usr/local/bin/liftoff`.
+
+See [The desktop app](desktop-app.md).
+
+### From the source code
+
+For working on the app, with Node.js 24 and git:
 
 ```sh
 git clone https://github.com/sanderstad/liftoff.git
 cd liftoff/apps/desktop
 npm install
-npm start
+npm start              # build and run
+npm run dist           # build the installer for this platform into release/ (run npm run build:cli in packages/liftoff first)
 ```
 
 If it says Electron failed to install, run `node node_modules/electron/install.js` in
-`apps/desktop` and try again. See [The desktop app](desktop-app.md).
+`apps/desktop` and try again.
 
 ## Building the program yourself
 

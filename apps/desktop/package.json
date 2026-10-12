@@ -1,7 +1,7 @@
 {
   "name": "desktop",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,29 +10,90 @@
     "preview": "vite preview",
     "test": "node --test src/ui/linediff.test.ts",
     "build:electron": "node electron/build.mjs",
-    "start": "npm run build && npm run build:electron && electron ."
+    "start": "npm run build && npm run build:electron && electron .",
+    "dist": "npm run build && npm run build:electron && electron-builder"
   },
   "dependencies": {
-    "@fontsource-variable/inter": "^5.3.0",
-    "@fontsource-variable/jetbrains-mono": "^5.3.0",
-    "@napi-rs/keyring": "^2.1.0",
-    "@tailwindcss/vite": "^4.3.3",
-    "lucide-react": "^1.53.0",
-    "radix-ui": "^1.7.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "tailwindcss": "^4.3.3"
+    "@napi-rs/keyring": "^2.1.0"
   },
   "devDependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
     "electron": "^44.7.0",
+    "electron-builder": "26.15.3",
     "esbuild": "^0.28.2",
+    "lucide-react": "^1.53.0",
     "oxlint": "^1.81.0",
+    "radix-ui": "^1.7.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
   },
-  "main": "dist-electron/main.mjs"
+  "main": "dist-electron/main.mjs",
+  "description": "LiftOff: plain-SQL database migrations, written from your dev database",
+  "author": "sanderstad",
+  "license": "MIT",
+  "build": {
+    "appId": "app.liftoff.desktop",
+    "productName": "LiftOff",
+    "copyright": "MIT licence",
+    "directories": {
+      "output": "release",
+      "buildResources": "installer"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "electron/icon.png",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../packages/liftoff/build/",
+        "to": "bin",
+        "filter": [
+          "liftoff",
+          "liftoff.exe"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "electron/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "LiftOff",
+      "include": "installer/installer.nsh",
+      "license": "../../LICENSE",
+      "artifactName": "LiftOff-Setup-${version}.${ext}"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "electron/icon.png",
+      "category": "public.app-category.developer-tools"
+    },
+    "dmg": {
+      "artifactName": "LiftOff-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "electron/icon.png",
+      "category": "Development"
+    },
+    "appImage": {
+      "artifactName": "LiftOff-${version}-${arch}.${ext}"
+    }
+  }
 }
