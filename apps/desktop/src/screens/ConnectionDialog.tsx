@@ -4,6 +4,7 @@ import { api, engineName, engineOfUrl, errorText, urlExample, type EnvView, type
 import { Button, Checkbox, Field, Input, PasswordInput, RadioGroup, Select } from '../ui/controls'
 import { InlineAlert } from '../ui/display'
 import { Dialog } from '../ui/overlays'
+import { buildUrl, defaultPort, emptyFields, splitUrl, type ConnectionFields } from '../../../../packages/liftoff/src/core/connection.ts'
 
 const roles: { value: Role; label: string }[] = [
   { value: 'dev', label: 'Dev: where you make changes' },
@@ -18,8 +19,17 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
   // Fresh state per opening: the parent remounts this dialog with a new key.
   const [name, setName] = useState(editing?.name ?? '')
   const [role, setRole] = useState<Role>(editing?.role ?? defaultRole)
-  const [url, setUrl] = useState(editing?.url ?? '')
-  const [user, setUser] = useState(editing?.user ?? '')
+  const engine = project.engine
+  const sqlserver = engine === 'sqlserver'
+  // The server details when the URL can be shown that way; else the URL as written.
+  const [initial] = useState(() => splitUrl(engine, editing?.url ?? ''))
+  const [mode, setMode] = useState<'fields' | 'url'>(initial ? 'fields' : 'url')
+  const [fields, setFields] = useState<ConnectionFields>(initial ?? emptyFields())
+  // Untouched details keep the URL exactly as written (it may hold settings the fields leave out).
+  const [fieldsTouched, setFieldsTouched] = useState(!editing)
+  const [switchError, setSwitchError] = useState<string | null>(null)
+  const [url, setUrlRaw] = useState(editing?.url ?? '')
+  const [user, setUser] = useState(editing?.user ?? initial?.user ?? '')
   const [password, setPassword] = useState('')
   // Editing keeps the environment where it is; new ones start private.
   const [shared, setShared] = useState<'me' | 'team'>(editing?.shared ? 'team' : 'me')
@@ -32,13 +42,42 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
 
   const taken = !editing && project.environments.some((e) => e.name === name.trim())
   const nameError = touched && (!name.trim() ? 'Name this environment.' : !/^[A-Za-z0-9_-]+$/.test(name.trim()) ? 'Use letters, digits, - and _ only.' : taken ? 'That name is already used.' : undefined)
-  const urlError = touched && !url.trim() ? 'Enter the connection URL.' : undefined
+  const setUrl = (v: string) => {
+    setUrlRaw(v)
+    setSwitchError(null)
+  }
+  const set = (p: Partial<ConnectionFields>) => {
+    setFields({ ...fields, ...p })
+    setFieldsTouched(true)
+  }
+  const effectiveUrl = mode === 'url' ? url.trim() : fieldsTouched || !editing ? buildUrl(engine, fields) : editing.url
+  const urlError = touched && mode === 'url' && !url.trim() ? 'Enter the connection URL.' : undefined
+  const serverError = touched && mode === 'fields' && !fields.server.trim() ? 'Enter the server name.' : undefined
+  const portError = mode === 'fields' && fields.port.trim() && !/^\d{1,5}$/.test(fields.port.trim()) ? 'A port is a number, e.g. ' + defaultPort(engine) + '.' : undefined
+  const databaseError = touched && mode === 'fields' && !fields.database.trim() ? 'Enter the database name.' : undefined
   const eraseError = touched && role === 'scratch' && !eraseOk ? 'Confirm that this database may be erased.' : undefined
-  const env = () => ({ url: url.trim(), user: user.trim() || null, password: password || null, role, allow_clean: role === 'scratch' || allowClean })
+  const env = () => ({ url: effectiveUrl, user: user.trim() || null, password: password || null, role, allow_clean: role === 'scratch' || allowClean })
+  const connectionInvalid = mode === 'url' ? !url.trim() : !fields.server.trim() || !fields.database.trim() || !!portError
+
+  const toUrl = () => {
+    setUrlRaw(effectiveUrl)
+    setMode('url')
+  }
+  const toFields = () => {
+    const s = splitUrl(engine, url)
+    if (!s) {
+      setSwitchError(`This URL can't be shown as server details: it uses \${env.…}, holds a password, or is not a ${engineName(engine)} URL. Keep it as a URL.`)
+      return
+    }
+    setFields(s)
+    setFieldsTouched(true)
+    if (s.user && !user.trim()) setUser(s.user)
+    setMode('fields')
+  }
 
   const runTest = async () => {
     setTouched(true)
-    if (!url.trim()) return
+    if (connectionInvalid) return
     setTest('running')
     try {
       setTest({ ok: await api.envTestDraft(env(), project.root, editing?.name) })
@@ -48,7 +87,7 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
   }
   const save = async () => {
     setTouched(true)
-    if (nameError || urlError || eraseError || !name.trim() || !url.trim() || taken) return
+    if (nameError || urlError || eraseError || !name.trim() || connectionInvalid || taken) return
     setBusy(true)
     setError(null)
     try {
@@ -66,7 +105,7 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
       open={open}
       onOpenChange={onOpenChange}
       title={editing ? `Edit ${editing.name}` : 'Add environment'}
-      dirty={!!(url || password) && !editing}
+      dirty={!editing && !!(url || password || fields.database)}
       submitting={busy}
       footer={<>
         <Button onClick={runTest} loading={test === 'running'}>Test connection</Button>
@@ -80,9 +119,53 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
           <Field label="Name" error={nameError || undefined}>{(a) => <Input {...a} value={name} disabled={!!editing} onChange={(e) => setName(e.target.value)} placeholder="staging" />}</Field>
           <Field label="Role">{(a) => <Select {...a} value={role} onChange={(e) => setRole(e.target.value as Role)}>{roles.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}</Select>}</Field>
         </div>
-        <Field label="Connection URL" error={urlError || undefined} help={`${engineName(project.engine)}, e.g. ${urlExample(project.engine)}. Use \${env.NAME} to read a value from an environment variable.`}>
-          {(a) => <Input {...a} mono value={url} onChange={(e) => setUrl(e.target.value)} placeholder={urlExample(project.engine)} spellCheck={false} />}
-        </Field>
+        {mode === 'fields' ? (
+          <div className="flex flex-col gap-4">
+            <div className="grid grid-cols-[2fr_1fr] gap-4">
+              <Field label="Server" error={serverError || undefined} help={sqlserver ? 'Host name or address, e.g. localhost or db01.corp.local' : 'Host name or address'}>
+                {(a) => <Input {...a} value={fields.server} onChange={(e) => set({ server: e.target.value })} placeholder="localhost" spellCheck={false} />}
+              </Field>
+              <Field label="Port" error={portError} help={sqlserver ? 'Empty: 1433, or the named instance\'s own port' : 'Empty: 5432'}>
+                {(a) => <Input {...a} inputMode="numeric" value={fields.port} onChange={(e) => set({ port: e.target.value })} placeholder={defaultPort(engine)} />}
+              </Field>
+            </div>
+            {sqlserver && (
+              <Field label="Instance" help="Only for a named instance, e.g. SQLEXPRESS. Empty for the default instance.">
+                {(a) => <Input {...a} value={fields.instance} onChange={(e) => set({ instance: e.target.value })} spellCheck={false} />}
+              </Field>
+            )}
+            <Field label="Database" error={databaseError || undefined}>
+              {(a) => <Input {...a} value={fields.database} onChange={(e) => set({ database: e.target.value })} placeholder="shop" spellCheck={false} />}
+            </Field>
+            {sqlserver ? (
+              <div className="flex flex-col gap-2">
+                <Checkbox checked={fields.encrypt} onChange={(v) => set({ encrypt: v })} label="Encrypt the connection" />
+                <Checkbox checked={fields.trustServerCertificate} onChange={(v) => set({ trustServerCertificate: v })}
+                  label="Trust the server certificate (for a self-signed certificate, e.g. a local container or a developer machine)" />
+              </div>
+            ) : (
+              <Field label="SSL">
+                {(a) => (
+                  <Select {...a} value={fields.sslmode} onChange={(e) => set({ sslmode: e.target.value })}>
+                    <option value="">When the server offers it (default)</option>
+                    <option value="require">Always, and verify the certificate</option>
+                    <option value="disable">Off</option>
+                  </Select>
+                )}
+              </Field>
+            )}
+            <p className="text-xs text-muted">Connection URL: <code className="font-mono break-all">{effectiveUrl}</code></p>
+            <div><Button size="sm" variant="ghost" onClick={toUrl}>Enter a URL instead</Button></div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <Field label="Connection URL" error={urlError || undefined} help={`${engineName(engine)}, e.g. ${urlExample(engine)}. Use \${env.NAME} to read a value from an environment variable.`}>
+              {(a) => <Input {...a} mono value={url} onChange={(e) => setUrl(e.target.value)} placeholder={urlExample(engine)} spellCheck={false} />}
+            </Field>
+            {switchError && <p role="alert" className="text-xs text-danger">{switchError}</p>}
+            <div><Button size="sm" variant="ghost" onClick={toFields}>Enter server details instead</Button></div>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-4">
           <Field label="User">{(a) => <Input {...a} value={user} onChange={(e) => setUser(e.target.value)} autoComplete="off" />}</Field>
           <Field label="Password" help={editing?.has_password ? 'Leave empty to keep the saved password.' : undefined}>
@@ -102,7 +185,7 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
           <Checkbox checked={allowClean} onChange={setAllowClean} label="Allow commands that erase this database (clean)" />
         )}
         {test && test !== 'running' && ('ok' in test
-          ? <InlineAlert tone="success" title="Connected">{test.ok.database} as {test.ok.user}, {engineName(engineOfUrl(url))} {test.ok.version}</InlineAlert>
+          ? <InlineAlert tone="success" title="Connected">{test.ok.database} as {test.ok.user}, {engineName(engineOfUrl(effectiveUrl))} {test.ok.version}</InlineAlert>
           : <InlineAlert tone="danger" title="Couldn't connect">{test.error}</InlineAlert>)}
         {error && <InlineAlert tone="danger" title="Not saved">{error}</InlineAlert>}
         <button type="submit" hidden />

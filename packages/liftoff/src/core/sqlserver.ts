@@ -36,6 +36,12 @@ export function parseUrl(url: string): { server: string; port?: number; instance
   return { server: server || 'localhost', port, instance: instance ?? props.get('instancename'), props }
 }
 
+/** The driver's message, with what to do about a certificate the computer does not trust (its own hint names a Node.js flag). */
+export function describeConnectError(message: string): string {
+  if (!/self[- ]signed certificate|unable to verify the first certificate|unable to get local issuer certificate|certificate has expired/i.test(message)) return message
+  return `${message.replace(/;\s*if the root CA is installed locally.*$/i, '')}. The server's certificate is not trusted by this computer: install its CA certificate, or, for a server you know (e.g. a local container), trust it with trustServerCertificate=true (in the app: Trust the server certificate)`
+}
+
 /** The same URL pointing at another database on the same server. */
 export function withDatabase(url: string, db: string): string {
   const parts = url.split(';').filter((p) => !/^\s*(databaseName|database)\s*=/i.test(p))
@@ -98,7 +104,7 @@ export class SqlServerConn implements Conn {
     }
     const connection = new Connection(config)
     await new Promise<void>((resolve, reject) => {
-      connection.connect((err) => (err ? reject(fail(err.message)) : resolve()))
+      connection.connect((err) => (err ? reject(fail(describeConnectError(err.message))) : resolve()))
     })
     connection.on('error', () => {}) // a dropped connection surfaces on the next request
     const conn = new SqlServerConn(connection)

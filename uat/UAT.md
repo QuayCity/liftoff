@@ -585,7 +585,12 @@ Values used below (61433 is the UAT port; use yours if you changed it):
 
 | field | value |
 | --- | --- |
-| Connection URL | `sqlserver://localhost:61433;databaseName=<database>;encrypt=true;trustServerCertificate=true` |
+| Server | `localhost` |
+| Port | `61433` |
+| Instance | empty |
+| Database | as the step says, e.g. `dk_dev` |
+| Encrypt the connection | on |
+| Trust the server certificate | on (the container has a self-signed certificate) |
 | User | `sa` |
 | Password | `Liftoff!Uat2026`, or `${env.LIFTOFF_UAT_PASSWORD}` where a step says so |
 
@@ -598,11 +603,14 @@ databases dk_dev, dk_test and dk_prod.
 | --- | --- | --- | --- |
 | 12.1 | start the app | the start page, with the logo: **New project…**, **Open folder…**, **Create sample…** and Recent | ☐ |
 | 12.2 | **New project…**: Folder **Choose…** `$UatRoot\desktop`, Project name `desktop`, Database engine **SQL Server**, then **Create project** | the project opens on Environments. There are no environments yet, and **Add environment** is offered | ☐ |
-| 12.3 | **Add environment** | the Connection URL box shows a **SQL Server** example (`sqlserver://localhost:1433;databaseName=shop;…`), not a `postgres://` one. The help line names SQL Server | ☐ |
-| 12.4 | Name `dev`, Role **Dev**, URL with `dk_dev`, user `sa`, password `Liftoff!Uat2026`, **Just me**. **Test connection**, then **Save** | **Connected** (version, user and database); dev is listed. `liftoff.user.toml` has dev **without** a password; Windows Credential Manager has it (`cmdkey /list`) | ☐ |
-| 12.5 | add `test`: Role **Test**, URL with `dk_test`, user `sa`, password `${env.LIFTOFF_UAT_PASSWORD}`, **Everyone on the project** | Test connection works. `liftoff.toml` has test's URL and user; `liftoff.user.toml` has `password = "${env.LIFTOFF_UAT_PASSWORD}"`, as typed | ☐ |
-| 12.6 | add `prod` the same way, Role **Production**, `dk_prod` | listed with the production role | ☐ |
-| 12.7 | add one with a wrong password, **Test connection** | **Couldn't connect** with the server's login error; **Save** still possible, but nothing is broken. Cancel it | ☐ |
+| 12.3 | **Add environment** | server details, not a URL: **Server** (`localhost`), **Port** (empty shows 1433), **Instance**, **Database**, **Encrypt the connection** (on), **Trust the server certificate** (off). Below them, the connection URL they make, which changes as you type | ☐ |
+| 12.4 | Name `dev`, Role **Dev**, Server `localhost`, Port `61433`, Database `dk_dev`, tick **Trust the server certificate**, user `sa`, password `Liftoff!Uat2026`, **Just me**. **Test connection**, then **Save** | the URL below the fields reads `sqlserver://localhost:61433;databaseName=dk_dev;encrypt=true;trustServerCertificate=true`. **Connected** (version, user and database); dev is listed. `liftoff.user.toml` has dev with that URL and **without** a password; Windows Credential Manager has it (`cmdkey /list`) | ☐ |
+| 12.4a | type `abc` as the port | **A port is a number, e.g. 1433.**; put `61433` back | ☐ |
+| 12.4b | **Enter a URL instead** | the URL box, filled with the URL the fields made. **Enter server details instead** goes back with the fields filled in | ☐ |
+| 12.4c | in URL mode type `sqlserver://${env.DB_HOST};databaseName=x`, then **Enter server details instead** | a message that this URL can't be shown as server details; it stays a URL. Cancel the dialog | ☐ |
+| 12.5 | add `test`: Role **Test**, the same server details with Database `dk_test`, user `sa`, password `${env.LIFTOFF_UAT_PASSWORD}`, **Everyone on the project** | Test connection works. `liftoff.toml` has test's URL and user; `liftoff.user.toml` has `password = "${env.LIFTOFF_UAT_PASSWORD}"`, as typed | ☐ |
+| 12.6 | add `prod` the same way, Role **Production**, Database `dk_prod` | listed with the production role. **Edit connection** on it opens with the server details filled in, not a URL | ☐ |
+| 12.7 | add one with Trust the server certificate **off**, **Test connection** | **Couldn't connect**, with a certificate error (the container's certificate is self-signed). Tick it: connected. Then try a wrong password: a login error. Cancel it | ☐ |
 | 12.8 | **Changes** | **A scratch database is needed**, offering **Create one…** | ☐ |
 | 12.9 | **Create one…** and confirm | dk_dev_scratch is created and saved as environment `scratch` (role Scratch) | ☐ |
 | 12.10 | change dev from the second window (block A below), then **Changes** | compares dev with **Migrations**: `dbo.customers` and `dbo.orders` added | ☐ |
@@ -841,7 +849,7 @@ this plan; these steps check that they stay fixed.
 | 14.4 | the conversion's hint suggested `import-flyway-history` on SQL Server, which does not support it | 7.4 | ☐ |
 | 14.5 | with no scratch environment, `diff` / `generate` did not say how to make one | 2.6 | ☐ |
 | 14.6 | (UAT feedback, 2026-10-12) the desktop app did not notice `liftoff.toml` changed outside it; the project had to be closed and reopened. It now reads the project again whenever its window gets focus | 12.35–12.38, 12.42 | ☐ |
-| 14.7 | (UAT feedback) the desktop app's Add environment dialog and Compare's URL box showed a `postgres://` example in a SQL Server project | 12.3, 12.67 | ☐ |
+| 14.7 | (UAT feedback) the desktop app asked for a connection URL, with a `postgres://` example even in a SQL Server project. It now asks for server, port, instance, database and the encryption options, and writes the URL itself; a URL can still be typed | 12.3–12.7, 12.67 | ☐ |
 | 14.8 | VS Code reloaded the project when `liftoff.toml` was saved, but not `liftoff.user.toml` | 13.21 | ☐ |
 
 Observations to judge during UAT (not bugs yet):
