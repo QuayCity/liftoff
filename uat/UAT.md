@@ -770,6 +770,30 @@ target and prod. Target and prod differ from source in known rows:
 
 ---
 
+### 12F. Azure SQL and Microsoft Entra ID (optional: needs an Azure SQL database)
+
+The local container cannot sign in with Microsoft Entra ID. Do this part only with an Azure SQL
+database where your Entra account (and, for 12.79, an app registration) is a database user:
+`CREATE USER [you@company.com] FROM EXTERNAL PROVIDER; ALTER ROLE db_owner ADD MEMBER [you@company.com];`
+
+Use a new project (**New project…**, SQL Server) in an empty folder. In each step, Server is
+`<name>.database.windows.net`, Database your database, **Encrypt the connection** on and **Trust the
+server certificate** off.
+
+| # | do | expect | result |
+| --- | --- | --- | --- |
+| 12.74 | **Add environment** → **Sign in with** | five choices: SQL Server login; Microsoft Entra ID: the account you are signed in with / sign in with a browser (MFA) / service principal / managed identity. Each shows a line saying when to use it | ☐ |
+| 12.75 | run `az login` in a terminal (with MFA). Then **Sign in with** = **the account you are signed in with** | no user or password boxes; the URL ends in `;authentication=ActiveDirectoryDefault`. **Test connection**: connected as your account | ☐ |
+| 12.76 | `az logout`, **Test connection** again | **Couldn't connect**, with a message from the Azure sign-in saying no account is available | ☐ |
+| 12.77 | **Sign in with a browser (MFA)**, Account `you@company.com`, **Test connection** | a browser opens on Microsoft's sign-in page with the account filled in; after MFA: connected | ☐ |
+| 12.78 | save it; on Environments run **Run pending** and then **Checks** → **Check for drift** | one browser sign-in for the session, not one per command | ☐ |
+| 12.79 | **Service principal**: Application (client) ID, Client secret, Directory (tenant) ID | the tenant is required (an error until filled in); **Test connection** connects as the app. The secret is stored like a password: not in `liftoff.toml` | ☐ |
+| 12.80 | the CLI with the saved project: `liftoff -e <name> info` for each environment | the same sign-ins work from the command line (the browser one opens a browser once per command) | ☐ |
+| 12.81 | a Flyway project whose `flyway.toml` URL has `;authentication=ActiveDirectoryDefault`: convert it | the environment keeps the sign-in method; it connects like 12.75 | ☐ |
+| 12.82 | a URL with `authentication=ActiveDirectoryPassword` | refused with a list of the supported methods (Microsoft is retiring password sign-in for Entra ID) | ☐ |
+
+---
+
 ## 13. VS Code extension
 
 This section stands on its own too. Each part starts with its own reset.
@@ -850,6 +874,7 @@ this plan; these steps check that they stay fixed.
 | 14.5 | with no scratch environment, `diff` / `generate` did not say how to make one | 2.6 | ☐ |
 | 14.6 | (UAT feedback, 2026-10-12) the desktop app did not notice `liftoff.toml` changed outside it; the project had to be closed and reopened. It now reads the project again whenever its window gets focus | 12.35–12.38, 12.42 | ☐ |
 | 14.7 | (UAT feedback) the desktop app asked for a connection URL, with a `postgres://` example even in a SQL Server project. It now asks for server, port, instance, database and the encryption options, and writes the URL itself; a URL can still be typed | 12.3–12.7, 12.67 | ☐ |
+| 14.9 | (UAT feedback) SQL Server could only sign in with a SQL login. Microsoft Entra ID is supported now: the signed-in account (az login, managed identity, AZURE_* variables), browser sign-in with MFA, service principal and managed identity, chosen under **Sign in with** or as `authentication=` in the URL | 12F | ☐ |
 | 14.8 | VS Code reloaded the project when `liftoff.toml` was saved, but not `liftoff.user.toml` | 13.21 | ☐ |
 
 Observations to judge during UAT (not bugs yet):

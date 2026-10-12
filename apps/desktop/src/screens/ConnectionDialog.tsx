@@ -13,6 +13,30 @@ const roles: { value: Role; label: string }[] = [
   { value: 'prod', label: 'Production' },
 ]
 
+/** SQL Server sign-in methods (JDBC names) and what each asks for. */
+const signInFor: Record<string, { label: string; help: string; user?: string; userHelp?: string; userRequired?: boolean; password?: string; tenant?: 'optional' | 'required' }> = {
+  SqlPassword: { label: 'SQL Server login', help: 'A login with a user name and password on the server.', user: 'User', password: 'Password' },
+  ActiveDirectoryDefault: {
+    label: 'Microsoft Entra ID: the account you are signed in with',
+    help: 'Uses az login or the Azure sign-in in Visual Studio Code (MFA happens there), AZURE_* environment variables, or the managed identity of an Azure machine. Nothing to type here; works in pipelines.',
+  },
+  ActiveDirectoryInteractive: {
+    label: 'Microsoft Entra ID: sign in with a browser (MFA)',
+    help: 'Opens a browser to sign in, with multi-factor authentication, the first time a command connects. For people, not pipelines.',
+    user: 'Account', userHelp: 'Optional, e.g. you@company.com: picked in the browser for you.', tenant: 'optional',
+  },
+  ActiveDirectoryServicePrincipal: {
+    label: 'Microsoft Entra ID: service principal',
+    help: 'An app registration with a client secret, usually for pipelines.',
+    user: 'Application (client) ID', userRequired: true, password: 'Client secret', tenant: 'required',
+  },
+  ActiveDirectoryManagedIdentity: {
+    label: 'Microsoft Entra ID: managed identity',
+    help: 'The identity of the Azure machine or runner LiftOff runs on.',
+    user: 'Client ID', userHelp: 'Only for a user-assigned identity; empty for the system-assigned one.',
+  },
+}
+
 export function ConnectionDialog({ open, onOpenChange, project, editing, defaultRole = 'dev', onSaved }: {
   open: boolean; onOpenChange: (o: boolean) => void; project: Project; editing?: EnvView; defaultRole?: Role; onSaved: (p: Project) => void
 }) {
@@ -56,8 +80,12 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
   const portError = mode === 'fields' && fields.port.trim() && !/^\d{1,5}$/.test(fields.port.trim()) ? 'A port is a number, e.g. ' + defaultPort(engine) + '.' : undefined
   const databaseError = touched && mode === 'fields' && !fields.database.trim() ? 'Enter the database name.' : undefined
   const eraseError = touched && role === 'scratch' && !eraseOk ? 'Confirm that this database may be erased.' : undefined
-  const env = () => ({ url: effectiveUrl, user: user.trim() || null, password: password || null, role, allow_clean: role === 'scratch' || allowClean })
-  const connectionInvalid = mode === 'url' ? !url.trim() : !fields.server.trim() || !fields.database.trim() || !!portError
+  // How the user and password boxes read for the sign-in method (SQL Server, server details only).
+  const signIn = sqlserver && mode === 'fields' ? signInFor[fields.authentication] ?? signInFor.SqlPassword : signInFor.SqlPassword
+  const tenantError = touched && signIn.tenant === 'required' && !fields.tenantId.trim() ? 'Enter the directory (tenant) ID.' : undefined
+  const userError = touched && signIn.userRequired && !user.trim() ? `Enter the ${signIn.user!.toLowerCase()}.` : undefined
+  const env = () => ({ url: effectiveUrl, user: signIn.user ? user.trim() || null : null, password: signIn.password ? password || null : null, role, allow_clean: role === 'scratch' || allowClean })
+  const connectionInvalid = mode === 'url' ? !url.trim() : !fields.server.trim() || !fields.database.trim() || !!portError || (signIn.tenant === 'required' && !fields.tenantId.trim()) || (signIn.userRequired && !user.trim())
 
   const toUrl = () => {
     setUrlRaw(effectiveUrl)
@@ -166,12 +194,30 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
             <div><Button size="sm" variant="ghost" onClick={toFields}>Enter server details instead</Button></div>
           </div>
         )}
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="User">{(a) => <Input {...a} value={user} onChange={(e) => setUser(e.target.value)} autoComplete="off" />}</Field>
-          <Field label="Password" help={editing?.has_password ? 'Leave empty to keep the saved password.' : undefined}>
-            {(a) => <PasswordInput {...a} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />}
+        {sqlserver && mode === 'fields' && (
+          <Field label="Sign in with" help={signIn.help}>
+            {(a) => (
+              <Select {...a} value={fields.authentication in signInFor ? fields.authentication : 'SqlPassword'} onChange={(e) => set({ authentication: e.target.value })}>
+                {Object.entries(signInFor).map(([value, m]) => <option key={value} value={value}>{m.label}</option>)}
+              </Select>
+            )}
           </Field>
-        </div>
+        )}
+        {signIn.tenant && (
+          <Field label="Directory (tenant) ID" error={tenantError || undefined} help={signIn.tenant === 'optional' ? 'Optional: for an account in more than one directory.' : 'The Microsoft Entra directory the app registration belongs to.'}>
+            {(a) => <Input {...a} value={fields.tenantId} onChange={(e) => set({ tenantId: e.target.value })} spellCheck={false} placeholder="00000000-0000-0000-0000-000000000000" />}
+          </Field>
+        )}
+        {(signIn.user || signIn.password) && (
+          <div className="grid grid-cols-2 gap-4">
+            {signIn.user && <Field label={signIn.user} help={signIn.userHelp} error={userError || undefined}>{(a) => <Input {...a} value={user} onChange={(e) => setUser(e.target.value)} autoComplete="off" />}</Field>}
+            {signIn.password && (
+              <Field label={signIn.password} help={editing?.has_password ? `Leave empty to keep the saved ${signIn.password.toLowerCase()}.` : undefined}>
+                {(a) => <PasswordInput {...a} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />}
+              </Field>
+            )}
+          </div>
+        )}
         <RadioGroup legend="Save the connection for" name="shared" value={shared} onChange={setShared} options={[
           { value: 'me', label: 'Just me', help: 'Stored in liftoff.user.toml, which git ignores.' },
           { value: 'team', label: 'Everyone on the project', help: 'URL and user go in liftoff.toml. The password always stays private.' },

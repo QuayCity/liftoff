@@ -12,13 +12,17 @@ export type ConnectionFields = {
   encrypt: boolean
   /** SQL Server: accept a certificate that is not trusted, e.g. a local container's self-signed one */
   trustServerCertificate: boolean
-  /** PostgreSQL: prefer (the default), require, verify-full or disable */
+  /** SQL Server: how to sign in, by its JDBC name (SqlPassword, ActiveDirectoryDefault, …) */
+  authentication: string
+  /** SQL Server, Microsoft Entra ID: the directory (tenant) ID */
+  tenantId: string
+  /** PostgreSQL: prefer (the default), require or disable */
   sslmode: string
   /** other settings of the URL, kept as written: `;applicationName=x` or `connect_timeout=5` */
   extra: string
 }
 
-export const emptyFields = (): ConnectionFields => ({ server: 'localhost', instance: '', port: '', database: '', encrypt: true, trustServerCertificate: false, sslmode: '', extra: '' })
+export const emptyFields = (): ConnectionFields => ({ server: 'localhost', instance: '', port: '', database: '', encrypt: true, trustServerCertificate: false, authentication: 'SqlPassword', tenantId: '', sslmode: '', extra: '' })
 
 export const defaultPort = (engine: string) => (engine === 'sqlserver' ? '1433' : '5432')
 
@@ -27,7 +31,9 @@ export function buildUrl(engine: string, f: ConnectionFields): string {
   const port = f.port.trim()
   if (engine === 'sqlserver') {
     const host = `${server}${f.instance.trim() ? `\\${f.instance.trim()}` : ''}${port ? `:${port}` : ''}`
-    return `sqlserver://${host};databaseName=${f.database.trim()};encrypt=${f.encrypt};trustServerCertificate=${f.trustServerCertificate}${f.extra}`
+    const auth = f.authentication && f.authentication !== 'SqlPassword' ? `;authentication=${f.authentication}` : ''
+    const tenant = auth && f.tenantId.trim() ? `;tenantId=${f.tenantId.trim()}` : ''
+    return `sqlserver://${host};databaseName=${f.database.trim()};encrypt=${f.encrypt};trustServerCertificate=${f.trustServerCertificate}${auth}${tenant}${f.extra}`
   }
   const host = server.includes(':') ? `[${server}]` : server
   const query = new URLSearchParams(f.extra)
@@ -67,6 +73,8 @@ export function splitUrl(engine: string, url: string): (ConnectionFields & { use
       else if (key === 'trustservercertificate') f.trustServerCertificate = value.toLowerCase() === 'true'
       else if (key === 'portnumber') f.port = value
       else if (key === 'instancename') f.instance = value
+      else if (key === 'authentication') f.authentication = value
+      else if (key === 'tenantid') f.tenantId = value
       else if (key === 'user') user = value
       else if (key === 'password') return undefined
       else f.extra += `;${kv.trim()}`

@@ -26,6 +26,7 @@
     "build:cli": "node scripts/build-cli.mjs"
   },
   "dependencies": {
+    "@azure/identity": "^4.13.3",
     "pg": "^8.23.1",
     "smol-toml": "^1.3.0",
     "tedious": "^20.3.3"

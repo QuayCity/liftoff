@@ -3,6 +3,7 @@
 // One tedious Connection per run, so the session-owned run lock, SET XACT_ABORT and
 // transactions spanning several batches all stay on the same session.
 
+import { InteractiveBrowserCredential } from '@azure/identity'
 import { Connection, Request, TYPES, type ConnectionConfiguration } from 'tedious'
 import type { Environment, LockMode } from './config.ts'
 import { DbError, connectError } from './errors.ts'
@@ -34,6 +35,50 @@ export function parseUrl(url: string): { server: string; port?: number; instance
   const [server, instance] = host.split('\\')
   if (props.has('portnumber')) port = Number(props.get('portnumber'))
   return { server: server || 'localhost', port, instance: instance ?? props.get('instancename'), props }
+}
+
+/** The sign-in methods, by their JDBC `authentication=` names (as Flyway projects write them). */
+export const SIGN_IN = ['SqlPassword', 'ActiveDirectoryDefault', 'ActiveDirectoryInteractive', 'ActiveDirectoryServicePrincipal', 'ActiveDirectoryManagedIdentity'] as const
+
+// One browser sign-in per process and account: the credential keeps its token in memory, so a
+// command that opens several connections (dev, scratch) asks once.
+const interactive = new Map<string, InteractiveBrowserCredential>()
+
+/**
+ * The driver's sign-in for `authentication=` in the URL. Microsoft Entra ID methods contact
+ * Microsoft's sign-in service: the one place LiftOff reaches beyond the databases.
+ */
+export function signIn(props: Map<string, string>, user: string | undefined, password: string | undefined): ConnectionConfiguration['authentication'] {
+  const method = (props.get('authentication') ?? 'SqlPassword').toLowerCase()
+  const tenantId = props.get('tenantid')
+  const need = (v: string | undefined, what: string) => {
+    if (!v) throw new Error(`${props.get('authentication')} needs ${what}`)
+    return v
+  }
+  switch (method) {
+    case 'sqlpassword':
+    case 'notspecified':
+      return { type: 'default', options: { userName: user, password } }
+    case 'activedirectorydefault':
+      // az login, Visual Studio Code's Azure sign-in, AZURE_* variables, or a managed identity
+      return { type: 'azure-active-directory-default', options: { clientId: user } }
+    case 'activedirectoryinteractive': {
+      const key = `${tenantId ?? ''}/${user ?? ''}`
+      let credential = interactive.get(key)
+      if (!credential) interactive.set(key, (credential = new InteractiveBrowserCredential({ tenantId, loginHint: user })))
+      return { type: 'token-credential', options: { credential } }
+    }
+    case 'activedirectoryserviceprincipal':
+      return {
+        type: 'azure-active-directory-service-principal-secret',
+        options: { clientId: need(user, 'the application (client) ID as the user'), clientSecret: need(password, 'the client secret as the password'), tenantId: need(tenantId, 'tenantId=… in the URL') },
+      }
+    case 'activedirectorymanagedidentity':
+    case 'activedirectorymsi':
+      return { type: 'azure-active-directory-msi-vm', options: { clientId: user } }
+    default:
+      throw new Error(`authentication=${props.get('authentication')} is not supported; use one of ${SIGN_IN.join(', ')}`)
+  }
 }
 
 /** The driver's message, with what to do about a certificate the computer does not trust (its own hint names a Node.js flag). */
@@ -83,13 +128,16 @@ export class SqlServerConn implements Conn {
     const fail = (msg: string) => connectError(envName, msg)
     const u = parseUrl(env.url)
     const flag = (k: string, dflt: boolean) => (u.props.has(k) ? /^(true|yes|1|strict|mandatory)$/i.test(u.props.get(k)!) : dflt)
-    if (flag('integratedsecurity', false)) throw fail('Windows integrated login is not supported yet; use a SQL login (user and password)')
+    if (flag('integratedsecurity', false)) throw fail('Windows integrated login is not supported yet; use a SQL login (user and password) or Microsoft Entra ID (authentication=ActiveDirectoryDefault)')
+    let authentication: ConnectionConfiguration['authentication']
+    try {
+      authentication = signIn(u.props, env.user ?? u.props.get('user') ?? u.props.get('username'), env.password ?? u.props.get('password'))
+    } catch (e) {
+      throw fail(e instanceof Error ? e.message : String(e))
+    }
     const config: ConnectionConfiguration = {
       server: u.server,
-      authentication: {
-        type: 'default',
-        options: { userName: env.user ?? u.props.get('user') ?? u.props.get('username'), password: env.password ?? u.props.get('password') },
-      },
+      authentication,
       options: {
         port: u.instance ? undefined : (u.port ?? 1433),
         instanceName: u.instance,

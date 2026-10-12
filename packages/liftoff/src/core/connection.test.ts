@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { buildUrl, emptyFields, splitUrl } from './connection.ts'
-import { describeConnectError, parseUrl as msParse } from './sqlserver.ts'
+import { describeConnectError, parseUrl as msParse, signIn } from './sqlserver.ts'
 import { parseUrl as pgParse } from './postgres.ts'
 
 test('SQL Server: fields to a URL the driver reads, and back', () => {
@@ -47,4 +47,28 @@ test('an untrusted SQL Server certificate says what to do, not which Node.js fla
   assert.equal(m.includes('--use-system-ca'), false)
   assert.match(m, /^Failed to connect to localhost:61433 - self-signed certificate\. .*trustServerCertificate=true/)
   assert.equal(describeConnectError('Login failed for user \'sa\'.'), 'Login failed for user \'sa\'.')
+})
+
+test('SQL Server sign-in methods, by their JDBC names', () => {
+  const sign = (url: string, user?: string, password?: string) => signIn(msParse(url).props, user, password)!
+  assert.deepEqual(sign('sqlserver://db;databaseName=x', 'sa', 'pw'), { type: 'default', options: { userName: 'sa', password: 'pw' } })
+  assert.deepEqual(sign('sqlserver://db;authentication=ActiveDirectoryDefault'), { type: 'azure-active-directory-default', options: { clientId: undefined } })
+  assert.deepEqual(sign('sqlserver://db;authentication=activedirectorymanagedidentity', 'mi-client'), { type: 'azure-active-directory-msi-vm', options: { clientId: 'mi-client' } })
+  assert.deepEqual(sign('sqlserver://db;authentication=ActiveDirectoryServicePrincipal;tenantId=t1', 'app-id', 'secret'), {
+    type: 'azure-active-directory-service-principal-secret', options: { clientId: 'app-id', clientSecret: 'secret', tenantId: 't1' },
+  })
+  assert.throws(() => sign('sqlserver://db;authentication=ActiveDirectoryServicePrincipal', 'app-id', 'secret'), /needs tenantId/)
+  const a = sign('sqlserver://db;authentication=ActiveDirectoryInteractive', 'me@corp.com')
+  const b = sign('sqlserver://db2;authentication=ActiveDirectoryInteractive', 'me@corp.com')
+  assert.equal(a.type, 'token-credential')
+  assert.equal((a.options as { credential: unknown }).credential, (b.options as { credential: unknown }).credential, 'one browser sign-in per account')
+  assert.throws(() => sign('sqlserver://db;authentication=ActiveDirectoryPassword', 'u', 'p'), /not supported; use one of SqlPassword, ActiveDirectoryDefault/)
+})
+
+test('the connection fields carry the sign-in method and tenant', () => {
+  const url = buildUrl('sqlserver', { ...emptyFields(), server: 'x.database.windows.net', database: 'shop', authentication: 'ActiveDirectoryServicePrincipal', tenantId: 't1' })
+  assert.equal(url, 'sqlserver://x.database.windows.net;databaseName=shop;encrypt=true;trustServerCertificate=false;authentication=ActiveDirectoryServicePrincipal;tenantId=t1')
+  const back = splitUrl('sqlserver', url)!
+  assert.deepEqual([back.authentication, back.tenantId, back.extra], ['ActiveDirectoryServicePrincipal', 't1', ''])
+  assert.equal(splitUrl('sqlserver', 'sqlserver://db;databaseName=x')!.authentication, 'SqlPassword')
 })

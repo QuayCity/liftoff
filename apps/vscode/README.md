@@ -40,9 +40,10 @@ Plain-SQL database migrations, written from your dev database, next to your code
 - **Compare data.** **LiftOff: Compare Data…** compares the rows of two databases, fast on big
   tables, and shows the rows that differ in a grid, a page at a time. Then open the INSERT /
   UPDATE / DELETE script or apply it to the target.
-- **PostgreSQL and SQL Server.**
+- **PostgreSQL and SQL Server,** including Azure SQL with Microsoft Entra ID sign-in (your `az login`
+  account, a browser sign-in with MFA, a service principal or a managed identity).
 
 The extension comes with the `liftoff` program and runs it for you; nothing is sent anywhere but
-your own databases. Point `liftoff.cliPath` at another build if you need to.
+your own databases (and, for Azure SQL with Microsoft Entra ID, Microsoft's sign-in service). Point `liftoff.cliPath` at another build if you need to.
 
 Free and open source (MIT).

@@ -76,8 +76,8 @@ up. PostgreSQL and SQL Server. Free and open source (MIT).
   script written (or required) and numbered after main; merges deploy through your environments.
 - **Three ways in.** The command line (every command also answers in JSON), a desktop app, and a
   VS Code extension.
-- **Offline.** The program never calls the internet. Your CI runners only need to reach your
-  databases.
+- **Offline.** The program only talks to your databases (and, for Azure SQL with Microsoft Entra
+  ID, to Microsoft's sign-in service). Your CI runners only need to reach your databases.
 
 ## Price
 
@@ -138,7 +138,9 @@ Flyway-style `-key=value` options are accepted, and `import-flyway-history` copi
 you have, which LiftOff rebuilds from your scripts to compare against. `liftoff create-scratch`
 makes one next to your dev database.
 
-**Does it send anything anywhere?** No. No telemetry, no sign-in, no update checks. Passwords go to
+**Does it send anything anywhere?** No. No telemetry, no LiftOff account, no update checks. The one
+exception is signing in to Azure SQL with Microsoft Entra ID, which talks to Microsoft's sign-in
+service, as any SQL Server tool does. Passwords go to
 your operating system's keychain or come from environment variables, never into `liftoff.toml`.
 
 **Is it ready for production?** It is new (version 0.1). The tests run against real PostgreSQL,
