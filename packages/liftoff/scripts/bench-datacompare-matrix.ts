@@ -1,9 +1,12 @@
-// Data compare speed by table size, for a table with a key and for a heap (no key).
-//   LIFTOFF_TEST_MSSQL='sqlserver://…' node scripts/bench-datacompare-matrix.ts ms 100,1000,10000
-//   LIFTOFF_TEST_PG=postgres://… node scripts/bench-datacompare-matrix.ts pg 100,1000,10000
-// Per size: bench_a and bench_b (dropped first) get N rows in a keyed table and in a heap with the
-// same columns; bench_b then gets 25 scattered differences (10 changed, 10 deleted, 5 extra).
-// Times: the comparison, the first page of rows, the sync script, applying it, and comparing again.
+// Data compare speed by table size and by how much differs, for a table with a key and for a heap.
+//   LIFTOFF_TEST_MSSQL='sqlserver://…' node scripts/bench-datacompare-matrix.ts ms 10000,100000 1,5,10,20 3
+//   LIFTOFF_TEST_PG=postgres://… node scripts/bench-datacompare-matrix.ts pg 10000,100000 1,5,10,20 3
+// Arguments: engine, sizes (rows), changes (% of the rows), runs per measurement, tables (keyed,heap).
+// Per size and percentage, bench_a and bench_b (dropped first) get N rows in a keyed table and in a
+// heap with the same columns. bench_b then gets the same changes in both, spread over the table:
+// a third of them rows with a changed value, a third rows missing, a third extra rows.
+// The comparison and the script are timed `runs` times (median, min-max); the sync is applied once,
+// then compared again. Every line checks the counts against the changes made.
 
 import * as fs from 'node:fs'
 import * as os from 'node:os'
@@ -15,15 +18,23 @@ import { open } from '../src/core/db.ts'
 import { PgConn, withDatabase } from '../src/core/postgres.ts'
 import { SqlServerConn } from '../src/core/sqlserver.ts'
 
-const [engine = 'ms', list = '100,1000,10000,50000,100000,200000,300000'] = process.argv.slice(2)
+const [engine = 'ms', sizeList = '100,1000,10000,50000,100000,200000,300000', pctList = '1,5,10,20', runsArg = '3', tableList = 'keyed,heap'] = process.argv.slice(2)
 const pg = engine === 'pg'
+const runs = Number(runsArg)
 const base = pg ? process.env.LIFTOFF_TEST_PG : process.env.LIFTOFF_TEST_MSSQL
 if (!base) throw new Error(`set ${pg ? 'LIFTOFF_TEST_PG' : 'LIFTOFF_TEST_MSSQL'}`)
 const urlOf = (db: string) => (pg ? withDatabase(base, db) : `${base};databaseName=${db}`)
 const env = (db: string) => ({ url: urlOf(db), role: 'test' as const, allow_clean: false, placeholders: {} })
-const since = (t: number) => (Date.now() - t) / 1000
 
-async function setUp(rows: number): Promise<void> {
+/** Changed, missing and extra rows made in bench_b. */
+type Made = { changed: number; missing: number; extra: number }
+
+// Rows are picked by a spread of their id over 0..9999: (id * 7919) % 10000, so the changes are
+// scattered through the table rather than in one block.
+const SPREAD = 10_000
+const spread = (col: string) => `(${col} * 7919) % ${SPREAD}`
+
+async function setUp(rows: number, pct: number): Promise<Made> {
   const admin = pg ? await PgConn.open('admin', env('postgres')) : await SqlServerConn.open('admin', env('master'))
   for (const db of ['bench_a', 'bench_b']) {
     await admin.batch(pg ? `drop database if exists ${db} with (force)` : `IF DB_ID('${db}') IS NOT NULL BEGIN ALTER DATABASE [${db}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [${db}]; END`)
@@ -45,15 +56,30 @@ async function setUp(rows: number): Promise<void> {
     }
     await c.close()
   }
+  // pct% of the spread: the first third changed, the second third deleted; as many extra rows as deleted.
+  const third = Math.round((SPREAD * pct) / 100 / 3)
   const b = await open('bench_b', env('bench_b'))
-  const step = Math.max(1, Math.floor(rows / 26))
+  const made: Made = { changed: 0, missing: 0, extra: 0 }
   for (const table of ['keyed', 'heap']) {
     const tbl = pg ? `public.${table}` : `dbo.${table}`
-    for (let k = 1; k <= 10; k++) await b.batch(`UPDATE ${tbl} SET note = 'changed' WHERE id = ${k * step}`)
-    for (let k = 11; k <= 20; k++) await b.batch(`DELETE FROM ${tbl} WHERE id = ${k * step}`)
-    for (let k = 1; k <= 5; k++) await b.batch(`INSERT INTO ${tbl} (id, account, kind, amount, at, note) VALUES (${rows + k}, 1, 'x', 1, ${pg ? 'now()' : 'SYSDATETIME()'}, 'extra')`)
+    const count = async (where: string) => {
+      const sql = `SELECT COUNT(*) FROM ${tbl} WHERE ${where}`
+      return Number(pg ? (await (b as PgConn).row(sql))[0] : (await (b as SqlServerConn).query(sql))[0][0])
+    }
+    made.changed = await count(`${spread('id')} < ${third}`)
+    made.missing = await count(`${spread('id')} >= ${third} AND ${spread('id')} < ${2 * third}`)
+    made.extra = made.missing
+    await b.batch(`UPDATE ${tbl} SET amount = amount + 1, note = ${pg ? "coalesce(note, '') || ' (changed)'" : "CONCAT(note, N' (changed)')"} WHERE ${spread('id')} < ${third}`)
+    await b.batch(`DELETE FROM ${tbl} WHERE ${spread('id')} >= ${third} AND ${spread('id')} < ${2 * third}`)
+    await b.batch(
+      pg
+        ? `insert into ${tbl} select ${rows} + i, 1, 'extra', i, now(), 'extra ' || i from generate_series(1, ${made.extra}) i`
+        : `WITH n AS (SELECT TOP (${made.extra}) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS i FROM sys.all_columns a CROSS JOIN sys.all_columns b CROSS JOIN sys.all_columns c)
+           INSERT INTO ${tbl} SELECT ${rows} + i, 1, N'extra', i, SYSDATETIME(), CONCAT(N'extra ', i) FROM n`,
+    )
   }
   await b.close()
+  return made
 }
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-bench-'))
@@ -61,33 +87,52 @@ init(dir, 'bench', pg ? 'postgresql' : 'sqlserver')
 for (const db of ['bench_a', 'bench_b']) saveEnvironment(dir, db, env(db), true, false)
 const cfg = Config.load(dir)
 
-const table = (name: string) => (pg ? `public.${name}` : `dbo.${name}`)
-console.log('| rows | table | compare (s) | found (src / tgt / diff) | first page (s) | script (s) | apply (s) | compare again (s) | then |')
-console.log('| ---: | --- | ---: | --- | ---: | ---: | ---: | ---: | --- |')
-for (const rows of list.split(',').map(Number)) {
-  await setUp(rows)
-  for (const name of ['keyed', 'heap']) {
-    const t = table(name)
-    let at = Date.now()
-    const s = await DataSession.open(cfg, parseSide('bench_a'), parseSide('bench_b'), [t])
-    const compare = since(at)
-    const r = s.result.tables[0]
-    at = Date.now()
-    await s.page(t, r.different ? 'different' : 'only_in_target', 0, 50)
-    const page = since(at)
-    at = Date.now()
-    for await (const _ of s.script()) void _
-    const script = since(at)
-    at = Date.now()
-    await s.apply()
-    const apply = since(at)
-    await s.close()
-    at = Date.now()
-    const again = await DataSession.open(cfg, parseSide('bench_a'), parseSide('bench_b'), [t])
-    const compareAgain = since(at)
-    const x = again.result.tables[0]
-    await again.close()
-    const left = x.only_in_source + x.only_in_target + x.different
-    console.log(`| ${rows.toLocaleString('en')} | ${name === 'keyed' ? 'key' : 'heap'} | ${compare.toFixed(2)} | ${r.only_in_source} / ${r.only_in_target} / ${r.different} | ${page.toFixed(2)} | ${script.toFixed(2)} | ${apply.toFixed(2)} | ${compareAgain.toFixed(2)} | ${left ? `${left} left!` : 'same'} |`)
+const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]
+const timed = (xs: number[]) => (xs.length > 1 ? `${median(xs).toFixed(2)} (${Math.min(...xs).toFixed(2)}–${Math.max(...xs).toFixed(2)})` : xs[0].toFixed(2))
+const sideA = parseSide('bench_a')
+const sideB = parseSide('bench_b')
+
+console.log(`SQL ${pg ? 'PostgreSQL' : 'Server'}; ${runs} run(s) per measurement; times in seconds: median (min–max)`)
+console.log('| rows | changed | table | differences found (source / target / changed) | as made | compare | script | apply | compare again | then |')
+console.log('| ---: | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | --- |')
+for (const rows of sizeList.split(',').map(Number)) {
+  for (const pct of pctList.split(',').map(Number)) {
+    const made = await setUp(rows, pct)
+    for (const name of tableList.split(',')) {
+      const t = pg ? `public.${name}` : `dbo.${name}`
+      const compare: number[] = []
+      const script: number[] = []
+      let found = ''
+      for (let r = 0; r < runs; r++) {
+        let at = Date.now()
+        const s = await DataSession.open(cfg, sideA, sideB, [t])
+        compare.push((Date.now() - at) / 1000)
+        const x = s.result.tables[0]
+        found = `${x.only_in_source} / ${x.only_in_target} / ${x.whole_rows ? '–' : x.different}`
+        at = Date.now()
+        for await (const _ of s.script()) void _
+        script.push((Date.now() - at) / 1000)
+        if (r < runs - 1) await s.close()
+        else {
+          // The last run applies the sync, then compares again.
+          at = Date.now()
+          await s.apply()
+          const apply = (Date.now() - at) / 1000
+          await s.close()
+          at = Date.now()
+          const again = await DataSession.open(cfg, sideA, sideB, [t])
+          const compareAgain = (Date.now() - at) / 1000
+          const y = again.result.tables[0]
+          await again.close()
+          const left = y.only_in_source + y.only_in_target + y.different
+          // A heap has no "changed": a changed row is one only in the source and one only in the target.
+          const expected = name === 'keyed' ? `${made.missing} / ${made.extra} / ${made.changed}` : `${made.missing + made.changed} / ${made.extra + made.changed} / –`
+          const total = made.changed + made.missing + made.extra
+          console.log(
+            `| ${rows.toLocaleString('en')} | ${pct}% (${total.toLocaleString('en')}) | ${name === 'keyed' ? 'key' : 'heap'} | ${found} | ${found === expected ? 'yes' : `NO, made ${expected}`} | ${timed(compare)} | ${timed(script)} | ${apply.toFixed(2)} | ${compareAgain.toFixed(2)} | ${left ? `${left} left!` : 'same'} |`,
+          )
+        }
+      }
+    }
   }
 }

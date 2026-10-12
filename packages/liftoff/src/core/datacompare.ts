@@ -170,8 +170,8 @@ const pg: Dialect = {
     const out = new Map<string, (string | null)[]>()
     if (!t.key.length) {
       // By row hash: one scan per batch, hashing every row as the comparison did.
-      for (let i = 0; i < keys.length; i += 5000) {
-        const hashes = [...new Set(keys.slice(i, i + 5000).map((k) => k[0]))]
+      for (let i = 0; i < keys.length; i += HEAP_READ) {
+        const hashes = [...new Set(keys.slice(i, i + HEAP_READ).map((k) => k[0]))]
         const rows = await (c as PgConn).rows(
           `select h::text, ${t.columns.map((col) => `t.${quoteIdent(col.name)}::text`).join(', ')} from (select ${pgRowHash(t)} h, t.* from ${pgFrom(t)}) t where h = any($1::bigint[])`,
           [hashes],
@@ -299,8 +299,8 @@ const ms: Dialect = {
     const out = new Map<string, (string | null)[]>()
     if (!t.key.length) {
       // By row hash: one scan per batch, hashing every row as the comparison did.
-      for (let i = 0; i < keys.length; i += 5000) {
-        const hashes = [...new Set(keys.slice(i, i + 5000).map((k) => k[0]))].join(',')
+      for (let i = 0; i < keys.length; i += HEAP_READ) {
+        const hashes = [...new Set(keys.slice(i, i + HEAP_READ).map((k) => k[0]))].join(',')
         const rows = await (c as SqlServerConn).query(
           `SELECT CAST(t.liftoff_h AS VARCHAR(20)), ${t.columns.map(msText).join(', ')}
              FROM (SELECT ${msRowHash(t)} AS liftoff_h, t.* FROM ${msFrom(t)}) t
@@ -332,8 +332,9 @@ const ms: Dialect = {
     // One pass: hash each row once (in the derived table; written out in an IN list, SQL Server
     // hashes the row again for every value: 18 s instead of 1.3 s on 300,000 rows), keep the rows
     // looked for, number the copies of each, delete the first n.
-    const values = copies.map(([h, n]) => `(${h}, ${n})`).join(', ')
-    return `WITH d AS (SELECT x.liftoff_h, ROW_NUMBER() OVER (PARTITION BY x.liftoff_h ORDER BY (SELECT NULL)) AS liftoff_rn FROM (SELECT ${msRowHash(t)} AS liftoff_h FROM ${msFrom(t)}) x WHERE x.liftoff_h IN (SELECT v.h FROM (VALUES ${values}) v(h, n))) DELETE FROM d WHERE EXISTS (SELECT 1 FROM (VALUES ${values}) v(h, n) WHERE v.h = d.liftoff_h AND d.liftoff_rn <= v.n);`
+    // The hashes go in as JSON: a VALUES list holds at most 1,000 rows.
+    const json = `OPENJSON(N'[${copies.map(([h, n]) => `[${h},${n}]`).join(',')}]') WITH (h bigint '$[0]', n int '$[1]')`
+    return `WITH d AS (SELECT x.liftoff_h, ROW_NUMBER() OVER (PARTITION BY x.liftoff_h ORDER BY (SELECT NULL)) AS liftoff_rn FROM (SELECT ${msRowHash(t)} AS liftoff_h FROM ${msFrom(t)}) x WHERE x.liftoff_h IN (SELECT v.h FROM ${json} v)) DELETE FROM d WHERE EXISTS (SELECT 1 FROM ${json} v WHERE v.h = d.liftoff_h AND d.liftoff_rn <= v.n);`
   },
 }
 
@@ -403,6 +404,12 @@ const dialectOf = (c: Conn): Dialect => (c.engine === 'PostgreSQL' ? pg : ms)
 
 /** About this many rows per bucket; tables up to SMALL rows skip the buckets. */
 const PER_BUCKET = 250
+/**
+ * Tables without a key: reading rows by their hash, and deleting by it, reads the whole table each
+ * time, so do it for many rows at once. Measured on a 300,000-row heap with 40,000 differing rows.
+ */
+const HEAP_READ = 50_000
+const HEAP_DELETE = 10_000
 const SMALL = 5_000
 
 /** The tables both sides have, with the columns both have; and why the others are left out. */
@@ -631,7 +638,7 @@ export class DataSession {
       for (const id of [...order].reverse()) {
         const d = this.diffs.get(id)!
         if (!d.table.key.length) {
-          // One statement (one pass over the table) per 1,000 distinct rows; their values above it.
+          // One statement (one pass over the table) per HEAP_DELETE distinct rows; their values above it.
           for (const [hashes, rows] of await this.byHash(this.b, d.table, d.onlyInTarget)) {
             yield hashes.map(([h, n]) => `-- ${n > 1 ? `${n} copies of ` : ''}${JSON.stringify(rows.get(keyId([h])))}`).join('\n') + `\n${dl.deleteCopies(d.table, hashes)}\n`
           }
@@ -648,13 +655,16 @@ export class DataSession {
       const cols = t.columns
       if (doInsert && d.onlyInSource.length) {
         if (isMs && t.identity) yield `SET IDENTITY_INSERT ${fq(t)} ON;\n`
-        for (let i = 0; i < d.onlyInSource.length; i += 1000) {
-          const keys = d.onlyInSource.slice(i, i + 1000)
+        const read = t.key.length ? 1000 : HEAP_READ
+        for (let i = 0; i < d.onlyInSource.length; i += read) {
+          const keys = d.onlyInSource.slice(i, i + read)
           const found = await dl.rows(this.a, t, keys)
           // One INSERT per key, so each copy of a duplicated row (no key) is inserted.
           const rows = keys.map((k) => found.get(keyId(k))).filter((r) => r !== undefined)
           const overriding = !isMs && t.identity ? ' OVERRIDING SYSTEM VALUE' : ''
-          yield rows.map((r) => `INSERT INTO ${fq(t)} (${cols.map((c) => dl.q(c.name)).join(', ')})${overriding} VALUES (${r.map((v, j) => dl.literal(cols[j], v)).join(', ')});`).join('\n') + '\n'
+          for (let j = 0; j < rows.length; j += 1000) {
+            yield rows.slice(j, j + 1000).map((r) => `INSERT INTO ${fq(t)} (${cols.map((c) => dl.q(c.name)).join(', ')})${overriding} VALUES (${r.map((v, k) => dl.literal(cols[k], v)).join(', ')});`).join('\n') + '\n'
+          }
         }
         if (isMs && t.identity) yield `SET IDENTITY_INSERT ${fq(t)} OFF;\n`
       }
@@ -676,15 +686,16 @@ export class DataSession {
     }
   }
 
-  /** Row hashes with their number of copies, in batches, with the rows' values (for the comment above a delete). */
+  /** Row hashes with their number of copies, one batch per delete statement, with the rows' values (for the comment above it). */
   private async byHash(c: Conn, t: DataTable, keys: Key[]): Promise<[[string, number][], Map<string, (string | null)[]>][]> {
     const copies = new Map<string, number>()
     for (const [h] of keys) copies.set(h, (copies.get(h) ?? 0) + 1)
     const all = [...copies]
     const out: [[string, number][], Map<string, (string | null)[]>][] = []
-    for (let i = 0; i < all.length; i += 1000) {
-      const batch = all.slice(i, i + 1000)
-      out.push([batch, await dialectOf(c).rows(c, t, batch.map(([h]) => [h]))])
+    for (let i = 0; i < all.length; i += HEAP_READ) {
+      const read = all.slice(i, i + HEAP_READ)
+      const rows = await dialectOf(c).rows(c, t, read.map(([h]) => [h]))
+      for (let j = 0; j < read.length; j += HEAP_DELETE) out.push([read.slice(j, j + HEAP_DELETE), rows])
     }
     return out
   }
