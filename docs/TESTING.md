@@ -2,8 +2,8 @@
 
 # Trying LiftOff by hand
 
-The full acceptance test plan, with scripts that set up SQL Server and every scenario, is
-[uat/UAT.md](../uat/UAT.md). This page is the short version. How fast data compare is, by table
+The user documentation and tutorials start at [docs/README.md](README.md). The full acceptance
+test plan, with scripts that set up SQL Server and every scenario, is [uat/UAT.md](../uat/UAT.md). This page is the short version. How fast data compare is, by table
 size and amount of change: [data-compare-benchmark.md](data-compare-benchmark.md).
 
 How to set LiftOff up on a fresh machine and try every part yourself: the CLI, the desktop app

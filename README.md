@@ -101,6 +101,9 @@ liftoff -e test migrate
 takes `--output-type json` for scripts and pipelines. To try it without a project:
 `liftoff init --sample`.
 
+**[The documentation](docs/README.md)** has the user guide and step-by-step tutorials for a new
+database and for an existing one, on the command line, in the desktop app and in VS Code.
+
 ## How a project goes
 
 **A new database.** The first script is `V0001`, the next `V0002`, and so on. Every database is
