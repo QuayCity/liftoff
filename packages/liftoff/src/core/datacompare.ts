@@ -332,9 +332,11 @@ const ms: Dialect = {
     // One pass: hash each row once (in the derived table; written out in an IN list, SQL Server
     // hashes the row again for every value: 18 s instead of 1.3 s on 300,000 rows), keep the rows
     // looked for, number the copies of each, delete the first n.
-    // The hashes go in as JSON: a VALUES list holds at most 1,000 rows.
+    // The hashes go in as JSON: a VALUES list holds at most 1,000 rows. HASH JOIN reads the JSON
+    // once into a hash table; otherwise SQL Server reads it again for every row (46 s instead of
+    // 1.7 s for 10,000 rows of a 300,000-row heap).
     const json = `OPENJSON(N'[${copies.map(([h, n]) => `[${h},${n}]`).join(',')}]') WITH (h bigint '$[0]', n int '$[1]')`
-    return `WITH d AS (SELECT x.liftoff_h, ROW_NUMBER() OVER (PARTITION BY x.liftoff_h ORDER BY (SELECT NULL)) AS liftoff_rn FROM (SELECT ${msRowHash(t)} AS liftoff_h FROM ${msFrom(t)}) x WHERE x.liftoff_h IN (SELECT v.h FROM ${json} v)) DELETE FROM d WHERE EXISTS (SELECT 1 FROM ${json} v WHERE v.h = d.liftoff_h AND d.liftoff_rn <= v.n);`
+    return `WITH d AS (SELECT x.liftoff_h, ROW_NUMBER() OVER (PARTITION BY x.liftoff_h ORDER BY (SELECT NULL)) AS liftoff_rn FROM (SELECT ${msRowHash(t)} AS liftoff_h FROM ${msFrom(t)}) x WHERE x.liftoff_h IN (SELECT v.h FROM ${json} v)) DELETE FROM d WHERE EXISTS (SELECT 1 FROM ${json} v WHERE v.h = d.liftoff_h AND d.liftoff_rn <= v.n) OPTION (HASH JOIN);`
   },
 }
 
