@@ -37,6 +37,11 @@ that fits your situation.
 | [Command reference](guide/cli-reference.md) | every command and option |
 | [Troubleshooting](guide/troubleshooting.md) | exit codes, common errors and what to do |
 
+## Showing LiftOff to others
+
+Two 30-minute demo walkthroughs, with what to do, see and say:
+[on the command line](demo/cli.md) and [in the desktop app](demo/desktop-app.md).
+
 More:
 - [Trying LiftOff by hand](TESTING.md), for contributors;
 - [Data compare benchmark](data-compare-benchmark.md): how fast data compare is, by table size.
