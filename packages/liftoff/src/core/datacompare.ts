@@ -163,7 +163,9 @@ const pg: Dialect = {
     return rows.map(([b, n, s]) => [Number(b), Number(n), String(s)])
   },
   async pairs(c, t, mask, buckets) {
-    const where = buckets ? ` where ${pgKeyHash(t)} & $1 = any($2::int[])` : ''
+    // IN (select unnest(…)), not = any($2): PostgreSQL checks a parameter array element by element for
+    // every row, so 65,000 differing buckets times 2,000,000 rows took minutes; a set is hashed once.
+    const where = buckets ? ` where ${pgKeyHash(t)} & $1 in (select unnest($2::int[]))` : ''
     const rows = await (c as PgConn).rows(`select ${[...t.key.map((k) => `t.${quoteIdent(k)}::text`), `${pgRowHash(t)}::text`].join(', ')} from ${pgFrom(t)}${where}`, buckets ? [mask, buckets] : [])
     return rows.map((r) => [r.slice(0, t.key.length).map(String), String(r[t.key.length])])
   },
@@ -174,7 +176,7 @@ const pg: Dialect = {
       for (let i = 0; i < keys.length; i += HEAP_READ) {
         const hashes = [...new Set(keys.slice(i, i + HEAP_READ).map((k) => k[0]))]
         const rows = await (c as PgConn).rows(
-          `select h::text, ${t.columns.map((col) => `t.${quoteIdent(col.name)}::text`).join(', ')} from (select ${pgRowHash(t)} h, t.* from ${pgFrom(t)}) t where h = any($1::bigint[])`,
+          `select h::text, ${t.columns.map((col) => `t.${quoteIdent(col.name)}::text`).join(', ')} from (select ${pgRowHash(t)} h, t.* from ${pgFrom(t)}) t where h in (select unnest($1::bigint[]))`,
           [hashes],
         )
         for (const r of rows) out.set(keyId([String(r[0])]), r.slice(1).map((v) => (v === null ? null : String(v))))
