@@ -91,11 +91,15 @@ type Bridge = {
   openFile(filterName: string, extensions: string[]): Promise<string | null>
   saveFile(defaultPath: string, filterName: string, extensions: string[]): Promise<string | null>
   onLog(cb: (e: LogEvent) => void): () => void
+  setTheme(theme: 'system' | 'light' | 'dark'): Promise<void>
 }
 const bridge = (window as unknown as { liftoff?: Bridge }).liftoff
 
 /** True inside the desktop app, false in a plain browser. */
 export const inDesktop = bridge !== undefined
+
+/** The window frame follows the app's theme; a browser has none to change. */
+export const setNativeTheme = (theme: 'system' | 'light' | 'dark') => void bridge?.setTheme(theme)
 
 /** Calls a command; a failure rejects with its ErrorReport (code, exit_code, message). */
 async function invoke<T>(name: string, args?: Record<string, unknown>): Promise<T> {

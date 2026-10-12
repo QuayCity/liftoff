@@ -17,6 +17,10 @@ The project's name is in the title bar, with a button to close it. Along the top
 workspaces: **Environments**, **Changes**, **Scripts**, **Compare**, **Commit** and **Pipelines**;
 the gear opens **Settings**.
 
+**Light or dark.** The sun / moon / screen button, top right on the start page and in the title
+bar, switches between light, dark and the same as the system, one click at a time. The choice is
+remembered on this computer for every project.
+
 Files changed outside the app (`liftoff.toml` edited in a text editor, scripts added from git)
 are read again whenever the window gets focus. If a file cannot be read, a red banner names the
 problem and the screens keep the last good state.

@@ -16,6 +16,25 @@ test.describe('F01 Home and projects', () => {
     await expect(page.getByRole('region', { name: 'staging environment' })).toBeVisible()
   })
 
+  test('F01-H5 the theme switch: system, light, dark, remembered, also in a project', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'light' })
+    const html = page.locator('html')
+    const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+    await expect(html).not.toHaveAttribute('data-theme')
+    const light = await bg()
+    await page.getByRole('button', { name: /^Theme: same as the system/ }).click()
+    await expect(html).toHaveAttribute('data-theme', 'light')
+    await page.getByRole('button', { name: /^Theme: light/ }).click()
+    await expect(html).toHaveAttribute('data-theme', 'dark')
+    expect(await bg()).not.toBe(light)
+    await page.reload()
+    await expect(html).toHaveAttribute('data-theme', 'dark')
+    await page.getByRole('button', { name: 'shop-db', exact: true }).click()
+    await page.getByRole('banner').getByRole('button', { name: /^Theme: dark/ }).click()
+    await expect(html).not.toHaveAttribute('data-theme')
+    expect(await bg()).toBe(light)
+  })
+
   test('F01-N2 a missing folder cannot be opened, only removed', async ({ page }) => {
     const row = page.getByRole('listitem').filter({ hasText: 'billing' })
     await expect(row.getByText('Folder not found')).toBeVisible()

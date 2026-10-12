@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { IconButton, cx } from './controls'
 import { Kbd, Spinner } from './display'
 import { Menu } from './overlays'
+import { ThemeToggle } from './theme'
 
 export const workspaces = ['Changes', 'Environments', 'Compare', 'Scripts', 'Commit', 'Pipelines'] as const
 export type Workspace = (typeof workspaces)[number]
@@ -40,6 +41,7 @@ export function TitleBar({ project, workspace, tabsActive = true, onWorkspace, o
           <Search aria-hidden className="size-3.5" />Commands<Kbd>Ctrl K</Kbd>
         </button>
       )}
+      <ThemeToggle />
       <IconButton label="Settings" icon={Settings} onClick={onSettings} />
     </header>
   )

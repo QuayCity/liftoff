@@ -6,11 +6,13 @@ import { App } from './App'
 import { DesignPage } from './design/DesignPage'
 import './index.css'
 import { OverlayProvider } from './ui/overlays'
+import { applyTheme, savedTheme } from './ui/theme'
 
 // ?theme=dark|light forces a theme (screenshots); ?design shows the component sheet.
 const params = new URLSearchParams(location.search)
 const forced = params.get('theme')
 if (forced) document.documentElement.dataset.theme = forced
+else applyTheme(savedTheme())
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

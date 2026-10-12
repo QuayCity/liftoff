@@ -6,6 +6,7 @@ import { Button, Field, Input, RadioGroup, Select } from '../ui/controls'
 import { Card, EmptyState, InlineAlert, Spinner } from '../ui/display'
 import logo from '../assets/logo.svg'
 import { Dialog } from '../ui/overlays'
+import { ThemeToggle } from '../ui/theme'
 
 function ConvertSummary({ r }: { r: ConvertReport }) {
   return (
@@ -82,6 +83,7 @@ export function Home({ onOpen }: { onOpen: (p: Project) => void }) {
           <h1 className="text-display">LiftOff</h1>
           <p className="mt-1 text-muted">Turn database changes into reviewed migration scripts, then run them everywhere.</p>
         </div>
+        <div className="ml-auto self-start"><ThemeToggle /></div>
       </header>
 
       <div className="grid grid-cols-3 gap-4">

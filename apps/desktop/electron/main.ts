@@ -1,6 +1,6 @@
 // The desktop app's main process: one window, and the commands (commands.ts) the screens call.
 
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron'
 import * as path from 'node:path'
 import { asLiftoffError } from '../../../packages/liftoff/src/core/errors.ts'
 import { commands, type Host } from './commands.ts'
@@ -50,6 +50,9 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('liftoff:set-theme', (_e, theme: unknown) => {
+    if (theme === 'system' || theme === 'light' || theme === 'dark') nativeTheme.themeSource = theme
+  })
   ipcMain.handle('liftoff:pick-folder', async () => {
     const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
     return r.canceled ? null : (r.filePaths[0] ?? null)
