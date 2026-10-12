@@ -3,7 +3,8 @@
 How fast `liftoff data-compare` is on SQL Server and PostgreSQL, by table size and by how much of
 the table differs, for a table with a primary key and for a heap (a table without a key, compared
 as whole rows). Measured on 2026-10-12. All 168 results found exactly the differences that were
-made, and every sync left both sides the same (0 wrong).
+made, and every sync left both sides the same (0 wrong). Tables of 1, 2 and 5 million rows are
+further down: [1, 2 and 5 million rows](#1-2-and-5-million-rows).
 
 ## At a glance
 
@@ -198,6 +199,107 @@ Times in seconds (median of 3 runs) for a 300,000-row table.
 
 The PostgreSQL heap runs at 200,000 rows with 10% and 20% changes overlapped with a short test on
 the SQL Server container, which shows in their wider compare ranges.
+
+## 1, 2 and 5 million rows
+
+The same measurement on bigger tables: 48 more results, all of which found exactly
+the differences that were made and left both sides the same after the sync (0 wrong). Nothing ran
+out of memory.
+
+These ran with two changes made after the first part of this benchmark, so their compare times
+are not directly comparable with the tables above:
+
+- **Smaller buckets, read in chunks.** Rows are grouped into buckets of about 16 instead of 250,
+  and the key and hash pairs of differing buckets are read 500,000 rows at a time. With changes
+  spread over a table, almost every 250-row bucket differed, so nearly every pair had to be read:
+  1,000,000 rows with 1% changed took 17.5 s to compare on SQL Server and 1 GB of memory, now
+  5.5 s and under 400 MB.
+- **PostgreSQL matches the differing buckets as a set.** With 16-row buckets their list grew to
+  tens of thousands, and PostgreSQL checked that list element by element for every row: a
+  first run took 55 s for 1,000,000 rows with 5% changed and 162 s for 2,000,000. Matching it as
+  a set brought those to 5.5 s and 9.1 s.
+
+### At a glance: 5,000,000 rows
+
+Times in seconds (median of 3 runs for compare and script).
+
+| 5,000,000 rows | changed | SQL Server: compare / script / apply | PostgreSQL: compare / script / apply |
+| --- | ---: | --- | --- |
+| with a key | 1% | 19.50 / 1.92 / 5.68 s | 11.95 / 0.52 / 4.85 s |
+| with a key | 5% | 34.10 / 9.70 / 29.52 s | 18.68 / 1.86 / 23.11 s |
+| with a key | 10% | 50.55 / 19.29 / 58.09 s | 32.09 / 3.42 / 44.19 s |
+| with a key | 20% | 82.56 / 38.99 / 122.99 s | 41.54 / 6.53 / 86.60 s |
+| heap (no key) | 1% | 54.07 / 22.30 / 44.63 s | 48.32 / 17.17 / 51.73 s |
+| heap (no key) | 5% | 126.70 / 91.07 / 191.84 s | 92.23 / 70.36 / 214.93 s |
+| heap (no key) | 10% | 160.71 / 162.12 / 387.35 s | 117.87 / 126.48 / 416.51 s |
+| heap (no key) | 20% | 224.31 / 389.98 / 803.59 s | 143.02 / 253.64 / 797.65 s |
+
+- **Compare grows with the table and, less, with the changes.** On PostgreSQL a keyed table of
+  5,000,000 rows compares in about 12 s with 1% changed; on SQL Server in about 20 s.
+- **Script and apply grow with the differences**, as on smaller tables.
+- **Heaps cost the most at this size**: at 20% changed, 667,000 rows have to be deleted and
+  667,000 inserted, each found by hashing every row: about 13 minutes to apply on either database.
+  Give big tables a primary key.
+- The SQL Server run at 5,000,000 rows, 20% changed, with a key, shares the machine with a short
+  test in two of its three compares, which shows in its wide range (60–95 s).
+
+### SQL Server
+
+| rows | changed rows | table | found: only in source / only in target / changed | compare | script | apply | compare again |
+| ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |
+| 1,000,000 | 1% (9,900) | key | 3300 / 3300 / 3300 | 5.53 (5.01–6.24) | 0.45 (0.42–0.45) | 1.21 | 2.71 |
+| 1,000,000 | 1% (9,900) | heap | 6600 / 6600 | 10.01 (8.99–10.62) | 4.77 (4.74–5.17) | 6.37 | 4.72 |
+| 1,000,000 | 5% (50,100) | key | 16700 / 16700 / 16700 | 13.56 (12.97–14.01) | 1.97 (1.97–1.98) | 5.74 | 2.72 |
+| 1,000,000 | 5% (50,100) | heap | 33400 / 33400 | 16.54 (15.92–17.39) | 7.39 (7.20–8.32) | 14.32 | 4.90 |
+| 1,000,000 | 10% (99,900) | key | 33300 / 33300 / 33300 | 16.02 (15.58–16.55) | 3.89 (3.87–3.92) | 11.10 | 2.75 |
+| 1,000,000 | 10% (99,900) | heap | 66600 / 66600 | 21.08 (20.99–21.79) | 16.14 (15.49–16.29) | 30.69 | 4.86 |
+| 1,000,000 | 20% (200,100) | key | 66700 / 66700 / 66700 | 18.54 (14.33–18.70) | 7.58 (7.37–7.66) | 22.13 | 2.79 |
+| 1,000,000 | 20% (200,100) | heap | 133400 / 133400 | 25.49 (25.04–26.24) | 34.27 (33.14–34.43) | 63.66 | 4.89 |
+| 2,000,000 | 1% (19,800) | key | 6600 / 6600 / 6600 | 9.43 (9.15–9.71) | 0.80 (0.79–0.83) | 2.30 | 4.89 |
+| 2,000,000 | 1% (19,800) | heap | 13200 / 13200 | 18.79 (18.39–18.79) | 8.98 (8.68–9.75) | 13.84 | 8.80 |
+| 2,000,000 | 5% (100,200) | key | 33400 / 33400 / 33400 | 17.11 (16.97–23.09) | 3.77 (3.72–3.97) | 10.76 | 4.90 |
+| 2,000,000 | 5% (100,200) | heap | 66800 / 66800 | 39.94 (39.70–40.50) | 21.33 (21.15–21.80) | 40.29 | 8.82 |
+| 2,000,000 | 10% (199,800) | key | 66600 / 66600 / 66600 | 32.89 (32.79–32.97) | 7.79 (7.74–8.05) | 25.50 | 5.73 |
+| 2,000,000 | 10% (199,800) | heap | 133200 / 133200 | 56.55 (56.11–60.64) | 38.70 (38.57–41.67) | 87.75 | 9.56 |
+| 2,000,000 | 20% (400,200) | key | 133400 / 133400 / 133400 | 38.64 (38.23–40.35) | 15.57 (15.48–15.84) | 47.03 | 5.97 |
+| 2,000,000 | 20% (400,200) | heap | 266800 / 266800 | 63.23 (57.55–66.37) | 77.74 (75.42–80.46) | 166.67 | 9.21 |
+| 5,000,000 | 1% (49,500) | key | 16500 / 16500 / 16500 | 19.50 (18.57–20.05) | 1.92 (1.89–2.08) | 5.68 | 13.03 |
+| 5,000,000 | 1% (49,500) | heap | 33000 / 33000 | 54.07 (52.55–55.11) | 22.30 (21.48–22.37) | 44.63 | 23.46 |
+| 5,000,000 | 5% (250,500) | key | 83500 / 83500 / 83500 | 34.10 (33.84–34.54) | 9.70 (9.65–9.90) | 29.52 | 13.48 |
+| 5,000,000 | 5% (250,500) | heap | 167000 / 167000 | 126.70 (121.83–127.44) | 91.07 (90.32–107.08) | 191.84 | 22.50 |
+| 5,000,000 | 10% (499,500) | key | 166500 / 166500 / 166500 | 50.55 (49.94–51.41) | 19.29 (19.04–19.43) | 58.09 | 14.99 |
+| 5,000,000 | 10% (499,500) | heap | 333000 / 333000 | 160.71 (158.25–161.31) | 162.12 (161.84–163.74) | 387.35 | 23.59 |
+| 5,000,000 | 20% (1,000,500) | key | 333500 / 333500 / 333500 | 82.56 (59.63–95.49) | 38.99 (37.31–41.52) | 122.99 | 13.93 |
+| 5,000,000 | 20% (1,000,500) | heap | 667000 / 667000 | 224.31 (218.81–254.61) | 389.98 (311.57–426.11) | 803.59 | 27.79 |
+
+### PostgreSQL
+
+| rows | changed rows | table | found: only in source / only in target / changed | compare | script | apply | compare again |
+| ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |
+| 1,000,000 | 1% (9,900) | key | 3300 / 3300 / 3300 | 3.67 (3.56–3.81) | 0.08 (0.07–0.13) | 1.13 | 2.82 |
+| 1,000,000 | 1% (9,900) | heap | 6600 / 6600 | 7.17 (7.14–7.54) | 3.60 (3.49–3.61) | 5.57 | 4.37 |
+| 1,000,000 | 5% (50,100) | key | 16700 / 16700 / 16700 | 5.47 (5.34–5.49) | 0.28 (0.27–0.40) | 4.50 | 2.88 |
+| 1,000,000 | 5% (50,100) | heap | 33400 / 33400 | 9.23 (9.18–12.63) | 4.53 (4.01–4.58) | 14.99 | 6.36 |
+| 1,000,000 | 10% (99,900) | key | 33300 / 33300 / 33300 | 7.36 (6.59–7.83) | 0.73 (0.68–1.07) | 10.01 | 0.82 |
+| 1,000,000 | 10% (99,900) | heap | 66600 / 66600 | 13.60 (13.39–13.63) | 9.33 (8.02–10.88) | 25.21 | 4.37 |
+| 1,000,000 | 20% (200,100) | key | 66700 / 66700 / 66700 | 7.54 (7.29–7.61) | 1.24 (1.14–1.31) | 17.41 | 2.91 |
+| 1,000,000 | 20% (200,100) | heap | 133400 / 133400 | 14.96 (12.90–16.21) | 12.98 (12.92–13.95) | 44.38 | 4.44 |
+| 2,000,000 | 1% (19,800) | key | 6600 / 6600 / 6600 | 5.22 (5.13–5.69) | 0.17 (0.16–0.28) | 1.92 | 1.48 |
+| 2,000,000 | 1% (19,800) | heap | 13200 / 13200 | 11.15 (11.15–11.28) | 7.38 (7.23–7.53) | 14.89 | 10.27 |
+| 2,000,000 | 5% (100,200) | key | 33400 / 33400 / 33400 | 9.13 (8.95–9.82) | 0.66 (0.64–0.75) | 9.17 | 1.64 |
+| 2,000,000 | 5% (100,200) | heap | 66800 / 66800 | 27.94 (24.80–29.60) | 16.21 (15.71–16.28) | 43.36 | 11.06 |
+| 2,000,000 | 10% (199,800) | key | 66600 / 66600 / 66600 | 12.05 (11.80–12.81) | 1.21 (1.13–1.34) | 17.32 | 6.82 |
+| 2,000,000 | 10% (199,800) | heap | 133200 / 133200 | 33.32 (32.01–33.98) | 24.35 (24.00–24.85) | 78.71 | 10.36 |
+| 2,000,000 | 20% (400,200) | key | 133400 / 133400 / 133400 | 16.51 (16.39–16.52) | 2.42 (2.38–2.83) | 35.98 | 7.48 |
+| 2,000,000 | 20% (400,200) | heap | 266800 / 266800 | 38.29 (38.10–38.94) | 47.09 (46.65–47.40) | 150.88 | 9.96 |
+| 5,000,000 | 1% (49,500) | key | 16500 / 16500 / 16500 | 11.95 (11.80–12.36) | 0.52 (0.42–0.57) | 4.85 | 6.73 |
+| 5,000,000 | 1% (49,500) | heap | 33000 / 33000 | 48.32 (37.37–49.60) | 17.17 (16.98–17.28) | 51.73 | 28.54 |
+| 5,000,000 | 5% (250,500) | key | 83500 / 83500 / 83500 | 18.68 (17.26–26.93) | 1.86 (1.66–1.87) | 23.11 | 20.54 |
+| 5,000,000 | 5% (250,500) | heap | 167000 / 167000 | 92.23 (90.47–92.41) | 70.36 (68.83–71.63) | 214.93 | 27.86 |
+| 5,000,000 | 10% (499,500) | key | 166500 / 166500 / 166500 | 32.09 (26.70–32.22) | 3.42 (2.90–3.43) | 44.19 | 20.55 |
+| 5,000,000 | 10% (499,500) | heap | 333000 / 333000 | 117.87 (117.39–118.81) | 126.48 (124.49–127.74) | 416.51 | 27.85 |
+| 5,000,000 | 20% (1,000,500) | key | 333500 / 333500 / 333500 | 41.54 (31.48–41.99) | 6.53 (5.62–7.44) | 86.60 | 20.00 |
+| 5,000,000 | 20% (1,000,500) | heap | 667000 / 667000 | 143.02 (139.91–144.44) | 253.64 (250.46–253.92) | 797.65 | 27.37 |
 
 ## Reading the numbers
 
