@@ -141,7 +141,7 @@ Mark the **Result** column as ✅ (pass), ❌ (fail) or ⚠️ (works, but somet
 | --- | --- | --- | --- |
 | 2.1 | `liftoff init --engine sqlserver` | `Created liftoff.toml`; the folders `migrations\` and `schema-model\` and a `.gitignore` holding `liftoff.user.toml` | ☐ |
 | 2.2 | open `liftoff.toml` | `engine = "sqlserver"`, `schemas = [ "dbo" ]`, `history_table = "liftoff_schema_history"` | ☐ |
-| 2.3 | `Get-Content $UatRoot\greenfield-environments.toml \| Add-Content liftoff.toml` | dev, test and prod environments, with `password = "${env.LIFTOFF_UAT_PASSWORD}"` | ☐ |
+| 2.3 | `Get-Content $UatRoot\greenfield-environments.toml \| Add-Content $UatRoot\greenfield\liftoff.toml` | dev, test and prod environments, with `password = "${env.LIFTOFF_UAT_PASSWORD}"` | ☐ |
 | 2.4 | `liftoff project` | `greenfield (sqlserver, scripts in migrations)`, then dev, prod and test with their roles. No URLs | ☐ |
 | 2.5 | `liftoff -e dev test-connection` | `Connected to dev: gf_dev as sa (SQL Server 16…)` | ☐ |
 | 2.6 | `liftoff diff` | no environment with role 'scratch'; add one or name it explicitly (`liftoff create-scratch` makes one next to the dev database); exit 2 | ☐ |
@@ -339,7 +339,7 @@ table and view), committed.
 
 | # | do | expect | result |
 | --- | --- | --- | --- |
-| 6.1 | `liftoff init --engine sqlserver`, then `Get-Content $UatRoot\adopt-environments.toml \| Add-Content liftoff.toml` | environments prod, scratch, test, stage, qa and new | ☐ |
+| 6.1 | `liftoff init --engine sqlserver`, then `Get-Content $UatRoot\adopt-environments.toml \| Add-Content $UatRoot\adopt\liftoff.toml` | environments prod, scratch, test, stage, qa and new | ☐ |
 | 6.2 | `liftoff -e prod migrate` | `'prod' already has tables but no migration history. Baseline it first … or … --allow-non-empty`; **exit 12** | ☐ |
 | 6.3 | `liftoff -e prod adopt` | captures prod, builds the capture on scratch to check it, `prod is now at B0001__existing_schema.sql`, `Wrote … and recorded it there` | ☐ |
 | 6.4 | read `migrations\B0001__existing_schema.sql` | all 4 tables, with keys, checks, defaults and the index, plus the view, the function, the procedure and the trigger. In an order that runs: tables before foreign keys, the function before the procedure that uses it | ☐ |
