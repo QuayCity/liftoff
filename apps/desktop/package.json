@@ -79,14 +79,6 @@
       "license": "../../LICENSE",
       "artifactName": "LiftOff-Setup-${version}.${ext}"
     },
-    "mac": {
-      "target": "dmg",
-      "icon": "electron/icon.png",
-      "category": "public.app-category.developer-tools"
-    },
-    "dmg": {
-      "artifactName": "LiftOff-${version}-${arch}.${ext}"
-    },
     "linux": {
       "target": "AppImage",
       "icon": "electron/icon.png",

@@ -12,7 +12,7 @@ happens behind each button; this page shows where the buttons are.
 
 ## Before you start
 
-- **The desktop app runs** ([Installing](../guide/installing.md#the-desktop-app)), and **git** is
+- **The desktop app is installed** (Windows or Linux; on a Mac, use [tutorial 4](04-existing-database-cli.md) or [6](06-existing-database-vscode.md)) ([Installing](../guide/installing.md#the-desktop-app)), and **git** is
   installed.
 - **The databases.** Use your own, or follow [step 0 of tutorial 4](04-existing-database-cli.md#step-0-the-existing-databases-only-to-follow-along)
   to make `shop_prod` (the truth, with rows), `shop_test` (missing a view and a procedure),

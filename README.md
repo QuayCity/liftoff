@@ -156,7 +156,8 @@ PgBouncer and SQL Server on every change. Try it on a test environment first, an
 From [Releases](../../releases), download one of:
 
 - **the desktop app**: `LiftOff-Setup-<version>.exe` (Windows, a setup wizard that also puts `liftoff`
-  on your PATH), `LiftOff-<version>-arm64.dmg` (macOS) or `LiftOff-<version>-x86_64.AppImage` (Linux);
+  on your PATH) or `LiftOff-<version>-x86_64.AppImage` (Linux). There is no desktop app for macOS;
+  on a Mac, use the command-line program or the VS Code extension;
 - **the VS Code extension**: `liftoff-vscode-<platform>.vsix`;
 - **the command-line program only**: `liftoff-<platform>`, one file.
 

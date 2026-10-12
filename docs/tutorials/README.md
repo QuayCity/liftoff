@@ -4,7 +4,7 @@ Step-by-step walk-throughs, each from an empty folder to a change deployed to pr
 situation you are in and the tool you like; the three tools share one project format, so you can
 switch later.
 
-| | command line | desktop app | VS Code |
+| | command line | desktop app (Windows, Linux) | VS Code |
 | --- | --- | --- | --- |
 | **A new database.** Nothing exists yet. You change a dev database; LiftOff writes the migrations and deploys them. | [1](01-new-project-cli.md) | [2](02-new-project-desktop.md) | [3](03-new-project-vscode.md) |
 | **An existing database.** It has years of tables and procedures, no migration scripts, and copies that have drifted. You capture it as a baseline, bring every environment under LiftOff, and carry on. | [4](04-existing-database-cli.md) | [5](05-existing-database-desktop.md) | [6](06-existing-database-vscode.md) |

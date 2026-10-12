@@ -2,7 +2,9 @@
 
 The desktop app does what the command line does, with screens instead of commands. It runs the
 same program, so a project made here works on the command line and in VS Code, and the other way
-round. [Installing](installing.md#the-desktop-app) says how to start it.
+round. It is for Windows and Linux; on a Mac, use the command line or
+[VS Code](vscode.md) ([why](installing.md#the-desktop-app)). [Installing](installing.md#the-desktop-app)
+says how to get it.
 
 ## The start page
 

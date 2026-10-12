@@ -2,7 +2,13 @@
 
 LiftOff comes in three parts. The command-line program, `liftoff`, does all the work. The VS Code
 extension and the desktop app run it for you, and each comes with its own copy, so install only
-the one you want: the desktop app's installer gives you the app and the `liftoff` command.
+the one you want: the desktop app's Windows installer gives you the app and the `liftoff` command.
+
+| | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| command-line program | yes | yes | yes (Apple silicon) |
+| VS Code extension | yes | yes | yes (Apple silicon) |
+| desktop app | yes | yes | no, [see why](#the-desktop-app) |
 
 ## What you need
 
@@ -72,13 +78,12 @@ The LiftOff rocket appears in the activity bar on the left. See [The VS Code ext
 
 ## The desktop app
 
-Download the installer for your platform from the same Releases page. It includes the `liftoff`
-program, so this is the only download you need.
+The desktop app is for **Windows and Linux**. Download it from the same Releases page; the Windows
+installer includes the `liftoff` program, so that is the only download you need there.
 
 | platform | file | install |
 | --- | --- | --- |
 | Windows (x64) | `LiftOff-Setup-<version>.exe` | run it and follow the wizard |
-| macOS (Apple silicon) | `LiftOff-<version>-arm64.dmg` | open it and drag LiftOff to Applications |
 | Linux (x64) | `LiftOff-<version>-x86_64.AppImage` | `chmod +x` it and run it |
 
 **Windows.** The wizard installs for your user only, so it needs no administrator rights. You
@@ -91,15 +96,18 @@ choose the folder (default `%LOCALAPPDATA%\Programs\LiftOff`), and it adds:
 For a silent install (a script, or software deployment):
 `LiftOff-Setup-<version>.exe /S /D=C:\Tools\LiftOff`.
 
-**Not signed yet.** Until the installers are code-signed, Windows SmartScreen says "Windows
-protected your PC" the first time: click **More info** > **Run anyway**. On macOS, right-click
-LiftOff in Applications > **Open** the first time, or run `xattr -dr com.apple.quarantine
-/Applications/LiftOff.app`.
+**Not signed yet.** Until the installer is code-signed, Windows SmartScreen says "Windows
+protected your PC" the first time: click **More info** > **Run anyway**.
 
-The command-line program inside the app is at `resources\bin\liftoff.exe` in the install folder
-on Windows, and `LiftOff.app/Contents/Resources/bin/liftoff` on macOS. On macOS and Linux, link it
-onto your PATH yourself if you want it in a terminal, e.g.
-`sudo ln -s /Applications/LiftOff.app/Contents/Resources/bin/liftoff /usr/local/bin/liftoff`.
+**Linux.** The AppImage runs the app; for `liftoff` in a terminal, install
+[the command-line program](#the-command-line-program) as well.
+
+**macOS.** There is no desktop app for macOS. An app that opens on a Mac without warnings has to be
+signed and notarised by Apple, which needs a paid Apple Developer membership; an unsigned one is
+blocked by Gatekeeper, and since macOS 15 getting past that takes several steps in System
+Settings. On a Mac, use [the command-line program](#the-command-line-program) or
+[the VS Code extension](#the-vs-code-extension): both do everything the app does. A signed macOS
+app may follow if there is demand.
 
 See [The desktop app](desktop-app.md).
 

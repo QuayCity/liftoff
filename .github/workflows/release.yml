@@ -1,8 +1,8 @@
 # Pushing a version tag (git tag v0.2.0 && git push origin v0.2.0) builds and publishes a release:
 #   liftoff-linux-x64, liftoff-win-x64.exe, liftoff-macos-arm64     the single-file CLI
 #   liftoff-vscode-<platform>.vsix                                  the VS Code extension, CLI included
-#   LiftOff-Setup-<version>.exe, LiftOff-<version>-arm64.dmg,
-#   LiftOff-<version>-x86_64.AppImage                               the desktop app, CLI included
+#   LiftOff-Setup-<version>.exe, LiftOff-<version>-x86_64.AppImage  the desktop app (Windows, Linux)
+# No desktop app for macOS: unsigned, Gatekeeper blocks it, and signing needs a paid Apple account.
 # The tag has to match the version in the code (see the first job), so a release says what it is.
 # Run it by hand (Actions > Release > Run workflow) for a dry run: everything is built, nothing published.
 name: Release
@@ -67,9 +67,10 @@ jobs:
         working-directory: apps/vscode
         run: npm ci && npm run build && npm run bundle-cli && npx vsce package --target ${{ matrix.vsce }} --out ../../liftoff-vscode-${{ matrix.vsce }}.vsix
       - name: The desktop app's installer for this platform (the CLI goes inside it)
+        if: matrix.name != 'macos-arm64'
         working-directory: apps/desktop
-        # Not code-signed yet: with no certificate configured, Windows SmartScreen and macOS
-        # Gatekeeper warn the first time it starts.
+        # Not code-signed yet: with no certificate configured, Windows SmartScreen warns the first
+        # time it starts.
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm ci && npm run build && npm run build:electron && npx electron-builder --publish never
@@ -82,7 +83,6 @@ jobs:
             liftoff-${{ matrix.name }}${{ matrix.ext }}
             liftoff-vscode-${{ matrix.vsce }}.vsix
             apps/desktop/release/LiftOff-Setup-*.exe
-            apps/desktop/release/LiftOff-*.dmg
             apps/desktop/release/LiftOff-*.AppImage
           if-no-files-found: error
 

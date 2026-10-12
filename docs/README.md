@@ -11,7 +11,7 @@ and SQL Server, from the command line, a desktop app or VS Code.
 New to LiftOff? Read [the concepts](guide/concepts.md) (ten minutes), then follow the tutorial
 that fits your situation.
 
-| your situation | command line | desktop app | VS Code |
+| your situation | command line | desktop app (Windows, Linux) | VS Code |
 | --- | --- | --- | --- |
 | **A new database**: nothing exists yet | [tutorial 1](tutorials/01-new-project-cli.md) | [tutorial 2](tutorials/02-new-project-desktop.md) | [tutorial 3](tutorials/03-new-project-vscode.md) |
 | **An existing database**: it has tables, but no migration scripts | [tutorial 4](tutorials/04-existing-database-cli.md) | [tutorial 5](tutorials/05-existing-database-desktop.md) | [tutorial 6](tutorials/06-existing-database-vscode.md) |

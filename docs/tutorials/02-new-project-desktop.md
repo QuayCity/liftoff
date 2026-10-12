@@ -10,7 +10,8 @@ step 2 and the connection dialog asks for what PostgreSQL needs instead.
 
 ## Before you start
 
-- **The desktop app runs**: see [Installing](../guide/installing.md#the-desktop-app).
+- **The desktop app is installed** (Windows or Linux): see [Installing](../guide/installing.md#the-desktop-app).
+  On a Mac, follow [tutorial 1](01-new-project-cli.md) or [tutorial 3](03-new-project-vscode.md) instead.
 - **git** is installed (the Commit screen uses it).
 - **A SQL Server you can create databases on**, and a tool to run SQL on it. No server?
   `docker run -d --name shop-sql -p 1433:1433 -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=Shop!Pass2026" mcr.microsoft.com/mssql/server:2022-latest`
@@ -68,7 +69,7 @@ Below the fields you see the connection URL they make; you never have to type on
 
 Where it went: dev is in `liftoff.user.toml`, which git ignores, because your dev database is
 yours alone. The password is in your operating system's keychain (Windows Credential Manager,
-macOS Keychain), not in any file.
+the Secret Service on Linux), not in any file.
 
 > Azure SQL? Pick one of the **Microsoft Entra ID** choices under **Sign in with**: the account
 > you are signed in with (`az login`), a browser sign-in with MFA, a service principal or a
