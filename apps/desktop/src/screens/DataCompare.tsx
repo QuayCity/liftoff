@@ -138,7 +138,7 @@ export function DataCompare({ project, source, target, header }: {
                       <button className="flex min-w-0 flex-1 flex-col items-start text-left" onClick={() => setActive(t.table)} aria-current={t.table === active ? 'true' : undefined}>
                         <span className="truncate font-mono">{t.table}</span>
                         <span className="text-xs text-muted">
-                          {t.skipped ? `Not compared: ${t.skipped}` : differs(t) ? `${n(t.different)} different · ${n(t.only_in_source)} only in source · ${n(t.only_in_target)} only in target` : `Same (${n(t.source_rows)} rows)`}
+                          {t.skipped ? `Not compared: ${t.skipped}` : differs(t) ? `${t.whole_rows ? '' : `${n(t.different)} different · `}${n(t.only_in_source)} only in source · ${n(t.only_in_target)} only in target${t.whole_rows ? ' · no key, whole rows' : ''}` : `Same (${n(t.source_rows)} rows)`}
                         </span>
                       </button>
                     </li>
@@ -209,6 +209,13 @@ function Rows({ id, table, sourceName, targetName }: { id: string; table: TableR
           </button>
         ))}
       </div>
+      {table.whole_rows && (
+        <div className="p-3 pb-0">
+          <InlineAlert tone="info" title="No key: whole rows compared">
+            A changed row shows once as only in the source and once as only in the target. The sync deletes the target's copy and inserts the source's; duplicate rows are counted copy by copy.
+          </InlineAlert>
+        </div>
+      )}
       {error && <div className="p-3"><InlineAlert tone="danger" title="Could not read the rows">{error}</InlineAlert></div>}
       {page && (
         <div className="overflow-auto">
@@ -221,10 +228,10 @@ function Rows({ id, table, sourceName, targetName }: { id: string; table: TableR
               </tr>
             </thead>
             <tbody>
-              {page.rows.map((r) => {
+              {page.rows.map((r, ri) => {
                 const sides = ([['source', r.source, sourceName], ['target', r.target, targetName]] as const).filter(([, v]) => v)
                 return sides.map(([side, values, name], i) => (
-                  <tr key={`${r.key.join('|')}-${side}`} className={cx(i === sides.length - 1 && 'border-b border-border')}>
+                  <tr key={`${ri}-${side}`} className={cx(i === sides.length - 1 && 'border-b border-border')}>
                     <th scope="row" className="whitespace-nowrap px-2 py-1 text-left font-sans font-normal text-muted">{name}</th>
                     {values!.map((v, j) => {
                       const changed = kind === 'different' && r.source && r.target && r.source[j] !== r.target[j]

@@ -67,7 +67,7 @@ export type Change = {
 }
 export type CompareResult = { source: string; target: string; engine: string; changes: Change[]; not_compared: string[] }
 export type DataKind = 'only_in_source' | 'only_in_target' | 'different'
-export type TableResult = { table: string; key: string[]; source_rows: number; target_rows: number; only_in_source: number; only_in_target: number; different: number; skipped?: string; ms: number }
+export type TableResult = { table: string; key: string[]; source_rows: number; target_rows: number; only_in_source: number; only_in_target: number; different: number; skipped?: string; /** no key: whole rows compared */ whole_rows?: boolean; ms: number }
 export type DataComparison = { id: string; source: string; target: string; engine: string; tables: TableResult[]; ms: number }
 export type RowPage = { columns: string[]; key: string[]; total: number; rows: { key: string[]; source: (string | null)[] | null; target: (string | null)[] | null }[] }
 export type SyncWhat = { insert: boolean; update: boolean; delete: boolean }
@@ -324,9 +324,9 @@ const fakeApi: Api = {
   dataOpen: async (_p, source, target) => {
     await wait(300)
     if (source === target) throw fail('LIFTOFF_CONFIG', 'the source and the target are the same', 2)
-    const t = (table: string, s: number, o: number, d: number, rows: number, skipped?: string) =>
-      ({ table, key: skipped ? [] : ['id'], source_rows: rows + s, target_rows: rows + o, only_in_source: s, only_in_target: o, different: d, skipped, ms: 40 })
-    return { id: '1', source, target, engine: 'PostgreSQL', ms: 1840, tables: [t('public.audit_log', 0, 0, 0, 0, 'no primary key or unique index on non-null columns, so rows cannot be matched'), t('public.customers', 0, 0, 0, 52_310), t('public.orders', 2, 1, 132, 1_204_551)] }
+    const t = (table: string, s: number, o: number, d: number, rows: number, skipped?: string, wholeRows?: boolean) =>
+      ({ table, key: skipped || wholeRows ? [] : ['id'], source_rows: rows + s, target_rows: rows + o, only_in_source: s, only_in_target: o, different: d, skipped, ...(wholeRows && { whole_rows: true }), ms: 40 })
+    return { id: '1', source, target, engine: 'PostgreSQL', ms: 1840, tables: [t('public.archive', 0, 0, 0, 0, 'only in the target; compare the schemas first'), t('public.audit_log', 3, 2, 0, 8_120, undefined, true), t('public.customers', 0, 0, 0, 52_310), t('public.orders', 2, 1, 132, 1_204_551)] }
   },
   dataPage: async (_id, table, kind, offset, limit) => {
     await wait(100)

@@ -609,15 +609,16 @@ const COMMANDS: Record<string, Command> = {
           ...r.tables.map((t) =>
             t.skipped
               ? `  ${t.table}: not compared, ${t.skipped}`
-              : `  ${t.table}: ${t.only_in_source + t.only_in_target + t.different === 0 ? 'same' : `${t.only_in_source} only in the source, ${t.only_in_target} only in the target, ${t.different} different`} (${t.source_rows} / ${t.target_rows} rows)`,
+              : `  ${t.table}: ${t.only_in_source + t.only_in_target + t.different === 0 ? 'same' : `${t.only_in_source} only in the source, ${t.only_in_target} only in the target, ${t.different} different`} (${t.source_rows} / ${t.target_rows} rows)${t.whole_rows ? '; no key, whole rows compared' : ''}`,
           ),
         ]
         if (str(v, 'rows')) {
           const page = await s.page(str(v, 'rows')!, kind as 'different', Number(str(v, 'offset')), Number(str(v, 'limit')))
           out.rows = page
           lines.push('', `${str(v, 'rows')}, ${kind}: ${page.rows.length} of ${page.total}`)
-          for (const row of page.rows) {
-            lines.push(`  key ${row.key.join(', ')}`)
+          for (const [n, row] of page.rows.entries()) {
+            // No key: the "key" is the row hash, which means nothing to a reader.
+            lines.push(page.key.length ? `  key ${row.key.join(', ')}` : `  row ${Number(str(v, 'offset')) + n + 1}`)
             page.columns.forEach((c, i) => {
               const [a, b] = [row.source?.[i], row.target?.[i]]
               if (row.source && row.target && a === b) return

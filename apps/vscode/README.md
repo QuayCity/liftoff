@@ -39,7 +39,8 @@ Plain-SQL database migrations, written from your dev database, next to your code
   sync script, write it as a migration, or apply it to the target.
 - **Compare data.** **LiftOff: Compare Data…** compares the rows of two databases, fast on big
   tables, and shows the rows that differ in a grid, a page at a time. Then open the INSERT /
-  UPDATE / DELETE script or apply it to the target.
+  UPDATE / DELETE script or apply it to the target. Tables without a key (heaps) are compared as
+  whole rows.
 - **PostgreSQL and SQL Server,** including Azure SQL with Microsoft Entra ID sign-in (your `az login`
   account, a browser sign-in with MFA, a service principal or a managed identity).
 

@@ -468,11 +468,12 @@ prod (`uat\sql\data-target-changes.sql`):
 | dbo.products | 1 | 1 | 3 | an IDENTITY column |
 | dbo.order_lines | 2 | 1 | 5 | a two-column primary key |
 | dbo.events | 0 | 0 | 3 | of 200,000 rows |
-| dbo.audit_log | – | – | – | no key: skipped |
+| dbo.page_views | 13 | 8 | – | no key (a heap, 50,000 rows): whole rows compared. 10 rows deleted, 5 extra copies, 3 changed |
+| dbo.audit_log | 1 | 2 | – | no key; its "created" row has a different time on each side |
 
 **Tests:**
 - the counts, and the speed;
-- skipped tables;
+- tables without a key (heaps): whole rows, duplicates counted copy by copy;
 - browsing the rows by kind and page;
 - the sync script and its switches;
 - apply, and the production guard;
@@ -481,17 +482,18 @@ prod (`uat\sql\data-target-changes.sql`):
 
 | # | do | expect | result |
 | --- | --- | --- | --- |
-| 9.1 | `liftoff data-compare --source source --target target` | exactly the counts above; `dbo.audit_log: not compared, no primary key…`. A few seconds in all; events reports `3 of 128 buckets differ` | ☐ |
+| 9.1 | `liftoff data-compare --source source --target target` | exactly the counts above; the two key-less tables end with `; no key, whole rows compared` and have no "different" count. A few seconds in all; events reports `3 of 128 buckets differ` | ☐ |
 | 9.2 | `… --table dbo.products` | only products | ☐ |
 | 9.3 | `… --rows dbo.customers` (kind different) | the 25 rows, source and target side by side; NULLs shown as NULL; Unicode intact (`Ünïcödé`, `Zoë ✓ 日本`) | ☐ |
 | 9.4 | `… --rows dbo.customers --kind only_in_source --limit 10 --offset 20` | rows 21–30 of the 30 (ids 21–30) | ☐ |
 | 9.5 | `… --rows dbo.order_lines --kind only_in_target` | `(1001, 1)` | ☐ |
-| 9.6 | `… --script sync.sql` | INSERT, UPDATE and DELETE statements. For products it uses `SET IDENTITY_INSERT … ON/OFF`; composite keys are matched on both columns | ☐ |
+| 9.6 | `… --script sync.sql` | INSERT, UPDATE and DELETE statements. For products it uses `SET IDENTITY_INSERT … ON/OFF`; composite keys are matched on both columns. For page_views: `DELETE TOP (n) t … WHERE <row hash> = …` with the row's values in a comment above it, and one INSERT per missing copy | ☐ |
+| 9.6a | `… --rows dbo.page_views --kind only_in_target` | 8 rows, numbered `row 1` … `row 8` (no key to show): the 5 extra copies and the 3 changed rows as the target has them | ☐ |
 | 9.7 | `… --script - --no-delete` | no DELETE statements | ☐ |
 | 9.8 | `… --save-diff rows.json`, then `Get-Content rows.json` | the keys and side labels only. **No URL and no password** in the file | ☐ |
 | 9.9 | `… --from-diff rows.json --rows dbo.events` | the 3 event rows, at once, without comparing again | ☐ |
 | 9.10 | `liftoff data-compare --source target --target source --from-diff rows.json --rows dbo.events` | refused: the sides do not match the file; **exit 2** | ☐ |
-| 9.11 | `… --apply` | applied in one transaction. Comparing again shows 0 everywhere (audit_log still skipped) | ☐ |
+| 9.11 | `… --apply` | applied in one transaction. Comparing again shows 0 everywhere, the heaps included: page_views has 50,000 rows on both sides again | ☐ |
 | 9.12 | `liftoff data-compare --source source --target prod --apply` | refused without `--confirm-production` | ☐ |
 | 9.13 | the same with `--confirm-production` | applied | ☐ |
 | 9.14 | `liftoff data-compare --source (uaturl dc_source) --target (uaturl dc_target) --output-type json` | one JSON object with the tables and counts; no password anywhere in it | ☐ |
@@ -757,11 +759,13 @@ target and prod. Target and prod differ from source in known rows:
 | dbo.products | 1 | 1 | 3 |
 | dbo.order_lines | 2 | 1 | 5 |
 | dbo.events (200,000 rows) | 0 | 0 | 3 |
-| dbo.audit_log | no key: skipped | | |
+| dbo.page_views (no key) | 13 | 8 | – |
+| dbo.audit_log (no key) | 1 | 2 | – |
 
 | # | do | expect | result |
 | --- | --- | --- | --- |
-| 12.68 | **Compare** → **Data** → Source `source`, Target `target` | the counts above, in seconds; audit_log listed as not compared, with the reason | ☐ |
+| 12.68 | **Compare** → **Data** → Source `source`, Target `target` | the counts above, in seconds. page_views and audit_log say **no key, whole rows** and have no "different" count | ☐ |
+| 12.68a | click page_views | a note **No key: whole rows compared**, explaining that a changed row shows as one only in the source and one only in the target | ☐ |
 | 12.69 | **Hide tables that are the same** | no change here (every table differs); after an apply it hides them | ☐ |
 | 12.70 | click customers' **different** count | the rows, source and target, changed cells marked, NULL styled, Unicode intact. **Previous** / **Next** page through | ☐ |
 | 12.71 | untick **Delete rows only in the target** → **Save script…** | INSERT and UPDATE statements only; products use IDENTITY_INSERT | ☐ |

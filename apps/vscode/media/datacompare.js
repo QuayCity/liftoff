@@ -41,7 +41,7 @@ function renderResult() {
   const head = el('tr', {}, ['Table', 'Rows (source / target)', ...KINDS.map(([, label]) => label)].map((h) => el('th', { scope: 'col' }, [h])))
   const body = r.tables.map((/** @type {any} */ t) =>
     el('tr', {}, [
-      el('th', { scope: 'row' }, [t.table]),
+      el('th', { scope: 'row' }, t.whole_rows ? [t.table, el('div', { class: 'muted', title: 'No key, so whole rows are compared: a changed row shows once as only in the source and once as only in the target, and the sync deletes the one and inserts the other.' }, ['no key: whole rows'])] : [t.table]),
       ...(t.skipped
         ? [el('td', { colspan: '4', class: 'muted' }, [`not compared: ${t.skipped}`])]
         : [

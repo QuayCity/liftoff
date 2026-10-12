@@ -15,7 +15,7 @@ export type DataCompareResult = {
   target: string
   engine: string
   ms: number
-  tables: { table: string; key: string[]; source_rows: number; target_rows: number; only_in_source: number; only_in_target: number; different: number; skipped?: string }[]
+  tables: { table: string; key: string[]; source_rows: number; target_rows: number; only_in_source: number; only_in_target: number; different: number; skipped?: string; /** no key: whole rows compared */ whole_rows?: boolean }[]
   rows?: DataPage
   script_text?: string
   applied?: { statements: number }

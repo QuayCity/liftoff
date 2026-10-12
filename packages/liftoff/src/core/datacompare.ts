@@ -8,6 +8,9 @@
 //      count and fingerprint per bucket (about 2,000 rows each)
 //   3. only for the buckets that differ, each side returns (key, row hash) pairs; comparing those
 //      gives the rows that are only in the source, only in the target, or different
+// A table without a key (a heap) is compared as whole rows: buckets by row hash, then the row
+// hashes counted on each side. Extra copies are only in the source or only in the target; a
+// changed row shows as one of each, since nothing says it is the same row.
 // Full rows are read later, and only for differing keys: page by page to look at, in batches for
 // a script. Both sides must run the same engine (the hashes are computed by the database).
 // A fingerprint match is a hash match: the chance that different rows give the same 60-bit sum
@@ -33,7 +36,7 @@ export type DataColumn = { name: string; type: string; /** how values become tex
 export type DataTable = {
   schema: string
   name: string
-  /** the key columns: the primary key, else a unique index on non-null columns */
+  /** the key columns: the primary key, else a unique index on non-null columns; empty: whole rows are compared */
   key: string[]
   columns: DataColumn[]
   /** inserts with the key's value need IDENTITY_INSERT (SQL Server) or OVERRIDING SYSTEM VALUE (PostgreSQL) */
@@ -48,8 +51,10 @@ export type TableResult = {
   only_in_source: number
   only_in_target: number
   different: number
-  /** why the table was not compared (no key, only on one side, …) */
+  /** why the table was not compared (only on one side, …) */
   skipped?: string
+  /** no key: whole rows were compared, so a changed row counts once only in the source and once only in the target */
+  whole_rows?: boolean
   /** milliseconds */
   ms: number
 }
@@ -62,7 +67,7 @@ export type DataComparison = {
   ms: number
 }
 
-/** A row's key, each part as text. */
+/** A row's key, each part as text; for a table without a key, the row hash (one entry per copy). */
 export type Key = string[]
 
 /** What differs in one table, by key. */
@@ -90,6 +95,8 @@ interface Dialect {
   /** the rows with these keys, every compared column as text */
   rows(c: Conn, t: DataTable, keys: Key[]): Promise<Map<string, (string | null)[]>>
   literal(col: DataColumn, v: string | null): string
+  /** deletes `n` copies of the row with this row hash (tables without a key) */
+  deleteCopies(t: DataTable, hash: string, n: number): string
 }
 
 const tableName = (t: { schema: string; name: string }) => `${t.schema}.${t.name}`
@@ -154,11 +161,23 @@ const pg: Dialect = {
   },
   async pairs(c, t, mask, buckets) {
     const where = buckets ? ` where ${pgKeyHash(t)} & $1 = any($2::int[])` : ''
-    const rows = await (c as PgConn).rows(`select ${t.key.map((k) => `t.${quoteIdent(k)}::text`).join(', ')}, ${pgRowHash(t)}::text from ${pgFrom(t)}${where}`, buckets ? [mask, buckets] : [])
+    const rows = await (c as PgConn).rows(`select ${[...t.key.map((k) => `t.${quoteIdent(k)}::text`), `${pgRowHash(t)}::text`].join(', ')} from ${pgFrom(t)}${where}`, buckets ? [mask, buckets] : [])
     return rows.map((r) => [r.slice(0, t.key.length).map(String), String(r[t.key.length])])
   },
   async rows(c, t, keys) {
     const out = new Map<string, (string | null)[]>()
+    if (!t.key.length) {
+      // By row hash: one scan per batch, hashing every row as the comparison did.
+      for (let i = 0; i < keys.length; i += 5000) {
+        const hashes = [...new Set(keys.slice(i, i + 5000).map((k) => k[0]))]
+        const rows = await (c as PgConn).rows(
+          `select h::text, ${t.columns.map((col) => `t.${quoteIdent(col.name)}::text`).join(', ')} from (select ${pgRowHash(t)} h, t.* from ${pgFrom(t)}) t where h = any($1::bigint[])`,
+          [hashes],
+        )
+        for (const r of rows) out.set(keyId([String(r[0])]), r.slice(1).map((v) => (v === null ? null : String(v))))
+      }
+      return out
+    }
     const keyCols = t.key.map((k) => t.columns.find((c) => c.name === k)!)
     for (let i = 0; i < keys.length; i += 5000) {
       const batch = keys.slice(i, i + 5000)
@@ -177,14 +196,18 @@ const pg: Dialect = {
   literal(col, v) {
     return v === null ? 'NULL' : `'${v.replaceAll("'", "''")}'::${col.type}`
   },
+  deleteCopies(t, hash, n) {
+    const fq = `${quoteIdent(t.schema)}.${quoteIdent(t.name)}`
+    return `DELETE FROM ${fq} WHERE ctid IN (SELECT t.ctid FROM ${pgFrom(t)} WHERE ${pgRowHash(t)} = ${hash} LIMIT ${n});`
+  },
 }
 
 const pgFrom = (t: DataTable) => `${quoteIdent(t.schema)}.${quoteIdent(t.name)} t`
 const pgRecord = (cols: string[]) => `row(${cols.map((c) => `t.${quoteIdent(c)}`).join(', ')})::text`
 /** 60 bits of the md5 of the row's text (record output is unambiguous: quotes, NULL as nothing). */
 const pgRowHash = (t: DataTable) => `('x' || substr(md5(${pgRecord(t.columns.map((c) => c.name))}), 1, 15))::bit(60)::bigint`
-/** The bucket source: a single integer key as it is, else 32 bits of the md5 of the key. */
-const pgKeyHash = (t: DataTable) => (integerKey(t, ['smallint', 'integer', 'bigint']) ? `t.${quoteIdent(t.key[0])}` : `('x' || substr(md5(${pgRecord(t.key)}), 1, 8))::bit(32)::int`)
+/** The bucket source: a single integer key as it is, else 32 bits of the md5 of the key (no key: the row hash). */
+const pgKeyHash = (t: DataTable) => (!t.key.length ? pgRowHash(t) : integerKey(t, ['smallint', 'integer', 'bigint']) ? `t.${quoteIdent(t.key[0])}` : `('x' || substr(md5(${pgRecord(t.key)}), 1, 8))::bit(32)::int`)
 const integerKey = (t: DataTable, types: string[]) => t.key.length === 1 && types.includes(t.columns.find((c) => c.name === t.key[0])?.type ?? '')
 
 const ms: Dialect = {
@@ -255,8 +278,7 @@ const ms: Dialect = {
     return rows.map(([b, n, s]) => [Number(b), Number(n), String(s)])
   },
   async pairs(c, t, mask, buckets) {
-    const keyText = t.key.map((k) => msText(t.columns.find((c) => c.name === k)!)).join(', ')
-    const select = `SELECT ${keyText}, CAST(${msRowHash(t)} AS VARCHAR(20))`
+    const select = `SELECT ${[...t.key.map((k) => msText(t.columns.find((c) => c.name === k)!)), `CAST(${msRowHash(t)} AS VARCHAR(20))`].join(', ')}`
     if (!buckets) return toPairs(t, await (c as SqlServerConn).query(`${select} FROM ${msFrom(t)}`))
     // Copy the rows of the differing buckets first, then hash only those: with the filter in the
     // same query, SQL Server hashes every row of the table before filtering.
@@ -270,6 +292,20 @@ const ms: Dialect = {
   },
   async rows(c, t, keys) {
     const out = new Map<string, (string | null)[]>()
+    if (!t.key.length) {
+      // By row hash: one scan per batch, hashing every row as the comparison did.
+      for (let i = 0; i < keys.length; i += 5000) {
+        const hashes = [...new Set(keys.slice(i, i + 5000).map((k) => k[0]))].join(',')
+        const rows = await (c as SqlServerConn).query(
+          `SELECT CAST(t.liftoff_h AS VARCHAR(20)), ${t.columns.map(msText).join(', ')}
+             FROM (SELECT ${msRowHash(t)} AS liftoff_h, t.* FROM ${msFrom(t)}) t
+            WHERE t.liftoff_h IN (SELECT CAST(value AS BIGINT) FROM STRING_SPLIT(@P1, ','))`,
+          [hashes],
+        )
+        for (const r of rows) out.set(keyId([String(r[0])]), r.slice(1).map((v) => (v === null ? null : String(v))))
+      }
+      return out
+    }
     const keyCols = t.key.map((k) => t.columns.find((c) => c.name === k)!)
     for (let i = 0; i < keys.length; i += 5000) {
       // The keys go in as one JSON parameter (no 2,100-parameter limit), joined on their own types.
@@ -287,6 +323,9 @@ const ms: Dialect = {
   literal(col, v) {
     return v === null ? 'NULL' : msFromText(col, `N'${v.replaceAll("'", "''")}'`)
   },
+  deleteCopies(t, hash, n) {
+    return `DELETE TOP (${n}) t FROM ${msFrom(t)} WHERE ${msRowHash(t)} = ${hash};`
+  },
 }
 
 const msFrom = (t: DataTable) => `${msQuote(t.schema)}.${msQuote(t.name)} t`
@@ -297,9 +336,9 @@ const msFrom = (t: DataTable) => `${msQuote(t.schema)}.${msQuote(t.name)} t`
 const msRowText = (cols: DataColumn[]) => `CONCAT(${cols.map((c) => `ISNULL(CONCAT(DATALENGTH(${msText(c)}), ':', ${msText(c)}), N'-')`).join(', ')}, N'')`
 /** 60 bits of SHA-256 over the row text. */
 const msRowHash = (t: DataTable) => `(CAST(SUBSTRING(HASHBYTES('SHA2_256', ${msRowText(t.columns)}), 1, 8) AS BIGINT) & 0x0FFFFFFFFFFFFFFF)`
-/** The bucket source: a single integer key as it is, else 32 bits of the hash of the key. */
+/** The bucket source: a single integer key as it is, else 32 bits of the hash of the key (no key: the row hash). */
 const msKeyHash = (t: DataTable) =>
-  integerKey(t, ['tinyint', 'smallint', 'int', 'bigint']) ? `t.${msQuote(t.key[0])}` : `CAST(SUBSTRING(HASHBYTES('SHA2_256', ${msRowText(t.key.map((k) => t.columns.find((c) => c.name === k)!))}), 1, 4) AS INT)`
+  !t.key.length ? msRowHash(t) : integerKey(t, ['tinyint', 'smallint', 'int', 'bigint']) ? `t.${msQuote(t.key[0])}` : `CAST(SUBSTRING(HASHBYTES('SHA2_256', ${msRowText(t.key.map((k) => t.columns.find((c) => c.name === k)!))}), 1, 4) AS INT)`
 /**
  * The text type a value converts to. (max) makes SQL Server treat every value as a large object,
  * which halves the speed of a pass; it is used only where a value can be longer than 4,000.
@@ -360,11 +399,8 @@ async function plan(cfg: Config, a: Conn, b: Conn, only: string[] | undefined): 
       skip(id, `only in the ${s ? 'source' : 'target'}; compare the schemas first`)
       continue
     }
+    // No key on either side: compared as whole rows.
     const key = s.key.length ? s.key : t.key
-    if (!key.length) {
-      skip(id, 'no primary key or unique index on non-null columns, so rows cannot be matched')
-      continue
-    }
     if (key.some((k) => !s.allColumns.has(k) || !t.allColumns.has(k))) {
       skip(id, 'its key columns differ between the sides')
       continue
@@ -380,7 +416,7 @@ async function compareTable(a: Conn, b: Conn, t: DataTable, log: Log): Promise<{
   const d = dialectOf(a)
   const started = Date.now()
   const diff: TableDiff = { table: t, onlyInSource: [], onlyInTarget: [], different: [] }
-  const result: TableResult = { table: tableName(t), key: t.key, source_rows: 0, target_rows: 0, only_in_source: 0, only_in_target: 0, different: 0, ms: 0 }
+  const result: TableResult = { table: tableName(t), key: t.key, source_rows: 0, target_rows: 0, only_in_source: 0, only_in_target: 0, different: 0, ms: 0, ...(!t.key.length && { whole_rows: true }) }
   const estimate = Math.max(...(await Promise.all([d.estimate(a, t), d.estimate(b, t)])))
   let same: boolean
   let mask = 0
@@ -410,16 +446,27 @@ async function compareTable(a: Conn, b: Conn, t: DataTable, log: Log): Promise<{
   }
   if (!same) {
     const [pa, pb] = await Promise.all([d.pairs(a, t, mask, buckets), d.pairs(b, t, mask, buckets)])
-    const hb = new Map(pb.map(([k, h]) => [keyId(k), [k, h] as const]))
-    for (const [k, h] of pa) {
-      const other = hb.get(keyId(k))
-      if (!other) diff.onlyInSource.push(k)
-      else {
-        if (other[1] !== h) diff.different.push(k)
-        hb.delete(keyId(k))
+    if (!t.key.length) {
+      // Whole rows: how many copies of each row each side has.
+      const copies = new Map<string, number>()
+      for (const [, h] of pa) copies.set(h, (copies.get(h) ?? 0) + 1)
+      for (const [, h] of pb) copies.set(h, (copies.get(h) ?? 0) - 1)
+      for (const [h, n] of copies) {
+        for (let i = 0; i < n; i++) diff.onlyInSource.push([h])
+        for (let i = 0; i < -n; i++) diff.onlyInTarget.push([h])
       }
+    } else {
+      const hb = new Map(pb.map(([k, h]) => [keyId(k), [k, h] as const]))
+      for (const [k, h] of pa) {
+        const other = hb.get(keyId(k))
+        if (!other) diff.onlyInSource.push(k)
+        else {
+          if (other[1] !== h) diff.different.push(k)
+          hb.delete(keyId(k))
+        }
+      }
+      diff.onlyInTarget = [...hb.values()].map(([k]) => k)
     }
-    diff.onlyInTarget = [...hb.values()].map(([k]) => k)
   }
   result.only_in_source = diff.onlyInSource.length
   result.only_in_target = diff.onlyInTarget.length
@@ -558,6 +605,13 @@ export class DataSession {
     if (doDelete) {
       for (const id of [...order].reverse()) {
         const d = this.diffs.get(id)!
+        if (!d.table.key.length) {
+          // ponytail: one table scan per distinct row; fine for thousands of rows, slow for millions.
+          for (const [hashes, rows] of await this.byHash(this.b, d.table, d.onlyInTarget)) {
+            yield hashes.map(([h, n]) => `-- ${JSON.stringify(rows.get(keyId([h])))}\n${dl.deleteCopies(d.table, h, n)}`).join('\n') + '\n'
+          }
+          continue
+        }
         for (let i = 0; i < d.onlyInTarget.length; i += 1000) {
           yield d.onlyInTarget.slice(i, i + 1000).map((k) => `DELETE FROM ${fq(d.table)} WHERE ${where(d.table, k)};`).join('\n') + '\n'
         }
@@ -570,9 +624,12 @@ export class DataSession {
       if (doInsert && d.onlyInSource.length) {
         if (isMs && t.identity) yield `SET IDENTITY_INSERT ${fq(t)} ON;\n`
         for (let i = 0; i < d.onlyInSource.length; i += 1000) {
-          const rows = await dl.rows(this.a, t, d.onlyInSource.slice(i, i + 1000))
+          const keys = d.onlyInSource.slice(i, i + 1000)
+          const found = await dl.rows(this.a, t, keys)
+          // One INSERT per key, so each copy of a duplicated row (no key) is inserted.
+          const rows = keys.map((k) => found.get(keyId(k))).filter((r) => r !== undefined)
           const overriding = !isMs && t.identity ? ' OVERRIDING SYSTEM VALUE' : ''
-          yield [...rows.values()].map((r) => `INSERT INTO ${fq(t)} (${cols.map((c) => dl.q(c.name)).join(', ')})${overriding} VALUES (${r.map((v, j) => dl.literal(cols[j], v)).join(', ')});`).join('\n') + '\n'
+          yield rows.map((r) => `INSERT INTO ${fq(t)} (${cols.map((c) => dl.q(c.name)).join(', ')})${overriding} VALUES (${r.map((v, j) => dl.literal(cols[j], v)).join(', ')});`).join('\n') + '\n'
         }
         if (isMs && t.identity) yield `SET IDENTITY_INSERT ${fq(t)} OFF;\n`
       }
@@ -592,6 +649,19 @@ export class DataSession {
         }
       }
     }
+  }
+
+  /** Row hashes with their number of copies, in batches, with the rows' values (for the comment above a delete). */
+  private async byHash(c: Conn, t: DataTable, keys: Key[]): Promise<[[string, number][], Map<string, (string | null)[]>][]> {
+    const copies = new Map<string, number>()
+    for (const [h] of keys) copies.set(h, (copies.get(h) ?? 0) + 1)
+    const all = [...copies]
+    const out: [[string, number][], Map<string, (string | null)[]>][] = []
+    for (let i = 0; i < all.length; i += 1000) {
+      const batch = all.slice(i, i + 1000)
+      out.push([batch, await dialectOf(c).rows(c, t, batch.map(([h]) => [h]))])
+    }
+    return out
   }
 
   /** Runs the script on the target, in one transaction; nothing changes when a statement fails. */

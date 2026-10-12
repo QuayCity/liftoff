@@ -71,7 +71,8 @@ up. PostgreSQL and SQL Server. Free and open source (MIT).
   every table and view.
 - **Compare.** The schema of any two: environments, the schema model, what the migrations build, a
   saved snapshot, any database by URL. The rows of two databases too, fast on big tables, with the
-  INSERT / UPDATE / DELETE script that makes them match.
+  INSERT / UPDATE / DELETE script that makes them match. Tables without a key (heaps) are
+  compared as whole rows, duplicates included.
 - **Pipelines.** `liftoff ci` writes a GitHub Actions workflow: pull requests get their migration
   script written (or required) and numbered after main; merges deploy through your environments.
 - **Three ways in.** The command line (every command also answers in JSON), a desktop app, and a

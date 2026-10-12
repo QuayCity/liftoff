@@ -40,8 +40,11 @@ test('data compare on PostgreSQL: 60,000 rows, tricky values, keys, order, and a
         from generate_series(1, 60000) i;
       insert into orders select i, i from generate_series(1, 100) i;
       insert into lines select o, l, 'item ' || o || '-' || l from generate_series(1, 100) o, generate_series(1, 3) l;
-      insert into nokey values (1, 'x');`)
+      insert into nokey values (1, 'x'), (2, 'y'), (3, null);`)
   }
+  // No key: whole rows. Dev has an extra copy of (2, 'y'); test changed (3, NULL) and added a row.
+  await sql(cfg, 'dev', `insert into nokey values (2, 'y');`)
+  await sql(cfg, 'test', `update nokey set b = 'z' where a = 3; insert into nokey values (4, 'w');`)
   // Only in dev (the source): a customer, an order with its lines.
   await sql(cfg, 'dev', `insert into customers (id, email) overriding system value values (60001, 'new@example.com');
     insert into orders values (101, 60001); insert into lines values (101, 1, 'new line'), (101, 2, 'second');`)
@@ -63,7 +66,9 @@ test('data compare on PostgreSQL: 60,000 rows, tricky values, keys, order, and a
     assert.deepEqual([t['public.customers'].only_in_source, t['public.customers'].only_in_target, t['public.customers'].different], [3, 1, 4], JSON.stringify(t['public.customers']))
     assert.deepEqual([t['public.orders'].only_in_source, t['public.orders'].only_in_target], [1, 1])
     assert.deepEqual([t['public.lines'].only_in_source, t['public.lines'].only_in_target, t['public.lines'].key], [3, 1, ['order_id', 'line']])
-    assert.match(t['public.nokey'].skipped ?? '', /no primary key/)
+    assert.deepEqual([t['public.nokey'].only_in_source, t['public.nokey'].only_in_target, t['public.nokey'].different, t['public.nokey'].whole_rows], [2, 2, 0, true])
+    const extra = await s.page('public.nokey', 'only_in_target', 0, 10)
+    assert.deepEqual(extra.rows.map((r) => r.target).sort(), [['3', 'z'], ['4', 'w']])
     assert.ok(!('public.liftoff_schema_history' in t))
 
     // A page of differences with both rows: NULL stays null, '' stays ''.
@@ -85,6 +90,7 @@ test('data compare on PostgreSQL: 60,000 rows, tricky values, keys, order, and a
     assert.match(script, /SET note = NULL WHERE id = '7'::integer/)
     assert.match(script, /SET amount = '12\.50'::numeric\(12,2\) WHERE id = '10'::integer/)
     assert.doesNotMatch(script, /doubled/)
+    assert.match(script, /DELETE FROM "?public"?\."?nokey"? WHERE ctid IN \(SELECT t\.ctid FROM .* LIMIT 1\);/)
 
     await s.apply()
   } finally {
@@ -118,6 +124,18 @@ test('data compare on SQL Server: identity, binary, NULL vs empty, and back to n
       SELECT CAST(HASHBYTES('MD5', CAST(i AS varchar(10))) AS uniqueidentifier), CASE WHEN i % 5 = 0 THEN NULL ELSE CONCAT(N'item ', i) END,
              i / 3.0, DATEADD(SECOND, i, CAST('2026-01-01T00:00:00.1234567' AS datetime2(7))), CAST(i AS varbinary(16)) FROM n`)
   }
+  // A heap (no key), big enough for the buckets.
+  for (const env of ['a', 'b']) {
+    await sql(cfg, env, `CREATE TABLE dbo.log (at datetime2(3) NOT NULL, kind nvarchar(20) NOT NULL, msg nvarchar(max) NULL, n float NULL);`)
+    await sql(cfg, env, `WITH n AS (SELECT TOP (70000) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS i FROM sys.all_columns a CROSS JOIN sys.all_columns b)
+      INSERT INTO dbo.log SELECT DATEADD(SECOND, i, '2026-01-01'), CONCAT(N'kind', i % 9), CASE WHEN i % 4 = 0 THEN NULL ELSE CONCAT(N'message ', i) END, i / 7.0 FROM n`)
+  }
+  // a: two more copies of one row. b: 3 changed, one only in letter case, one with a trailing space, 2 deleted.
+  await sql(cfg, 'a', `INSERT INTO dbo.log SELECT TOP (1) * FROM dbo.log WHERE msg = N'message 10'; INSERT INTO dbo.log SELECT TOP (1) * FROM dbo.log WHERE msg = N'message 10';`)
+  await sql(cfg, 'b', `UPDATE dbo.log SET msg = N'changed' WHERE msg IN (N'message 21', N'message 22', N'message 23');
+    UPDATE dbo.log SET msg = N'MESSAGE 30' WHERE msg = N'message 30' COLLATE Latin1_General_BIN2;
+    UPDATE dbo.log SET msg = N'message 31 ' WHERE msg = N'message 31' AND DATALENGTH(msg) = 20;
+    DELETE FROM dbo.log WHERE msg IN (N'message 41', N'message 42');`)
   await sql(cfg, 'b', `UPDATE dbo.items SET name = N'' WHERE id = 5;
     UPDATE dbo.items SET price = 0.1 + 0.2 WHERE id = 6;
     UPDATE dbo.items SET blob = 0x00 WHERE id = 50000;
@@ -139,14 +157,21 @@ test('data compare on SQL Server: identity, binary, NULL vs empty, and back to n
     let script = ''
     for await (const chunk of s.script()) script += chunk
     assert.match(script, /SET IDENTITY_INSERT \[dbo\]\.\[items\] ON/)
+    const log = byTable(s)['dbo.log']
+    assert.deepEqual([log.only_in_source, log.only_in_target, log.different, log.whole_rows], [9, 5, 0, true], JSON.stringify(log))
+    assert.match(script, /DELETE TOP \(1\) t FROM \[dbo\]\.\[log\] t WHERE/)
+    assert.match(script, /-- \[".*","kind\d","MESSAGE 30",/)
     await s.apply()
   } finally {
     await s.close()
   }
   const again = await DataSession.open(cfg, parseSide('a'), parseSide('b'))
   try {
-    const t = byTable(again)['dbo.items']
-    assert.deepEqual([t.only_in_source, t.only_in_target, t.different], [0, 0, 0])
+    for (const name of ['dbo.items', 'dbo.log']) {
+      const t = byTable(again)[name]
+      assert.deepEqual([name, t.only_in_source, t.only_in_target, t.different], [name, 0, 0, 0])
+    }
+    assert.equal(byTable(again)['dbo.log'].target_rows, 70002)
   } finally {
     await again.close()
   }

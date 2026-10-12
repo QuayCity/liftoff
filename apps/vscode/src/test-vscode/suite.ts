@@ -141,12 +141,12 @@ export async function run(): Promise<void> {
   const again = await vscode.commands.executeCommand<CompareResult>('liftoff.compare', { source: `snapshot:${snap}`, target: 'dev' })
   assert.equal(again?.changes.length, 0, 'a snapshot matches what it was taken from')
 
-  // Compare Data: orders has a key and the same rows; notes and tags have no key. Pages and the
-  // script come from the saved keys.
+  // Compare Data: orders has a key and the same rows; notes has no key, so its whole rows are
+  // compared; tags is only on one side. Pages and the script come from the saved keys.
   const data = await vscode.commands.executeCommand<DataComparePanel>('liftoff.dataCompare', { source: 'test', target: 'dev' })
   assert.deepEqual(
-    data?.result?.tables.map((t) => [t.table, t.skipped ? 'skipped' : t.only_in_source + t.only_in_target + t.different]),
-    [['public.notes', 'skipped'], ['public.orders', 0], ['public.tags', 'skipped']],
+    data?.result?.tables.map((t) => [t.table, t.skipped ? 'skipped' : t.only_in_source + t.only_in_target + t.different, !!t.whole_rows]),
+    [['public.notes', 0, true], ['public.orders', 0, false], ['public.tags', 'skipped', false]],
   )
   assert.deepEqual(await data!.rows('public.orders', 'different'), { columns: ['id'], key: ['id'], total: 0, rows: [] })
   assert.match((await data!.script()) ?? '', /Makes the rows of dev match test/)

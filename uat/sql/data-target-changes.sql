@@ -3,7 +3,8 @@
 --   dbo.products     only in source 1,  only in target 1,  different 3
 --   dbo.order_lines  only in source 2,  only in target 1,  different 5
 --   dbo.events       only in source 0,  only in target 0,  different 3   (of 200,000 rows)
---   dbo.audit_log    skipped (no primary key)
+--   dbo.page_views   only in source 13, only in target 8  (no key: whole rows; 10 deleted, 5 extra copies, 3 changed)
+--   dbo.audit_log    only in source 1,  only in target 2   (no key; its "created" row has a different time on each side)
 SET NOCOUNT ON;
 DELETE dbo.customers WHERE id BETWEEN 1 AND 30;
 INSERT dbo.customers (id, name, email, city, balance)
@@ -24,5 +25,11 @@ UPDATE dbo.order_lines SET quantity = quantity + 100 WHERE order_id = 2;
 INSERT dbo.order_lines (order_id, line_no, quantity, unit_price) VALUES (1001, 1, 1, 1);
 
 UPDATE dbo.events SET payload = N'changed' WHERE id IN (5, 100000, 199999);
+
+-- A heap: 10 rows gone, 5 rows twice (an extra copy each), 3 rows changed (a changed row is one
+-- only in the source and one only in the target: without a key nothing says it is the same row).
+DELETE dbo.page_views WHERE at BETWEEN '2026-01-01 01:01' AND '2026-01-01 01:10';
+INSERT dbo.page_views SELECT TOP (5) * FROM dbo.page_views WHERE at >= '2026-01-02' ORDER BY at;
+UPDATE dbo.page_views SET path = N'/checkout' WHERE at IN ('2026-01-03 00:00', '2026-01-03 00:01', '2026-01-03 00:02');
 
 INSERT dbo.audit_log (message) VALUES (N'only here');

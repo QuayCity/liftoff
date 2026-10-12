@@ -28,7 +28,12 @@ CREATE TABLE dbo.events (
     payload nvarchar(100) NULL,
     at datetime2 NOT NULL
 );
--- No key: data compare cannot match its rows, so it is skipped.
+-- No key (heaps): compared as whole rows.
+CREATE TABLE dbo.page_views (
+    at datetime2(0) NOT NULL,
+    path nvarchar(200) NOT NULL,
+    visitor varchar(20) NULL
+);
 CREATE TABLE dbo.audit_log (
     at datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
     message nvarchar(200) NULL
@@ -54,6 +59,9 @@ SELECT (i - 1) / 5 + 1, (i - 1) % 5 + 1, i % 9 + 1, (i % 40) * 1.5 FROM #n WHERE
 
 INSERT dbo.events (id, kind, payload, at)
 SELECT i, CONCAT('kind', i % 7), CONCAT(N'payload ', i), DATEADD(second, i, '2026-01-01') FROM #n;
+
+INSERT dbo.page_views (at, path, visitor)
+SELECT DATEADD(minute, i, '2026-01-01'), CONCAT(N'/products/', i % 500), CASE WHEN i % 6 = 0 THEN NULL ELSE CONCAT('v', i % 2000) END FROM #n WHERE i <= 50000;
 
 INSERT dbo.audit_log (message) VALUES (N'created');
 DROP TABLE #n;
