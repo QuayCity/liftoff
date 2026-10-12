@@ -5,11 +5,12 @@
 //   1. each side returns one row count and one fingerprint for the whole table (a sum of row
 //      hashes); equal on both sides means the table is the same, whatever its size
 //   2. a table that differs is split into buckets by a hash of its key; each side returns one
-//      count and fingerprint per bucket (about 250 rows each, so a few scattered differences
+//      count and fingerprint per bucket (about 16 rows each, so changes spread over the table
 //      re-read little; the GROUP BY also lets SQL Server use every core, which one sum over the
 //      table does not, so tables above 5,000 rows start here)
-//   3. only for the buckets that differ, each side returns (key, row hash) pairs; comparing those
-//      gives the rows that are only in the source, only in the target, or different
+//   3. only for the buckets that differ, each side returns (key, row hash) pairs, about 500,000
+//      rows at a time; comparing those gives the rows that are only in the source, only in the
+//      target, or different, and only those are kept
 // A table without a key (a heap) is compared as whole rows: buckets by row hash, then the row
 // hashes counted on each side. Extra copies are only in the source or only in the target; a
 // changed row shows as one of each, since nothing says it is the same row.
@@ -404,8 +405,13 @@ const dialectOf = (c: Conn): Dialect => (c.engine === 'PostgreSQL' ? pg : ms)
 
 /* ---------- comparing ---------- */
 
-/** About this many rows per bucket; tables up to SMALL rows skip the buckets. */
-const PER_BUCKET = 250
+/**
+ * About this many rows per bucket; tables up to SMALL rows skip the buckets. Small buckets matter
+ * when changes are spread over a table: with 250 rows per bucket, 1% changed in 1,000,000 rows made
+ * all 4,096 buckets differ and every key/hash pair had to be read (17 s); with 16, 15% of them
+ * differ (5 s). Identical tables cost the same either way.
+ */
+const PER_BUCKET = 16
 /**
  * Tables without a key: reading rows by their hash, and deleting by it, reads the whole table each
  * time, so do it for many rows at once. Measured on a 300,000-row heap with 40,000 differing rows.
@@ -413,6 +419,9 @@ const PER_BUCKET = 250
 const HEAP_READ = 50_000
 const HEAP_DELETE = 10_000
 const SMALL = 5_000
+const MAX_BITS = 20
+/** Key/hash pairs are read and compared this many rows at a time, so memory stays flat on big tables. */
+const CHUNK_ROWS = 500_000
 
 /** The tables both sides have, with the columns both have; and why the others are left out. */
 async function plan(cfg: Config, a: Conn, b: Conn, only: string[] | undefined): Promise<{ tables: DataTable[]; skipped: TableResult[] }> {
@@ -455,31 +464,56 @@ async function compareTable(a: Conn, b: Conn, t: DataTable, log: Log): Promise<{
   let same: boolean
   let mask = 0
   let buckets: number[] | undefined
+  /** rows in each differing bucket (the larger side), to read the pairs in chunks */
+  let sizes = new Map<number, number>()
+  const bitsFor = (rows: number, per: number) => Math.max(1, Math.min(MAX_BITS, Math.ceil(Math.log2(rows / per))))
   /** One pass per side: a count and fingerprint per bucket; their totals are the table's. */
-  const byBucket = async (rows: number) => {
-    const bits = Math.min(20, Math.ceil(Math.log2(rows / PER_BUCKET)))
+  const byBucket = async (bits: number) => {
     mask = 2 ** bits - 1
     const [ba, bb] = await Promise.all([d.buckets(a, t, mask), d.buckets(b, t, mask)])
     result.source_rows = ba.reduce((n, [, c]) => n + c, 0)
     result.target_rows = bb.reduce((n, [, c]) => n + c, 0)
-    const fp = (rs: [number, number, string][]) => new Map(rs.map(([k, n, f]) => [k, `${n}:${f}`]))
+    const fp = (rs: [number, number, string][]) => new Map(rs.map(([k, n, f]) => [k, [n, f] as const]))
     const [ma, mb] = [fp(ba), fp(bb)]
-    buckets = [...new Set([...ma.keys(), ...mb.keys()])].filter((k) => ma.get(k) !== mb.get(k))
+    buckets = [...new Set([...ma.keys(), ...mb.keys()])].filter((k) => ma.get(k)?.[0] !== mb.get(k)?.[0] || ma.get(k)?.[1] !== mb.get(k)?.[1])
+    sizes = new Map(buckets.map((k) => [k, Math.max(ma.get(k)?.[0] ?? 0, mb.get(k)?.[0] ?? 0)]))
     log('info', `${tableName(t)}: ${buckets.length} of ${mask + 1} buckets differ`)
     return buckets.length === 0
   }
   if (estimate > SMALL) {
-    same = await byBucket(estimate)
+    same = await byBucket(bitsFor(estimate, PER_BUCKET))
   } else {
     const [[na, fa], [nb, fb]] = await Promise.all([d.fingerprint(a, t), d.fingerprint(b, t)])
     result.source_rows = na
     result.target_rows = nb
     same = na === nb && fa === fb
     // The estimate was stale (a table filled since it was last analysed): narrow it down by bucket.
-    if (!same && Math.max(na, nb) > SMALL) same = await byBucket(Math.max(na, nb))
+    if (!same && Math.max(na, nb) > SMALL) same = await byBucket(bitsFor(Math.max(na, nb), PER_BUCKET))
   }
   if (!same) {
-    const [pa, pb] = await Promise.all([d.pairs(a, t, mask, buckets), d.pairs(b, t, mask, buckets)])
+    // The differing buckets in chunks of about CHUNK_ROWS rows; a key (or, without one, a whole
+    // row) always falls in the same bucket on both sides, so each chunk is compared on its own.
+    const chunks: (number[] | undefined)[] = []
+    if (!buckets) chunks.push(undefined)
+    else {
+      let cur: number[] = []
+      let rows = 0
+      for (const k of buckets) {
+        const n = sizes.get(k) ?? 0
+        if (cur.length && rows + n > CHUNK_ROWS) {
+          chunks.push(cur)
+          cur = []
+          rows = 0
+        }
+        cur.push(k)
+        rows += n
+      }
+      if (cur.length) chunks.push(cur)
+    }
+    for (const chunk of chunks) await compareChunk(chunk)
+  }
+  async function compareChunk(chunk: number[] | undefined): Promise<void> {
+    const [pa, pb] = await Promise.all([d.pairs(a, t, mask, chunk), d.pairs(b, t, mask, chunk)])
     if (!t.key.length) {
       // Whole rows: how many copies of each row each side has.
       const copies = new Map<string, number>()
@@ -499,7 +533,7 @@ async function compareTable(a: Conn, b: Conn, t: DataTable, log: Log): Promise<{
           hb.delete(keyId(k))
         }
       }
-      diff.onlyInTarget = [...hb.values()].map(([k]) => k)
+      for (const [k] of hb.values()) diff.onlyInTarget.push(k)
     }
   }
   result.only_in_source = diff.onlyInSource.length
