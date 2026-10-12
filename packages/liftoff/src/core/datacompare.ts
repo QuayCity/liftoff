@@ -5,7 +5,9 @@
 //   1. each side returns one row count and one fingerprint for the whole table (a sum of row
 //      hashes); equal on both sides means the table is the same, whatever its size
 //   2. a table that differs is split into buckets by a hash of its key; each side returns one
-//      count and fingerprint per bucket (about 2,000 rows each)
+//      count and fingerprint per bucket (about 250 rows each, so a few scattered differences
+//      re-read little; the GROUP BY also lets SQL Server use every core, which one sum over the
+//      table does not, so tables above 5,000 rows start here)
 //   3. only for the buckets that differ, each side returns (key, row hash) pairs; comparing those
 //      gives the rows that are only in the source, only in the target, or different
 // A table without a key (a heap) is compared as whole rows: buckets by row hash, then the row
@@ -95,8 +97,8 @@ interface Dialect {
   /** the rows with these keys, every compared column as text */
   rows(c: Conn, t: DataTable, keys: Key[]): Promise<Map<string, (string | null)[]>>
   literal(col: DataColumn, v: string | null): string
-  /** deletes `n` copies of the row with this row hash (tables without a key) */
-  deleteCopies(t: DataTable, hash: string, n: number): string
+  /** one statement deleting `n` copies of each row by its row hash (tables without a key) */
+  deleteCopies(t: DataTable, copies: [string, number][]): string
 }
 
 const tableName = (t: { schema: string; name: string }) => `${t.schema}.${t.name}`
@@ -196,9 +198,11 @@ const pg: Dialect = {
   literal(col, v) {
     return v === null ? 'NULL' : `'${v.replaceAll("'", "''")}'::${col.type}`
   },
-  deleteCopies(t, hash, n) {
+  deleteCopies(t, copies) {
+    // One pass: hash only the rows looked for, number the copies of each, keep the first n.
     const fq = `${quoteIdent(t.schema)}.${quoteIdent(t.name)}`
-    return `DELETE FROM ${fq} WHERE ctid IN (SELECT t.ctid FROM ${pgFrom(t)} WHERE ${pgRowHash(t)} = ${hash} LIMIT ${n});`
+    const values = copies.map(([h, n]) => `(${h}::bigint, ${n})`).join(', ')
+    return `DELETE FROM ${fq} WHERE ctid IN (SELECT x.ctid FROM (SELECT t.ctid, ${pgRowHash(t)} AS h, row_number() OVER (PARTITION BY ${pgRowHash(t)}) AS rn FROM ${pgFrom(t)} WHERE ${pgRowHash(t)} IN (${copies.map(([h]) => h).join(', ')})) x JOIN (VALUES ${values}) v(h, n) ON v.h = x.h AND x.rn <= v.n);`
   },
 }
 
@@ -266,25 +270,26 @@ const ms: Dialect = {
   },
   async fingerprint(c, t) {
     const [[n, sum]] = await (c as SqlServerConn).query(
-      `SELECT COUNT_BIG(*), CAST(COALESCE(SUM(CAST(h AS DECIMAL(38, 0))), 0) AS VARCHAR(40)) FROM (SELECT ${msRowHash(t)} AS h FROM ${msFrom(t)}) x`,
+      `SELECT COUNT_BIG(*), CAST(COALESCE(SUM(CAST(h AS DECIMAL(38, 0))), 0) AS VARCHAR(40)) FROM (SELECT ${msRowHash(t)} AS h FROM ${msFrom(t)}) x${await msHint(c)}`,
     )
     return [Number(n), String(sum)]
   },
   async buckets(c, t, mask) {
     const rows = await (c as SqlServerConn).query(
-      `SELECT b, COUNT_BIG(*), CAST(SUM(CAST(h AS DECIMAL(38, 0))) AS VARCHAR(40)) FROM (SELECT ${msKeyHash(t)} & @P1 AS b, ${msRowHash(t)} AS h FROM ${msFrom(t)}) x GROUP BY b`,
+      `SELECT b, COUNT_BIG(*), CAST(SUM(CAST(h AS DECIMAL(38, 0))) AS VARCHAR(40)) FROM (SELECT ${msKeyHash(t)} & @P1 AS b, ${msRowHash(t)} AS h FROM ${msFrom(t)}) x GROUP BY b${await msHint(c)}`,
       [mask],
     )
     return rows.map(([b, n, s]) => [Number(b), Number(n), String(s)])
   },
   async pairs(c, t, mask, buckets) {
     const select = `SELECT ${[...t.key.map((k) => msText(t.columns.find((c) => c.name === k)!)), `CAST(${msRowHash(t)} AS VARCHAR(20))`].join(', ')}`
-    if (!buckets) return toPairs(t, await (c as SqlServerConn).query(`${select} FROM ${msFrom(t)}`))
+    const hint = await msHint(c)
+    if (!buckets) return toPairs(t, await (c as SqlServerConn).query(`${select} FROM ${msFrom(t)}${hint}`))
     // Copy the rows of the differing buckets first, then hash only those: with the filter in the
     // same query, SQL Server hashes every row of the table before filtering.
     const rows = await (c as SqlServerConn).query(
-      `SELECT t.* INTO #liftoff_rows FROM ${msFrom(t)} WHERE ${msKeyHash(t)} & @P1 IN (SELECT CAST(value AS INT) FROM STRING_SPLIT(@P2, ','));
-       ${select} FROM #liftoff_rows t;
+      `SELECT t.* INTO #liftoff_rows FROM ${msFrom(t)} WHERE ${msKeyHash(t)} & @P1 IN (SELECT CAST(value AS INT) FROM STRING_SPLIT(@P2, ','))${hint};
+       ${select} FROM #liftoff_rows t${hint};
        DROP TABLE #liftoff_rows;`,
       [mask, buckets.join(',')],
     )
@@ -299,7 +304,7 @@ const ms: Dialect = {
         const rows = await (c as SqlServerConn).query(
           `SELECT CAST(t.liftoff_h AS VARCHAR(20)), ${t.columns.map(msText).join(', ')}
              FROM (SELECT ${msRowHash(t)} AS liftoff_h, t.* FROM ${msFrom(t)}) t
-            WHERE t.liftoff_h IN (SELECT CAST(value AS BIGINT) FROM STRING_SPLIT(@P1, ','))`,
+            WHERE t.liftoff_h IN (SELECT CAST(value AS BIGINT) FROM STRING_SPLIT(@P1, ','))${await msHint(c)}`,
           [hashes],
         )
         for (const r of rows) out.set(keyId([String(r[0])]), r.slice(1).map((v) => (v === null ? null : String(v))))
@@ -323,9 +328,29 @@ const ms: Dialect = {
   literal(col, v) {
     return v === null ? 'NULL' : msFromText(col, `N'${v.replaceAll("'", "''")}'`)
   },
-  deleteCopies(t, hash, n) {
-    return `DELETE TOP (${n}) t FROM ${msFrom(t)} WHERE ${msRowHash(t)} = ${hash};`
+  deleteCopies(t, copies) {
+    // One pass: hash each row once (in the derived table; written out in an IN list, SQL Server
+    // hashes the row again for every value: 18 s instead of 1.3 s on 300,000 rows), keep the rows
+    // looked for, number the copies of each, delete the first n.
+    const values = copies.map(([h, n]) => `(${h}, ${n})`).join(', ')
+    return `WITH d AS (SELECT x.liftoff_h, ROW_NUMBER() OVER (PARTITION BY x.liftoff_h ORDER BY (SELECT NULL)) AS liftoff_rn FROM (SELECT ${msRowHash(t)} AS liftoff_h FROM ${msFrom(t)}) x WHERE x.liftoff_h IN (SELECT v.h FROM (VALUES ${values}) v(h, n))) DELETE FROM d WHERE EXISTS (SELECT 1 FROM (VALUES ${values}) v(h, n) WHERE v.h = d.liftoff_h AND d.liftoff_rn <= v.n);`
   },
+}
+
+/**
+ * Hashing a table is CPU work; below its cost threshold SQL Server runs it on one core (100,000
+ * rows: 1.3 s instead of 0.26 s on 16 cores). Ask for a parallel plan where the server takes the
+ * hint, checked once per connection. Only for LiftOff's own queries, never in a saved script.
+ */
+const parallelHint = new WeakMap<Conn, Promise<string>>()
+function msHint(c: Conn): Promise<string> {
+  let h = parallelHint.get(c)
+  if (!h) {
+    const hint = " OPTION (USE HINT('ENABLE_PARALLEL_PLAN_PREFERENCE'))"
+    h = (c as SqlServerConn).query(`SELECT 1${hint}`).then(() => hint, () => '')
+    parallelHint.set(c, h)
+  }
+  return h
 }
 
 const msFrom = (t: DataTable) => `${msQuote(t.schema)}.${msQuote(t.name)} t`
@@ -377,8 +402,8 @@ const dialectOf = (c: Conn): Dialect => (c.engine === 'PostgreSQL' ? pg : ms)
 /* ---------- comparing ---------- */
 
 /** About this many rows per bucket; tables up to SMALL rows skip the buckets. */
-const PER_BUCKET = 2000
-const SMALL = 50_000
+const PER_BUCKET = 250
+const SMALL = 5_000
 
 /** The tables both sides have, with the columns both have; and why the others are left out. */
 async function plan(cfg: Config, a: Conn, b: Conn, only: string[] | undefined): Promise<{ tables: DataTable[]; skipped: TableResult[] }> {
@@ -606,9 +631,9 @@ export class DataSession {
       for (const id of [...order].reverse()) {
         const d = this.diffs.get(id)!
         if (!d.table.key.length) {
-          // ponytail: one table scan per distinct row; fine for thousands of rows, slow for millions.
+          // One statement (one pass over the table) per 1,000 distinct rows; their values above it.
           for (const [hashes, rows] of await this.byHash(this.b, d.table, d.onlyInTarget)) {
-            yield hashes.map(([h, n]) => `-- ${JSON.stringify(rows.get(keyId([h])))}\n${dl.deleteCopies(d.table, h, n)}`).join('\n') + '\n'
+            yield hashes.map(([h, n]) => `-- ${n > 1 ? `${n} copies of ` : ''}${JSON.stringify(rows.get(keyId([h])))}`).join('\n') + `\n${dl.deleteCopies(d.table, hashes)}\n`
           }
           continue
         }

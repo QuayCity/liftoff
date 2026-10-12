@@ -90,7 +90,8 @@ test('data compare on PostgreSQL: 60,000 rows, tricky values, keys, order, and a
     assert.match(script, /SET note = NULL WHERE id = '7'::integer/)
     assert.match(script, /SET amount = '12\.50'::numeric\(12,2\) WHERE id = '10'::integer/)
     assert.doesNotMatch(script, /doubled/)
-    assert.match(script, /DELETE FROM "?public"?\."?nokey"? WHERE ctid IN \(SELECT t\.ctid FROM .* LIMIT 1\);/)
+    // One statement for all the extra rows of a table without a key.
+    assert.equal(script.match(/DELETE FROM "?public"?\."?nokey"? WHERE ctid IN \(SELECT x\.ctid FROM/g)?.length, 1)
 
     await s.apply()
   } finally {
@@ -135,7 +136,9 @@ test('data compare on SQL Server: identity, binary, NULL vs empty, and back to n
   await sql(cfg, 'b', `UPDATE dbo.log SET msg = N'changed' WHERE msg IN (N'message 21', N'message 22', N'message 23');
     UPDATE dbo.log SET msg = N'MESSAGE 30' WHERE msg = N'message 30' COLLATE Latin1_General_BIN2;
     UPDATE dbo.log SET msg = N'message 31 ' WHERE msg = N'message 31' AND DATALENGTH(msg) = 20;
-    DELETE FROM dbo.log WHERE msg IN (N'message 41', N'message 42');`)
+    DELETE FROM dbo.log WHERE msg IN (N'message 41', N'message 42');
+    INSERT INTO dbo.log SELECT TOP (1) * FROM dbo.log WHERE msg = N'message 50';
+    INSERT INTO dbo.log SELECT TOP (1) * FROM dbo.log WHERE msg = N'message 50';`)
   await sql(cfg, 'b', `UPDATE dbo.items SET name = N'' WHERE id = 5;
     UPDATE dbo.items SET price = 0.1 + 0.2 WHERE id = 6;
     UPDATE dbo.items SET blob = 0x00 WHERE id = 50000;
@@ -158,8 +161,10 @@ test('data compare on SQL Server: identity, binary, NULL vs empty, and back to n
     for await (const chunk of s.script()) script += chunk
     assert.match(script, /SET IDENTITY_INSERT \[dbo\]\.\[items\] ON/)
     const log = byTable(s)['dbo.log']
-    assert.deepEqual([log.only_in_source, log.only_in_target, log.different, log.whole_rows], [9, 5, 0, true], JSON.stringify(log))
-    assert.match(script, /DELETE TOP \(1\) t FROM \[dbo\]\.\[log\] t WHERE/)
+    assert.deepEqual([log.only_in_source, log.only_in_target, log.different, log.whole_rows], [9, 7, 0, true], JSON.stringify(log))
+    assert.equal(script.match(/WITH d AS \(SELECT x\.liftoff_h, .* FROM \[dbo\]\.\[log\] t\) x WHERE .*\) DELETE FROM d WHERE EXISTS/g)?.length, 1, 'one statement for all the extra rows')
+    assert.doesNotMatch(script, /USE HINT/, 'the saved script runs anywhere')
+    assert.match(script, /-- 2 copies of \[".*","message 50",/)
     assert.match(script, /-- \[".*","kind\d","MESSAGE 30",/)
     await s.apply()
   } finally {
@@ -171,7 +176,7 @@ test('data compare on SQL Server: identity, binary, NULL vs empty, and back to n
       const t = byTable(again)[name]
       assert.deepEqual([name, t.only_in_source, t.only_in_target, t.different], [name, 0, 0, 0])
     }
-    assert.equal(byTable(again)['dbo.log'].target_rows, 70002)
+    assert.equal(byTable(again)['dbo.log'].target_rows, 70002, 'the two extra copies were deleted, one copy stays')
   } finally {
     await again.close()
   }
