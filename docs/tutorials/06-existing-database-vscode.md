@@ -22,8 +22,9 @@ each step in more detail.
 
 LiftOff rocket → **Create LiftOff Project** → **SQL Server** → **Empty project** → name `shop`.
 
-In the settings tab that opens, **Add environment** for each (user and password as for your
-server; `trustServerCertificate=true` only for a local container):
+The settings tab opens with a first, empty environment: fill it in for `dev`, then **Add
+environment** for each of the others (user and password as for your server;
+`trustServerCertificate=true` only for a local container):
 
 | Name | Connection URL | Role | Stored in |
 | --- | --- | --- | --- |
@@ -33,7 +34,8 @@ server; `trustServerCertificate=true` only for a local container):
 | `acceptance` | `…databaseName=shop_acc…` | Test | shared with the team through git |
 | `prod` | `…databaseName=shop_prod…` | Production | shared with the team through git |
 
-**Test connection** on each, then **Save**. The login used on production needs to read the
+**Save** after each one, then **Test connection** in its section (it tests saved environments
+only). The login used on production needs to read the
 schema and create one table (the history table); to deploy later, it needs to change the schema.
 
 > Faster: open `liftoff.toml` and paste the `[environments.…]` sections from
@@ -44,8 +46,11 @@ schema and create one table (the history table); to deploy later, it needs to ch
 
 In the **Environments** view, right-click **prod** → **Run Pending Migrations**. Production has
 tables, the project has no scripts, and LiftOff will not run scripts on a database it knows
-nothing about. Instead it offers **Adopt Existing Database…**. Accept (or run **LiftOff: Adopt
-Existing Database…** from the command palette and pick prod).
+nothing about. First it asks to confirm, because prod is production: **Run**. Then it says
+**prod already has tables, and this project has no scripts yet.** and offers **Adopt as B0001**.
+Click it (or run **LiftOff: Adopt Existing Database…** from the command palette and pick prod).
+When it is done: **Captured prod as B0001__existing_schema.sql and recorded it there. New scripts
+start at V0002.**
 
 LiftOff then:
 
@@ -64,20 +69,22 @@ procedure and the trigger, in an order that runs. Commit it from Source Control:
 Right-click **test** → **Run Pending Migrations**. Test lacks the view and the procedure: they are
 created, then B0001 is recorded. **Show Log** shows which objects it created.
 
-Right-click **acceptance** → **Run Pending Migrations**. Acceptance has an extra column. It stops,
-lists the object that differs (`table:dbo.customers`), changes nothing, and offers to record the
-baseline anyway.
+Right-click **acceptance** → **Run Pending Migrations**. Acceptance has an extra column. It stops:
+**acceptance differs from the baseline script. Nothing was changed.**, with
+`table:dbo.customers: different`, and offers **Record Anyway**. Click **Cancel** for now.
 
 Before deciding, look: **LiftOff: Compare…** → source **What the migrations build**, target
-**acceptance**. `dbo.customers` is changed, may lose data; **Show the Difference** shows the
-extra column. Then:
+**acceptance**. The **Compare** view opens with **acceptance → the migrations: 1 difference**:
+`dbo.customers`, **different · may lose data**, so it starts unticked. Click it: the diff shows
+the extra `loyalty_points` column. Then:
 
-- **Production is right**: **Apply to the Target** drops the column on acceptance (and its data).
+- **Production is right**: tick `dbo.customers`, then **Apply to the Target** (in the Compare
+  view's **…** menu) drops the column on acceptance (and its data).
   Run Pending Migrations again: B0001 is recorded cleanly.
 - **The column should exist everywhere**: record anyway, then add it in dev and write a
   migration (step 5).
-- **Not decided yet**: record anyway. **Check for Drift** on acceptance keeps showing
-  `dbo.customers` until it is fixed.
+- **Not decided yet**: **Record Anyway**. **Check for Drift** on acceptance keeps saying **1
+  object on acceptance differs from its scripts** until it is fixed.
 
 ## Step 4: dev and the schema model
 
@@ -101,7 +108,7 @@ Open `schema-model/dbo/tables/products.sql` and add a column inside the `CREATE 
 `V0002__product_weight.sql`, the first script after the baseline. Commit both files.
 
 Deploy: test → **Run Pending Migrations**; prod → **Check for Drift**, **Show the SQL That Would
-Run**, then **Run Pending Migrations**.
+Run**, then **Run Pending Migrations** and **Run** to confirm.
 
 Bring dev along too: it does not have the column yet (you changed the model, not dev). Run
 `ALTER TABLE dbo.products ADD weight_kg decimal(6,2) NULL;` on dev, then **Compare with Dev**

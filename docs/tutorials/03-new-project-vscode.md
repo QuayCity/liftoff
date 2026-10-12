@@ -43,7 +43,8 @@ settings open in an editor tab.
 
 ## Step 2: add the environments
 
-In the settings tab, **Add environment** four times:
+The settings tab opens with a first, empty environment ready to fill in. Fill it in for `dev`,
+then click **Add environment** for each of the others:
 
 | Name | Connection URL | Role | Stored in |
 | --- | --- | --- | --- |
@@ -53,8 +54,9 @@ In the settings tab, **Add environment** four times:
 | `prod` | `…databaseName=shop_prod…` | Production | liftoff.toml: shared with the team through git |
 
 User `sa` and password `Shop!Pass2026` for each. `trustServerCertificate=true` accepts a local
-container's self-signed certificate; leave it out for a real server. Click **Test connection** on
-each, then **Save**.
+container's self-signed certificate; leave it out for a real server. Click **Save** (at the bottom) after
+each one, then **Test connection** in its section: the bottom line says **Connected to shop_dev as
+sa** and the server version. (Test connection works on saved environments only.)
 
 The passwords go to your operating system's keychain, never into the files. To share how to get a
 password without sharing the password, type `${env.SHOP_TEST_PASSWORD}` instead: the extension
@@ -105,7 +107,7 @@ orders`.
 
 ## Step 6: deploy to test
 
-The **Environments** view shows V0001 under every environment, **pending**. Under dev too: the
+In the **Environments** view, expand an environment: V0001 is listed, **pending**. Under dev too: the
 script was generated from the model, so dev's history does not know dev has the tables. You never
 deploy to dev here, so that is fine.
 
@@ -116,8 +118,10 @@ Right-click **test**:
 
 ## Step 7: production, carefully
 
-Right-click **prod** → **Check for Drift**: no drift, nobody changed it by hand. **Show the SQL
-That Would Run** to review. Then **Run Pending Migrations**.
+Right-click **prod** → **Check for Drift**: **No drift on prod: it matches its applied scripts**.
+Nobody changed it by hand. **Show the SQL That Would Run** to review. Then **Run Pending
+Migrations**: because prod has the Production role, it asks first (**Run the pending migrations
+on prod? This is a production database.**). Click **Run**.
 
 ## Step 8: the next change, from the model
 
@@ -140,17 +144,20 @@ it, or work from dev as in step 3 next time. Both directions work; pick one per 
 
 ## Step 9: a warning where you type
 
-Open `V0001__customers_and_orders.sql`, which already ran on test and prod, and add a comment.
-The editor warns: the script already ran, and editing it would make the databases disagree with
-the file. **Validate** on test reports it too. Undo the edit and save; the warning goes away. The
-next change always goes in a new script.
+Open `V0001__customers_and_orders.sql`, which already ran on test and prod, add a comment, and
+save. Right-click **test** → **Validate**: **V0001__customers_and_orders.sql changed after it was
+applied (checksum mismatch)**. The file gets a warning on its first line, in the **Problems**
+panel too; from then on it follows every save, for each environment you have expanded or
+validated. Undo the edit and save; the warning goes away. The next change always goes in a new
+script.
 
 ## Step 10: run one script only
 
 Add two scripts by hand: `migrations/V0003__a.sql` with `CREATE TABLE dbo.a (id int);` and
 `migrations/V0004__b.sql` with `CREATE TABLE dbo.b (id int);`. In the Environments view,
-right-click V0004 under **prod** → **Run This Script Only**. It tells you V0003 stays behind,
-then runs V0004 alone. Useful for a hotfix that cannot wait for the rest.
+right-click V0004 under **prod** → **Run This Script Only**. It tells you which older scripts stay
+behind on prod (V0002, which only ran on test, and V0003) and that prod is a production database;
+**Run This Script Only** then runs V0004 alone. Useful for a hotfix that cannot wait for the rest.
 
 ## Step 11: a pipeline (optional)
 

@@ -78,6 +78,8 @@ export class CompareView implements vscode.TreeDataProvider<Item>, vscode.TextDo
     this.busy = true
     this.result = undefined
     this.changed.fire(undefined)
+    // The view starts collapsed: from the command palette the result would land out of sight.
+    void vscode.commands.executeCommand('liftoff.compare.focus')
     void vscode.commands.executeCommand('setContext', 'liftoff.compared', false)
     try {
       this.result = await vscode.window.withProgress({ location: { viewId: 'liftoff.compare' }, title: 'Comparing' }, () =>
@@ -228,7 +230,8 @@ export class CompareView implements vscode.TreeDataProvider<Item>, vscode.TextDo
   /** The two sides of one difference, for the diff editor: liftoff-compare:/<target|source>/<id> */
   provideTextDocumentContent(uri: vscode.Uri): string {
     const [, side, ...rest] = uri.path.split('/')
-    const c = this.result?.changes.find((x) => x.id === decodeURIComponent(rest.join('/')))
+    const id = decodeURIComponent(rest.join('/')).replace(/\.sql$/, '')
+    const c = this.result?.changes.find((x) => x.id === id)
     return (side === 'source' ? c?.after : c?.before) ?? ''
   }
 

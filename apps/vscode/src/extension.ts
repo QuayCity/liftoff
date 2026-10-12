@@ -418,7 +418,7 @@ async function checkDrift(lo: Liftoff, item?: EnvironmentItem): Promise<CheckRep
   const names = drift.map((c) => `${c.kind} ${c.object_type.toLowerCase()} ${c.name}`)
   names.forEach((n) => lo.log.appendLine(`drift: ${n}`))
   const content = `-- What would make the scripts match ${env.name}:\n\n` + drift.map((c) => `-- ${c.kind} ${c.name}\n${c.sql}`).join('\n\n')
-  void vscode.window.showWarningMessage(`${drift.length} object${drift.length === 1 ? '' : 's'} on ${env.name} differ from its scripts`, 'Show the SQL').then(async (choice) => {
+  void vscode.window.showWarningMessage(`${drift.length} object${drift.length === 1 ? '' : 's'} on ${env.name} differ${drift.length === 1 ? 's' : ''} from its scripts`, 'Show the SQL').then(async (choice) => {
     if (choice === 'Show the SQL') {
       await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ language: 'sql', content }), { preview: true })
     }

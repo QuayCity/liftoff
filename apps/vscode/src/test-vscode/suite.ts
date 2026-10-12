@@ -129,6 +129,9 @@ export async function run(): Promise<void> {
   const compared = await vscode.commands.executeCommand<CompareResult>('liftoff.compare', { source: 'test', target: 'dev' })
   assert.deepEqual(compared?.changes.map((c) => c.id).sort(), ['table:public.notes', 'table:public.tags'])
   assert.deepEqual([...lo.compare!.checked].sort(), ['table:public.notes', 'table:public.tags'], 'nothing here can lose data, so all start ticked')
+  // Show the Difference: the source side is the table's DDL (the diff editor's URIs end in .sql).
+  const side = await vscode.workspace.openTextDocument(vscode.Uri.parse(`liftoff-compare:/source/${encodeURIComponent('table:public.notes')}.sql`))
+  assert.match(side.getText(), /notes/)
   lo.compare!.checked.delete('table:public.tags')
   const script = await vscode.commands.executeCommand<string>('liftoff.compare.script')
   assert.match(script ?? '', /Makes dev match test/)
