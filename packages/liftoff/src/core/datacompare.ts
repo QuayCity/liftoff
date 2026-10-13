@@ -23,7 +23,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { Config, Environment } from './config.ts'
 import { compares } from './config.ts'
-import { open, type Conn } from './db.ts'
+import { open, ownTables, type Conn } from './db.ts'
 import { configError } from './errors.ts'
 import { typeName } from './msdiff.ts'
 import { PgConn, quoteIdent } from './postgres.ts'
@@ -439,7 +439,7 @@ async function plan(cfg: Config, a: Conn, b: Conn, only: string[] | undefined): 
     if (only && !only.includes(id)) continue
     const [s, t] = [ta.get(id), tb.get(id)]
     const [schema, name] = [(s ?? t)!.schema, (s ?? t)!.name]
-    if (name === cfg.project.history_table || !compares(cfg.project, 'table', schema, name)) continue
+    if (ownTables(cfg.project.history_table).includes(name) || !compares(cfg.project, 'table', schema, name)) continue
     if (!s || !t) {
       skip(id, `only in the ${s ? 'source' : 'target'}; compare the schemas first`)
       continue

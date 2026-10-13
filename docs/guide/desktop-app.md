@@ -14,10 +14,11 @@ says how to get it.
 | **Open folder…** | open a folder with a `liftoff.toml`. A folder with a Flyway project offers **Convert settings…** instead (see [Moving from Flyway](flyway.md)) |
 | **Create sample…** | a small sample shop project to look around in |
 | **Recent** | projects opened before; **Remove** takes one off the list (the folder stays) |
+| **Overview of all projects** | the [Overview](#overview) of every recent project at once, each with an **Open** button. It connects to all their databases, so it only reads them when you ask |
 
 The project's name is in the title bar, with a button to close it. Along the top are the
-workspaces: **Environments**, **Changes**, **Scripts**, **Compare**, **Commit** and **Pipelines**;
-the gear opens **Settings**.
+workspaces: **Overview**, **Changes**, **Environments**, **Compare**, **Scripts**, **Commit** and
+**Pipelines** (Ctrl+1 to Ctrl+7); the gear opens **Settings**.
 
 **About LiftOff.** The ⓘ button, top right on the start page and in the title bar, shows this
 version, the newest LiftOff release, and what is new in it (its release notes), with **Check
@@ -31,6 +32,22 @@ remembered on this computer for every project.
 Files changed outside the app (`liftoff.toml` edited in a text editor, scripts added from git)
 are read again whenever the window gets focus. If a file cannot be read, a red banner names the
 problem and the screens keep the last good state.
+
+## Overview
+
+Where every environment stands, read from its databases. Scratch databases are left out.
+
+- **A card per environment**: the version it is at, how many scripts wait (or **Up to date**, or
+  how many failed), and its last run: when and by whom. One that cannot be reached says why.
+- **Where each script is**: the latest 12 scripts (or all of them) against every environment, with
+  their state on each. What has reached test but not production, at a glance.
+- **Activity**: the runs on every environment, newest first, from each database's
+  [activity table](concepts.md#the-activity-table): what ran, whether it worked, the database
+  user, and whether it came from a pipeline or a computer. Pick an environment or **Failures
+  only** to narrow it. Click a run for everything about it: the deployment id (with a copy
+  button), the computer, the pipeline run's page, the commit, the scripts, and the error.
+
+**Read again** reads every database once more.
 
 ## Environments
 

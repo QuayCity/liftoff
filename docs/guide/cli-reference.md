@@ -22,7 +22,7 @@ Flyway-style options (`-url=…`, `-user=…`, `-locations=filesystem:…`) are 
 
 - **Projects and settings:** [`init`](#init), [`settings`](#settings), [`project`](#project), [`test-connection`](#test-connection), [`create-scratch`](#create-scratch)
 - **Writing migrations:** [`diff`](#diff), [`generate`](#generate), [`add`](#add), [`capture`](#capture), [`model`](#model), [`lint`](#lint)
-- **Deploying:** [`info`](#info), [`migrate`](#migrate), [`check`](#check), [`validate`](#validate), [`repair`](#repair), [`undo`](#undo), [`mark-applied`](#mark-applied), [`baseline`](#baseline), [`clean`](#clean)
+- **Deploying:** [`info`](#info), [`activity`](#activity), [`migrate`](#migrate), [`check`](#check), [`validate`](#validate), [`repair`](#repair), [`undo`](#undo), [`mark-applied`](#mark-applied), [`baseline`](#baseline), [`clean`](#clean)
 - **Existing databases and baselines:** [`adopt`](#adopt), [`squash`](#squash), [`rebaseline`](#rebaseline)
 - **Compare:** [`compare`](#compare), [`snapshot`](#snapshot), [`data-compare`](#data-compare)
 - **Teams and pipelines:** [`renumber`](#renumber), [`ci`](#ci)
@@ -183,6 +183,17 @@ List every migration and its state on the environment
 
 ```
 Usage: liftoff info [OPTIONS]
+```
+
+### activity
+
+What ran where: each environment (all but scratch, or the one named with -e) with its version and pending scripts, then the latest runs (migrate, undo, repair, …) with who ran them, from where and what they changed
+
+```
+Usage: liftoff activity [OPTIONS]
+
+Options:
+      --limit <N>                    How many runs to show [default: 20]
 ```
 
 ### migrate

@@ -7,7 +7,7 @@ import { ThemeToggle } from './theme'
 import { UpdateButton } from './update'
 import { AboutButton } from './about'
 
-export const workspaces = ['Changes', 'Environments', 'Compare', 'Scripts', 'Commit', 'Pipelines'] as const
+export const workspaces = ['Overview', 'Changes', 'Environments', 'Compare', 'Scripts', 'Commit', 'Pipelines'] as const
 export type Workspace = (typeof workspaces)[number]
 
 /** Title bar. Empty areas are the window drag region once Tauri's custom title bar is on. */

@@ -9,6 +9,7 @@
 
 import { compares, type Project } from './config.ts'
 import { configError } from './errors.ts'
+import { ownTables } from './db.ts'
 import {
   P_DROP,
   P_DROP_OTHER,
@@ -149,7 +150,7 @@ export async function introspect(c: PgConn, schemas: string[], excludeTable: str
 
 async function read(c: PgConn, schemas: string[], excludeTable: string): Promise<Model> {
   const m = emptyModel()
-  const p = [schemas, excludeTable]
+  const p = [schemas, ownTables(excludeTable)]
   const p1 = [schemas]
   const s = (v: unknown) => v as string
   const ns = (v: unknown) => (v ?? null) as string | null
@@ -167,7 +168,7 @@ async function read(c: PgConn, schemas: string[], excludeTable: string): Promise
      left join pg_inherits i on i.inhrelid = c.oid and c.relispartition
      left join pg_class pc on pc.oid = i.inhparent
      left join pg_namespace pn on pn.oid = pc.relnamespace
-     where c.relkind in ('r', 'p') and n.nspname = any($1) and c.relname <> $2 and ${notExt('c.oid')}
+     where c.relkind in ('r', 'p') and n.nspname = any($1) and c.relname <> all($2) and ${notExt('c.oid')}
      order by 1, 2, a.attnum`,
     p,
   )) {
@@ -189,7 +190,7 @@ async function read(c: PgConn, schemas: string[], excludeTable: string): Promise
      join pg_class c on c.oid = con.conrelid
      join pg_namespace n on n.oid = c.relnamespace
      where con.contype in ('p', 'u', 'c', 'f', 'x') and con.conislocal
-       and c.relkind in ('r', 'p') and n.nspname = any($1) and c.relname <> $2
+       and c.relkind in ('r', 'p') and n.nspname = any($1) and c.relname <> all($2)
      order by 1, 2, 3`,
     p,
   )) {
@@ -203,7 +204,7 @@ async function read(c: PgConn, schemas: string[], excludeTable: string): Promise
      join pg_class i on i.oid = x.indexrelid
      join pg_class t on t.oid = x.indrelid
      join pg_namespace n on n.oid = t.relnamespace
-     where t.relkind in ('r', 'p', 'm') and n.nspname = any($1) and t.relname <> $2
+     where t.relkind in ('r', 'p', 'm') and n.nspname = any($1) and t.relname <> all($2)
        and not i.relispartition
        and not exists (select 1 from pg_constraint con
                        where con.conindid = x.indexrelid and con.conrelid = x.indrelid and con.contype in ('p', 'u', 'x'))
@@ -309,7 +310,7 @@ async function read(c: PgConn, schemas: string[], excludeTable: string): Promise
   for (const r of await c.rows(
     `select n.nspname::text, c.relname::text, t.tgname::text, pg_get_triggerdef(t.oid, true)
      from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
-     where not t.tgisinternal and t.tgparentid = 0 and n.nspname = any($1) and c.relname <> $2`,
+     where not t.tgisinternal and t.tgparentid = 0 and n.nspname = any($1) and c.relname <> all($2)`,
     p,
   )) {
     m.triggers.set(key(s(r[0]), s(r[1]), s(r[2])), `${s(r[3])};`)
@@ -320,7 +321,7 @@ async function read(c: PgConn, schemas: string[], excludeTable: string): Promise
     `select case c.relkind when 'S' then 'SEQUENCE ' else 'TABLE ' end || quote_ident(n.nspname) || '.' || quote_ident(c.relname),
             case when a.grantee = 0 then 'PUBLIC' else a.grantee::regrole::text end, a.privilege_type::text, a.is_grantable
      from pg_class c join pg_namespace n on n.oid = c.relnamespace, aclexplode(c.relacl) a
-     where c.relkind in ('r', 'p', 'v', 'm', 'S') and n.nspname = any($1) and c.relname <> $2 and a.grantee <> c.relowner and ${notExt('c.oid')}
+     where c.relkind in ('r', 'p', 'v', 'm', 'S') and n.nspname = any($1) and c.relname <> all($2) and a.grantee <> c.relowner and ${notExt('c.oid')}
      union all
      select case p.prokind when 'p' then 'PROCEDURE ' else 'FUNCTION ' end || quote_ident(n.nspname) || '.' || quote_ident(p.proname)
               || '(' || pg_get_function_identity_arguments(p.oid) || ')',
@@ -338,11 +339,11 @@ async function read(c: PgConn, schemas: string[], excludeTable: string): Promise
     `select case c.relkind when 'v' then 'VIEW ' when 'm' then 'MATERIALIZED VIEW ' when 'S' then 'SEQUENCE ' else 'TABLE ' end
               || quote_ident(n.nspname) || '.' || quote_ident(c.relname), obj_description(c.oid, 'pg_class')
      from pg_class c join pg_namespace n on n.oid = c.relnamespace
-     where c.relkind in ('r', 'p', 'v', 'm', 'S') and n.nspname = any($1) and c.relname <> $2 and ${notExt('c.oid')}
+     where c.relkind in ('r', 'p', 'v', 'm', 'S') and n.nspname = any($1) and c.relname <> all($2) and ${notExt('c.oid')}
      union all
      select 'COLUMN ' || quote_ident(n.nspname) || '.' || quote_ident(c.relname) || '.' || quote_ident(a.attname), col_description(c.oid, a.attnum)
      from pg_class c join pg_namespace n on n.oid = c.relnamespace join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
-     where c.relkind in ('r', 'p', 'v', 'm') and n.nspname = any($1) and c.relname <> $2 and ${notExt('c.oid')}
+     where c.relkind in ('r', 'p', 'v', 'm') and n.nspname = any($1) and c.relname <> all($2) and ${notExt('c.oid')}
      union all
      select case p.prokind when 'p' then 'PROCEDURE ' else 'FUNCTION ' end || quote_ident(n.nspname) || '.' || quote_ident(p.proname)
               || '(' || pg_get_function_identity_arguments(p.oid) || ')', obj_description(p.oid, 'pg_proc')

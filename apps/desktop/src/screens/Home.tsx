@@ -1,5 +1,5 @@
 // S01 start page + S02 new project dialog.
-import { FlaskConical, FolderOpen, FolderPlus, History } from 'lucide-react'
+import { ArrowLeft, FlaskConical, FolderOpen, FolderPlus, History, LayoutDashboard } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, type Engine, errorText, isErrorReport, type ConvertReport, type Project, type Recent } from '../api'
 import { Button, Field, Input, RadioGroup, Select } from '../ui/controls'
@@ -9,6 +9,7 @@ import { Dialog } from '../ui/overlays'
 import { ThemeToggle } from '../ui/theme'
 import { UpdateButton } from '../ui/update'
 import { AboutButton } from '../ui/about'
+import { Overview } from './Overview'
 
 function ConvertSummary({ r }: { r: ConvertReport }) {
   return (
@@ -39,6 +40,8 @@ export function Home({ onOpen }: { onOpen: (p: Project) => void }) {
   const [flywayFolder, setFlywayFolder] = useState<string | null>(null)
   const [converting, setConverting] = useState(false)
   const [converted, setConverted] = useState<{ report: ConvertReport; project: Project } | null>(null)
+  // Every recent project's environments side by side; connects to all their databases, so on request.
+  const [all, setAll] = useState(false)
 
   useEffect(() => { api.recentProjects().then(setRecent, (e) => { setRecent([]); setError(errorText(e)) }) }, [])
 
@@ -75,6 +78,21 @@ export function Home({ onOpen }: { onOpen: (p: Project) => void }) {
   const forget = async (path: string) => {
     await api.recentForget(path)
     setRecent((r) => r?.filter((x) => x.path !== path) ?? null)
+  }
+
+  const existing = recent?.filter((r) => r.exists) ?? []
+  if (all) {
+    return (
+      <main className="flex min-h-full flex-col gap-2 py-4">
+        <div className="flex items-center gap-3 px-4">
+          <Button icon={ArrowLeft} variant="ghost" onClick={() => setAll(false)}>Back</Button>
+          <h1 className="text-xl">All projects</h1>
+          <span className="flex-1" /><ThemeToggle />
+        </div>
+        {error && <div className="px-4"><InlineAlert tone="danger" title="Couldn't open the project">{error}</InlineAlert></div>}
+        <Overview projects={existing.map((r) => ({ name: r.name, path: r.path }))} onOpen={open} />
+      </main>
+    )
   }
 
   return (
@@ -134,7 +152,10 @@ export function Home({ onOpen }: { onOpen: (p: Project) => void }) {
       )}
 
       <section aria-labelledby="recent-h" className="flex flex-col gap-2">
-        <h2 id="recent-h" className="text-xs font-semibold tracking-wide text-muted uppercase">Recent</h2>
+        <div className="flex items-center">
+          <h2 id="recent-h" className="flex-1 text-xs font-semibold tracking-wide text-muted uppercase">Recent</h2>
+          {existing.length > 0 && <Button size="sm" variant="ghost" icon={LayoutDashboard} onClick={() => setAll(true)}>Overview of all projects</Button>}
+        </div>
         <Card className="overflow-hidden">
           {recent === null ? (
             <div className="p-4"><Spinner label="Loading recent projects" /></div>

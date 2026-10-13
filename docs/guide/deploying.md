@@ -16,6 +16,26 @@ Version          Description                      State           Ran on        
 
 The states are listed in [Concepts](concepts.md#the-history-table).
 
+## What ran where: `activity`
+
+```
+$ liftoff activity
+dev              dev      0004       0 pending
+test             test     0003       1 pending
+prod             prod     cannot be read: could not connect to 'prod': timed out
+
+2026-10-13 14:02:11  test             migrate: V0003__phone.sql
+    by deploy (runner@gh-7f2c) in https://github.com/acme/shop/actions/runs/118 at 3e591d5c0a  [6d6bb1af-…]
+2026-10-13 13:40:52  test             migrate FAILED
+    by deploy (runner@gh-7f2c) in https://github.com/acme/shop/actions/runs/117 at 9b1f2e0d77  [0c41…]
+    migration V0003__phone.sql failed: column "phone" already exists
+```
+
+Every environment but the scratch ones, each with the version it is at and what is waiting, then
+the latest runs on all of them, newest first (`--limit`, 20 by default). `-e test` shows one
+environment. The runs come from each database's [activity table](concepts.md#the-activity-table);
+an environment that cannot be reached says why, and the others are still read.
+
 ## Run the pending scripts: `migrate`
 
 ```sh
@@ -171,7 +191,8 @@ that was brought up to date some other way, e.g. by another tool. See
 liftoff -e test clean
 ```
 
-drops every object in the project's schemas, the history table included. It is refused unless
+drops every object in the project's schemas, the history table included (the
+[activity table](concepts.md#the-activity-table) keeps one row: this clean). It is refused unless
 the environment has `allow_clean = true` or the role `scratch`, so it cannot erase production by
 accident. Useful to rebuild a test database from scratch: `clean`, then `migrate`.
 

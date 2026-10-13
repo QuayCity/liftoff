@@ -1,10 +1,14 @@
 // Running migrations: info (C03), migrate (C04), undo (C09), validate (C05), baseline (C06),
 // repair (C07), clean (C08) and recording a script as applied. The same code serves PostgreSQL
-// and SQL Server; the differences live behind `Conn` (db.ts).
+// and SQL Server; the differences live behind `Conn` (db.ts). Each run that changes something is
+// also written to the activity table (who, from where, what), failed or not.
 
+import { randomUUID } from 'node:crypto'
+import * as os from 'node:os'
 import type { Config, Environment } from './config.ts'
 import { BaselineDiffersError, configError, DbError, MigrationError, notBaselinedError, validateError } from './errors.ts'
-import { dialect, open, type Conn, type EngineName, type Held, type HistoryRow } from './db.ts'
+import { activityTable, dialect, open, type Conn, type EngineName, type Held, type HistoryRow } from './db.ts'
+import { run as git } from './git.ts'
 import { applyPlaceholders, compareVersions, holds, isFor, parseExpression, parseVersion, scan, versionNote, type Kind, type Script, type Version } from './migration.ts'
 import { quoteIdent } from './postgres.ts'
 import { quote as quoteTsql } from './sqlserver.ts'
@@ -203,6 +207,8 @@ export type MigrateResult = {
   left_behind?: string[]
   /** a database with objects was checked against a baseline script instead of running it */
   baseline_check?: BaselineCheck
+  /** the activity row of this run, when it ran any script */
+  deployment_id?: string
 }
 
 export type BaselineCheck = {
@@ -247,6 +253,89 @@ export type MigrateOptions = {
 
 const waiting = (log: Log) => () => log('info', 'Another run holds the lock on this database; waiting')
 
+/** What a run writes to the activity table. `scripts` is read when the run ends. */
+type Audit = { id: string; operation: string; scripts: () => string[]; detail: string | null; options: string | null }
+
+const audit = (operation: string, options: string | null = null): Audit => ({ id: randomUUID(), operation, scripts: () => [], detail: null, options })
+
+/** The CI run's page, from the variables each CI service sets; null outside a pipeline. */
+export function pipelineOf(e: Record<string, string | undefined>): string | null {
+  if (e.GITHUB_ACTIONS === 'true' && e.GITHUB_RUN_ID) return `${e.GITHUB_SERVER_URL ?? 'https://github.com'}/${e.GITHUB_REPOSITORY}/actions/runs/${e.GITHUB_RUN_ID}`
+  if (e.TF_BUILD && e.BUILD_BUILDID) return `${e.SYSTEM_COLLECTIONURI ?? e.SYSTEM_TEAMFOUNDATIONCOLLECTIONURI ?? ''}${encodeURIComponent(e.SYSTEM_TEAMPROJECT ?? '')}/_build/results?buildId=${e.BUILD_BUILDID}`
+  if (e.GITLAB_CI && (e.CI_JOB_URL || e.CI_PIPELINE_URL)) return (e.CI_JOB_URL ?? e.CI_PIPELINE_URL)!
+  if (e.JENKINS_URL && e.BUILD_URL) return e.BUILD_URL
+  return null
+}
+
+function commitOf(root: string): string | null {
+  try {
+    return git(root, ['rev-parse', 'HEAD']).trim() || null
+  } catch {
+    return null
+  }
+}
+
+function osUser(): string {
+  try {
+    return process.env.USERNAME ?? process.env.USER ?? os.userInfo().username
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Runs `work` and writes the run to the activity table, failed or not. A run that changed nothing
+ * is not written. Writing never hides the run's own result or error: it only warns.
+ */
+async function audited<T>(c: Conn, cfg: Config, log: Log, a: Audit, work: () => Promise<T>): Promise<T> {
+  const started = new Date()
+  let error: { e: unknown } | undefined
+  try {
+    return await work()
+  } catch (e) {
+    error = { e }
+    throw e
+  } finally {
+    const scripts = a.scripts()
+    if (error || scripts.length || a.detail) {
+      const schema = cfg.historySchema()
+      const table = activityTable(cfg.project.history_table)
+      try {
+        await c.ensureActivity(schema, table)
+        await c.insertActivity(schema, table, {
+          id: a.id,
+          operation: a.operation,
+          started_on: started.toISOString(),
+          execution_time: Date.now() - started.getTime(),
+          success: !error,
+          os_user: osUser().slice(0, 100),
+          host: os.hostname().slice(0, 100),
+          pipeline: pipelineOf(process.env)?.slice(0, 1000) ?? null,
+          git_commit: commitOf(cfg.root),
+          scripts,
+          detail: [error ? failure(error.e) : a.detail, a.options].filter(Boolean).join('\n') || null,
+        })
+      } catch (e) {
+        log('warn', `This run was not written to ${table}: ${failure(e)}`)
+      }
+    }
+  }
+}
+
+/** How migrate was asked to run, for the activity table. */
+function optionsText(o: MigrateOptions): string | null {
+  const parts = [
+    o.only && `--only ${o.only.join(', ')}`,
+    o.topic !== undefined && `--topic ${o.topic}`,
+    o.target !== undefined && `--target ${o.target}`,
+    o.outOfOrder && '--out-of-order',
+    o.allowNonEmpty && '--allow-non-empty',
+    o.acceptDifferences && '--accept-differences',
+    o.rerunRepeatables && '--rerun-repeatables',
+  ].filter(Boolean)
+  return parts.length ? parts.join(' ') : null
+}
+
 /** Validates, then applies pending versioned scripts in order, then new or changed repeatables. */
 export async function migrate(cfg: Config, envName: string | undefined, opts: MigrateOptions = {}, log: Log = quiet): Promise<MigrateResult> {
   const started = Date.now()
@@ -273,13 +362,15 @@ export async function migrate(cfg: Config, envName: string | undefined, opts: Mi
       return result
     }
     const held = await c.lock(schema, table, cfg.project.lock, waiting(log), () => open(name, env))
-    let result: MigrateResult
+    const result: MigrateResult = { environment: name, applied: [], execution_time_ms: 0, dry_run_sql: null }
+    const a = { ...audit('migrate', optionsText(opts)), scripts: () => result.applied.map((x) => x.script) }
     try {
-      result = await migrateLocked(c, cfg, name, targetOf(cfg, name, env, opts.as), scripts, opts, target, log)
+      await audited(c, cfg, log, a, () => migrateLocked(c, cfg, name, targetOf(cfg, name, env, opts.as), scripts, opts, target, log, result))
     } finally {
       // Released on failure too (a dropped connection or an expired lease would free it as well).
       await held.release()
     }
+    if (result.applied.length) result.deployment_id = a.id
     result.execution_time_ms = Date.now() - started
     return result
   })
@@ -444,11 +535,10 @@ function dryRun(cfg: Config, engine: EngineName, name: string, as: Target, scrip
   return result
 }
 
-async function migrateLocked(c: Conn, cfg: Config, name: string, as: Target, scripts: Script[], opts: MigrateOptions, target: Version | undefined, log: Log): Promise<MigrateResult> {
+async function migrateLocked(c: Conn, cfg: Config, name: string, as: Target, scripts: Script[], opts: MigrateOptions, target: Version | undefined, log: Log, result: MigrateResult): Promise<void> {
   const [schema, table] = [cfg.historySchema(), cfg.project.history_table]
   await c.ensureHistory(schema, table)
   let rows = await c.readHistory(schema, table)
-  const result: MigrateResult = { environment: name, applied: [], execution_time_ms: 0, dry_run_sql: null }
 
   // Scripts that create what already exists fail half-way; ask for a baseline instead.
   // (--only never builds from a B script: it runs what it names.)
@@ -509,7 +599,6 @@ async function migrateLocked(c: Conn, cfg: Config, name: string, as: Target, scr
     log('info', `Applied ${s.fileName} in ${ms} ms`)
     result.applied.push({ script: s.fileName, version: s.version?.text ?? null, execution_time_ms: ms, transactional })
   }
-  return result
 }
 
 /** A failed script's message, in the database's own words. */
@@ -543,7 +632,7 @@ function record(c: Conn, s: Script, ms: number, success: boolean, schema: string
 
 /** Runs the U script of the latest applied version and records it; that version is pending again. */
 export async function undo(cfg: Config, envName: string | undefined, log: Log = quiet): Promise<Applied> {
-  return withSession(cfg, envName, log, async (s) => {
+  return withSession(cfg, envName, log, 'undo', async (s) => {
     const infos = compute(s.scripts, s.rows)
     validate(infos, {})
     const latest = infos
@@ -556,6 +645,7 @@ export async function undo(cfg: Config, envName: string | undefined, log: Log = 
     if (!u) throw validateError(`${latest.script} has no undo script (U${latest.version}__….sql)`)
     const transactional = !dialect[s.c.engine].needsNoTransaction(u.sql)
     log('info', `Undoing ${latest.script} with ${u.fileName}`)
+    s.audit.scripts = () => [u.fileName]
     const t = Date.now()
     try {
       await runScript(s.c, u, sqlFor(cfg, s.name, u), transactional, s.schema, s.table, 'UNDO_SQL')
@@ -586,17 +676,20 @@ export async function validateEnv(cfg: Config, envName: string | undefined): Pro
   return infos
 }
 
-/** A locked connection with the history table in place. */
-type Session = { c: Conn; name: string; schema: string; table: string; scripts: Script[]; rows: HistoryRow[] }
+/** A locked connection with the history table in place; `audit` is what the activity table gets. */
+type Session = { c: Conn; name: string; schema: string; table: string; scripts: Script[]; rows: HistoryRow[]; audit: Audit }
 
-async function withSession<T>(cfg: Config, envName: string | undefined, log: Log, work: (s: Session) => Promise<T>): Promise<T> {
+async function withSession<T>(cfg: Config, envName: string | undefined, log: Log, operation: string, work: (s: Session) => Promise<T>): Promise<T> {
   const scripts = scan(cfg.migrationsDir())
   return withEnv(cfg, envName, async (c, name, env) => {
     const [schema, table] = [cfg.historySchema(), cfg.project.history_table]
     const held: Held = await c.lock(schema, table, cfg.project.lock, waiting(log), () => open(name, env))
+    const a = audit(operation)
     try {
-      await c.ensureHistory(schema, table)
-      return await work({ c, name, schema, table, scripts, rows: await c.readHistory(schema, table) })
+      return await audited(c, cfg, log, a, async () => {
+        await c.ensureHistory(schema, table)
+        return work({ c, name, schema, table, scripts, rows: await c.readHistory(schema, table), audit: a })
+      })
     } finally {
       await held.release()
     }
@@ -606,8 +699,9 @@ async function withSession<T>(cfg: Config, envName: string | undefined, log: Log
 /** Marks an existing database as being at `version`, so scripts up to it never run there. */
 export async function baseline(cfg: Config, envName: string | undefined, version: string, description: string, log: Log = quiet): Promise<void> {
   if (!parseVersion(version)) throw configError(`baseline version '${version}' must be numbers separated by . or _`)
-  await withSession(cfg, envName, log, async (s) => {
+  await withSession(cfg, envName, log, 'baseline', async (s) => {
     if (s.rows.length) throw validateError(`${s.name} already has migration history; baseline only applies to a database without any`)
+    s.audit.detail = `baseline at version ${version}`
     await s.c.insertHistory(s.schema, s.table, { version, description, type: 'BASELINE', script: '<< baseline >>', checksum: null, executionTime: 0, success: true })
     log('info', `${s.name} is now at baseline ${version}`)
   })
@@ -624,7 +718,7 @@ export type RepairReport = {
 
 /** Removes failed runs, accepts edited scripts, forgets scripts whose files were deleted. */
 export async function repair(cfg: Config, envName: string | undefined, log: Log = quiet): Promise<RepairReport> {
-  return withSession(cfg, envName, log, async (s) => {
+  return withSession(cfg, envName, log, 'repair', async (s) => {
     const report: RepairReport = { removed_failed: await s.c.deleteFailed(s.schema, s.table), realigned: [], forgotten: [] }
     const rows = await s.c.readHistory(s.schema, s.table)
     for (const i of compute(s.scripts, rows)) {
@@ -642,7 +736,9 @@ export async function repair(cfg: Config, envName: string | undefined, log: Log 
         report.forgotten.push(i.script)
       }
     }
-    log('info', `Repair: ${report.removed_failed.length} failed row(s) removed, ${report.realigned.length} checksum(s) updated, ${report.forgotten.length} missing script(s) forgotten`)
+    const done = `${report.removed_failed.length} failed row(s) removed, ${report.realigned.length} checksum(s) updated, ${report.forgotten.length} missing script(s) forgotten`
+    log('info', `Repair: ${done}`)
+    s.audit.scripts = () => [...report.removed_failed, ...report.realigned, ...report.forgotten]
     return report
   })
 }
@@ -656,7 +752,8 @@ export async function clean(cfg: Config, envName: string | undefined, log: Log =
   await withEnv(cfg, name, async (c) => {
     const held = await c.lock(cfg.historySchema(), cfg.project.history_table, cfg.project.lock, waiting(log), () => open(name, env))
     try {
-      await c.resetSchemas(cfg.project.schemas)
+      // The activity table goes too; the clean is its first row again.
+      await audited(c, cfg, log, { ...audit('clean'), detail: `erased ${cfg.project.schemas.join(', ')}` }, () => c.resetSchemas(cfg.project.schemas))
     } finally {
       await held.release()
     }
@@ -670,12 +767,13 @@ export async function clean(cfg: Config, envName: string | undefined, log: Log =
  * generated from, which already has the change.
  */
 export async function markApplied(cfg: Config, envName: string | undefined, script: string, log: Log = quiet): Promise<void> {
-  await withSession(cfg, envName, log, async (s) => {
+  await withSession(cfg, envName, log, 'mark-applied', async (s) => {
     const env = cfg.pick(s.name)[1]
     const i = compute(s.scripts, s.rows, { name: s.name, role: env.role }).find((i) => i.script === script)
     if (!i) throw configError(`no script named ${script} in the migrations folder`)
     if (i.state !== 'pending' && i.state !== 'outdated') throw validateError(`${script} is ${i.state.replaceAll('_', '')} on ${s.name}; only pending scripts can be recorded`)
     await record(s.c, s.scripts.find((x) => x.fileName === script)!, 0, true, s.schema, s.table, 'SQL')
+    s.audit.scripts = () => [script]
     log('info', `Recorded ${script} as applied on ${s.name} without running it`)
   })
 }

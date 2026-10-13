@@ -110,7 +110,8 @@ test('the runner on SQL Server', { skip: !base && 'set LIFTOFF_TEST_MSSQL' }, as
   await runner.baseline(cfg, 'dev', '3', 'existing')
   assert.deepEqual((await runner.migrate(cfg, 'dev')).applied.map((a) => a.script), ['V4__total.sql', 'R__order_view.sql'])
 
-  // 7. Clean removes everything, whatever depends on what; the schema stays.
+  // 7. Clean removes everything, whatever depends on what; the schema stays. Only the activity table
+  //    is there again, with the clean in it.
   await sql(
     cfg,
     'dev',
@@ -125,7 +126,7 @@ test('the runner on SQL Server', { skip: !base && 'set LIFTOFF_TEST_MSSQL' }, as
     await succeeds(
       cfg,
       'dev',
-      "IF EXISTS (SELECT 1 FROM sys.objects WHERE schema_id = SCHEMA_ID('dbo') AND is_ms_shipped = 0 AND parent_object_id = 0) " +
+      "IF EXISTS (SELECT 1 FROM sys.objects WHERE schema_id = SCHEMA_ID('dbo') AND is_ms_shipped = 0 AND parent_object_id = 0 AND name <> 'liftoff_schema_history_activity') " +
         "OR EXISTS (SELECT 1 FROM sys.types WHERE is_user_defined = 1 AND schema_id = SCHEMA_ID('dbo')) THROW 50000, 'clean left objects behind', 1;",
     ),
   )

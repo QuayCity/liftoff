@@ -83,6 +83,29 @@ a script that was **edited after it ran**: the checksum no longer matches the fi
 | future | ran here, and is newer than any file you have (another branch ran it) |
 | baseline | a baseline row: the database was marked as being at this version |
 | belowbaseline | covered by a baseline: never runs here |
+| excluded | not for this environment ([`-- liftoff:for`](scripts.md#scripts-for-some-environments-only)): never runs here |
+
+## The activity table
+
+Next to the history table is `liftoff_schema_history_activity` (the history table's name plus
+`_activity`), with one row per **run** rather than per script: every `migrate`, `undo`, `repair`,
+`baseline`, `mark-applied` and `clean` that changed something, and every one that failed or was
+refused. A row says:
+
+- when it ran, how long it took, and whether it worked (the database's error when it did not);
+- who ran it: the database user, and the user and computer it ran from;
+- the pipeline run's page when it ran in GitHub Actions, Azure DevOps, GitLab or Jenkins (read
+  from the variables those set), and the git commit of the project;
+- the scripts it ran, and how it was asked to run (`--only 5`, `--topic JIRA-142`);
+- its **deployment id**, which `migrate` also prints and returns in its JSON (`deployment_id`).
+
+A `migrate` with nothing to do and a dry run leave no row. The history table is not changed by
+any of this, so it stays as it was. LiftOff's own tables are never part of a comparison, drift
+or a baseline check. `clean` erases the activity table with everything else, and writes the
+clean as its first row again.
+
+[`liftoff activity`](deploying.md#what-ran-where-activity) and the desktop app's
+[Overview](desktop-app.md#overview) read it.
 
 ## Baselines
 

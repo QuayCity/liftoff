@@ -8,6 +8,7 @@ import { Settings } from './screens/Settings'
 import { Scripts } from './screens/Scripts'
 import { Commit } from './screens/Commit'
 import { Pipelines } from './screens/Pipelines'
+import { Overview } from './screens/Overview'
 import { InlineAlert } from './ui/display'
 import { StatusBar, TitleBar, workspaces, type Workspace } from './ui/shell'
 
@@ -95,6 +96,7 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
       <main className="min-h-0 flex-1 overflow-auto">
         <h1 className="sr-only">{`${view}: ${project.name}`}</h1>
         {reloadError && <div className="p-4 pb-0"><InlineAlert tone="danger" title="Could not read the project files again">{reloadError} The screens show the project as it was; fix the file and come back to this window.</InlineAlert></div>}
+        {view === 'Overview' && <Overview projects={[{ name: project.name, path: project.root }]} />}
         {view === 'Environments' && <Environments project={project} onProject={onProject} />}
         {view === 'Changes' && <Changes project={project} onProject={onProject} onEnvironments={() => setView('Environments')} />}
         {view === 'Settings' && <Settings project={project} onProject={onProject} onDirty={setSettingsDirty} />}

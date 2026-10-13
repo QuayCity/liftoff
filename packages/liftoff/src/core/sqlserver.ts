@@ -7,7 +7,7 @@ import { InteractiveBrowserCredential } from '@azure/identity'
 import { Connection, Request, TYPES, type ConnectionConfiguration } from 'tedious'
 import type { Environment, LockMode } from './config.ts'
 import { DbError, connectError } from './errors.ts'
-import { sleep, type Conn, type Held, type HistoryRow, type NewRow, type ServerInfo } from './db.ts'
+import { activityRow, ownTables, sleep, type Activity, type Conn, type Held, type HistoryRow, type NewActivity, type NewRow, type ServerInfo } from './db.ts'
 import { splitBatches } from './migration.ts'
 
 /** `[name]`, with `]` doubled, as QUOTENAME does. */
@@ -278,12 +278,50 @@ export class SqlServerConn implements Conn {
     )
   }
 
+  async ensureActivity(schema: string, table: string): Promise<void> {
+    await this.query("IF SCHEMA_ID(@P1) IS NULL BEGIN DECLARE @s nvarchar(400) = N'CREATE SCHEMA ' + QUOTENAME(@P1); EXEC (@s) END", [schema])
+    if (await this.historyExists(schema, table)) return
+    await this.batch(
+      `CREATE TABLE ${quote(schema)}.${quote(table)} (
+         id nvarchar(36) NOT NULL PRIMARY KEY,
+         operation nvarchar(20) NOT NULL,
+         started_on datetime2(3) NOT NULL,
+         execution_time int NOT NULL,
+         success bit NOT NULL,
+         installed_by nvarchar(100) NOT NULL,
+         os_user nvarchar(100) NOT NULL,
+         host nvarchar(100) NOT NULL,
+         pipeline nvarchar(1000) NULL,
+         git_commit nvarchar(64) NULL,
+         scripts nvarchar(max) NOT NULL,
+         detail nvarchar(max) NULL
+       );`,
+    )
+  }
+
+  async insertActivity(schema: string, table: string, a: NewActivity): Promise<void> {
+    await this.query(
+      `INSERT INTO ${quote(schema)}.${quote(table)} (id, operation, started_on, execution_time, success, installed_by, os_user, host, pipeline, git_commit, scripts, detail)
+       VALUES (@P1, @P2, CONVERT(datetime2(3), @P3, 127), @P4, @P5, SUSER_SNAME(), @P6, @P7, @P8, @P9, @P10, @P11)`,
+      [a.id, a.operation, a.started_on, a.execution_time, a.success, a.os_user, a.host, a.pipeline, a.git_commit, a.scripts.join('\n'), a.detail],
+    )
+  }
+
+  async readActivity(schema: string, table: string, limit: number): Promise<Activity[]> {
+    if (!(await this.historyExists(schema, table))) return []
+    const rows = await this.query(
+      `SELECT TOP (@P1) id, operation, CONVERT(varchar(23), started_on, 126) + 'Z', execution_time, success, installed_by, os_user, host, pipeline, git_commit, scripts, detail
+       FROM ${quote(schema)}.${quote(table)} ORDER BY started_on DESC, id`,
+      [limit],
+    )
+    return rows.map(activityRow)
+  }
+
   async userObjects(schemas: string[], table: string): Promise<number> {
     const [[n]] = await this.query(
       `SELECT COUNT(*) FROM sys.objects o JOIN sys.schemas s ON s.schema_id = o.schema_id
        WHERE s.name IN (${schemas.map(lit).join(', ')}) AND o.is_ms_shipped = 0 AND o.parent_object_id = 0
-         AND o.type IN ('U', 'V', 'P', 'FN', 'IF', 'TF', 'SO', 'SN') AND o.name <> @P1`,
-      [table],
+         AND o.type IN ('U', 'V', 'P', 'FN', 'IF', 'TF', 'SO', 'SN') AND o.name NOT IN (${ownTables(table).map(lit).join(', ')})`,
     )
     return Number(n)
   }

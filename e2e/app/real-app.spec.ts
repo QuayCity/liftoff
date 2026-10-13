@@ -185,7 +185,8 @@ test('F09-H1 clean the scratch database after typing its name', async () => {
   await dialog.getByLabel('Type scratch to confirm').fill('scratch')
   await dialog.getByRole('button', { name: 'Erase everything' }).click()
   await expect(page.getByText('scratch is empty', { exact: true })).toBeVisible()
-  expect(psql('shop_scratch', "select count(*) from pg_tables where schemaname = 'public'")).toBe('0')
+  // Only the activity table, with this clean in it.
+  expect(psql('shop_scratch', "select string_agg(tablename, ',') from pg_tables where schemaname = 'public'")).toBe('liftoff_schema_history_activity')
 })
 
 test('F07-N2 a database with tables but no history asks for a baseline instead of failing', async () => {

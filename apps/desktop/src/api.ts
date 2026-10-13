@@ -89,6 +89,12 @@ export type ModelChange = { path: string; object_type: string; kind: 'added' | '
 export type CiOptions = { stages: string[]; branch: string; checks: boolean; install: string; model?: 'off' | 'check' | 'generate' }
 export type ObjectCommit = { sha: string; short: string; author: string; date: string; message: string; path: string; deleted: boolean }
 export type RepairReport = { removed_failed: string[]; realigned: string[]; forgotten: string[] }
+/** One run against a database, from its activity table. `id` is the deployment id. */
+export type Activity = {
+  id: string; operation: string; started_on: string; execution_time: number; success: boolean
+  installed_by: string; os_user: string; host: string; pipeline: string | null; git_commit: string | null; scripts: string[]; detail: string | null
+}
+export type EnvironmentOverview = { name: string; role: Role; error: string | null; version: string | null; pending: number; failed: number; activity: Activity[]; migrations: MigrationInfo[] }
 
 /** The bridge electron/preload.ts puts on the window. */
 type Bridge = {
@@ -214,6 +220,8 @@ type Api = {
   /** `path` and `name` when editing a saved environment: its saved password and URL fill the gaps */
   envTestDraft(env: EnvInput, path?: string, name?: string): Promise<ServerInfo>
   migrationsInfo(path: string, env: string): Promise<MigrationInfo[]>
+  /** Every environment but scratch: its state and latest runs (one that cannot be read has `error`) */
+  overview(path: string): Promise<EnvironmentOverview[]>
   /** `only`: run these scripts and nothing else (a cherry-pick) */
   migrate(path: string, env: string, outOfOrder: boolean, allowNonEmpty?: boolean, only?: string[], acceptDifferences?: boolean): Promise<MigrateResult>
   adopt(path: string, env: string): Promise<{ environment: string; baseline: string; version: string; objects: number }>
@@ -285,6 +293,7 @@ const real: Api = {
   envTest: (path, name) => invoke('env_test', { path, name }),
   envTestDraft: (env, path, name) => invoke('env_test_draft', { env, path, name }),
   migrationsInfo: (path, env) => invoke('migrations_info', { path, env }),
+  overview: (path) => invoke('overview', { path }),
   migrate: (path, env, outOfOrder, allowNonEmpty = false, only, acceptDifferences = false) => invoke('migrate', { path, env, outOfOrder, allowNonEmpty, only, acceptDifferences }),
   adopt: (path, env) => invoke('adopt', { path, env }),
   modelStatus: (path) => invoke('model_status', { path }),
@@ -377,6 +386,7 @@ const fake = {
     { path: 'tables/public.orders.sql', object_type: 'tables', kind: 'changed', before: 'CREATE TABLE public.orders (\n    id bigserial,\n    note text\n);\n', after: 'CREATE TABLE public.orders (\n    id bigserial,\n    note text,\n    paid_at timestamp with time zone\n);\n' },
     { path: 'tables/public.customer.sql', object_type: 'tables', kind: 'added', before: null, after: 'CREATE TABLE public.customer (\n    id bigint NOT NULL\n);\n' },
   ] as ModelChange[],
+  activity: [] as (Activity & { environment: string })[],
   gitRejectPush: new URLSearchParams(location.search).has('rejectpush'),
   notGit: new URLSearchParams(location.search).has('nogit'),
 }
@@ -397,7 +407,35 @@ const fakeInfo = (env: string): MigrationInfo[] => [
     : []),
 ]
 
+const fakeRun = (environment: string, operation: string, started_on: string, scripts: string[], o: { by: string; from: string; pipeline?: string; failed?: string }): Activity & { environment: string } => ({
+  environment, id: crypto.randomUUID(), operation, started_on, execution_time: 400 + scripts.length * 120, success: !o.failed,
+  installed_by: o.by, os_user: o.from.split('@')[0], host: o.from.split('@')[1], pipeline: o.pipeline ?? null,
+  git_commit: o.pipeline ? '3e591d5c0a8f41d2b7e6a9c4f1d0b2e8a7c6d5e4' : null, scripts, detail: o.failed ?? null,
+})
+const ago = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString()
+const ci = 'https://github.com/acme/shop-db/actions/runs/11873'
+fake.activity.push(
+  fakeRun('staging', 'migrate', ago(3), ['V20261003.1530__add_order_lines.sql'], { by: 'deploy', from: 'runner@gh-7f2c', pipeline: ci }),
+  fakeRun('staging', 'migrate', ago(4), ['V20261007.1102__tax_function.sql'], { by: 'deploy', from: 'runner@gh-7f2c', pipeline: ci, failed: 'V20261007.1102__tax_function.sql failed: function round(double precision, integer) does not exist' }),
+  fakeRun('local', 'migrate', ago(26), ['V20261007.1102__tax_function.sql', 'V20261008.0840__daily_totals_view.sql'], { by: 'me', from: 'me@LAPTOP-7' }),
+  fakeRun('staging', 'migrate', ago(50), ['V20261001.0912__create_orders.sql'], { by: 'deploy', from: 'runner@gh-7f2c', pipeline: ci }),
+  fakeRun('local', 'mark-applied', ago(75), ['V20261003.1530__add_order_lines.sql'], { by: 'me', from: 'me@LAPTOP-7' }),
+)
+
 const fakeApi: Api = {
+  overview: async (path) => {
+    await wait()
+    if (path.includes('flyway')) throw fail('LIFTOFF_FLYWAY_PROJECT', 'This folder has a Flyway project. Convert its settings to open it in LiftOff.', 2)
+    return fake.project.environments.filter((e) => e.role !== 'scratch').map((e): EnvironmentOverview => {
+      if (e.name === 'production') return { name: e.name, role: e.role, error: "could not connect to 'production': timed out", version: null, pending: 0, failed: 0, activity: [], migrations: [] }
+      const migrations = fakeInfo(e.name)
+      return {
+        name: e.name, role: e.role, error: null, version: migrations.filter((i) => i.state === 'applied').at(-1)?.version ?? null,
+        pending: migrations.filter((i) => i.state === 'pending').length, failed: 0, migrations,
+        activity: fake.activity.filter((a) => a.environment === e.name).map(({ environment: _, ...a }) => a),
+      }
+    })
+  },
   recentProjects: async () => [
     { name: 'shop-db', path: 'C:/repos/shop-db', exists: true },
     { name: 'legacy-flyway', path: 'C:/repos/legacy-flyway', exists: true },
@@ -581,6 +619,7 @@ const fakeApi: Api = {
     }
     if (!pending.length) emit('info', `${env} is up to date`)
     fake.applied[env] = fake.scripts.length
+    if (pending.length) fake.activity.unshift(fakeRun(env, 'migrate', new Date().toISOString(), pending.map((p) => p.script), { by: 'me', from: 'me@LAPTOP-7' }))
     return { environment: env, applied: pending.map((p) => ({ script: p.script, version: p.version, execution_time_ms: 52, transactional: true })), execution_time_ms: 300 * pending.length }
   },
   validate: async (_p, env) => {

@@ -6,6 +6,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { parseArgs, type ParseArgsConfig } from 'node:util'
+import * as activity from '../core/activity.ts'
 import * as checks from '../core/checks.ts'
 import * as ci from '../core/ci.ts'
 import { Config, defaultSchema, init, PROJECT_FILE, readSettings, saveSettings, type Environment, type Role, type SettingsChange } from '../core/config.ts'
@@ -263,6 +264,26 @@ const COMMANDS: Record<string, Command> = {
       return [infos, infoTable(infos)]
     },
   },
+  activity: {
+    help: 'What ran where: each environment (all but scratch, or the one named with -e) with its version and pending scripts, then the latest runs (migrate, undo, repair, …) with who ran them, from where and what they changed',
+    options: {
+      limit: { type: 'string', default: '20', help: 'How many runs to show', value: 'N' },
+    },
+    async run(ctx, v) {
+      const limit = Number(str(v, 'limit'))
+      if (!Number.isInteger(limit) || limit < 1) throw configError('--limit must be a whole number above 0')
+      const envs = await activity.overview(load(ctx), limit, ctx.env)
+      const list = activity.runs(envs, limit)
+      const result = { environments: envs.map(({ migrations: _, activity: __, ...e }) => e), runs: list }
+      const status = envs.map((e) => `${e.name.padEnd(16)} ${e.role.padEnd(8)} ${e.error ? `cannot be read: ${e.error}` : `${(e.version ?? 'empty').padEnd(10)} ${e.pending} pending${e.failed ? `, ${e.failed} failed` : ''}`}`)
+      const lines = list.map((r) => {
+        const what = `${r.operation}${r.success ? '' : ' FAILED'}${r.scripts.length ? `: ${r.scripts.join(', ')}` : ''}`
+        const who = `${r.installed_by} (${r.os_user}@${r.host})`
+        return [`${r.started_on.slice(0, 19).replace('T', ' ')}  ${r.environment.padEnd(16)} ${what}`, `    by ${who}${r.pipeline ? ` in ${r.pipeline}` : ''}${r.git_commit ? ` at ${r.git_commit.slice(0, 10)}` : ''}  [${r.id}]`, ...(r.detail ? [`    ${r.detail.replaceAll('\n', '\n    ')}`] : [])].join('\n')
+      })
+      return [result, [...status, '', ...(lines.length ? lines : ['No runs recorded yet'])].join('\n')]
+    },
+  },
   migrate: {
     help: 'Run pending migrations',
     options: {
@@ -284,7 +305,7 @@ const COMMANDS: Record<string, Command> = {
         { outOfOrder: flag(v, 'out-of-order'), target: str(v, 'target'), dryRun: flag(v, 'dry-run'), allowNonEmpty: flag(v, 'allow-non-empty'), rerunRepeatables: flag(v, 'rerun-repeatables'), only: v.only as string[] | undefined, topic: str(v, 'topic'), acceptDifferences: flag(v, 'accept-differences'), scratch: str(v, 'scratch') },
         log,
       )
-      return [r, r.dry_run_sql ?? `Applied ${r.applied.length} migration(s) to ${r.environment} in ${r.execution_time_ms} ms`]
+      return [r, r.dry_run_sql ?? `Applied ${r.applied.length} migration(s) to ${r.environment} in ${r.execution_time_ms} ms${r.deployment_id ? ` (deployment ${r.deployment_id})` : ''}`]
     },
   },
   undo: {

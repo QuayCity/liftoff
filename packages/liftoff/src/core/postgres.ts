@@ -7,7 +7,7 @@ import pg from 'pg'
 import * as tls from 'node:tls'
 import type { Environment, LockMode } from '../core/config.ts'
 import { DbError, connectError } from './errors.ts'
-import { holderName, sleep, type Conn, type Held, type HistoryRow, type NewRow, type ServerInfo } from './db.ts'
+import { activityRow, holderName, ownTables, sleep, type Activity, type Conn, type Held, type HistoryRow, type NewActivity, type NewRow, type ServerInfo } from './db.ts'
 import { splitStatements } from './migration.ts'
 
 const RESERVED = new Set(
@@ -310,12 +310,51 @@ export class PgConn implements Conn {
     )
   }
 
+  async ensureActivity(schema: string, table: string): Promise<void> {
+    const [s, t] = [quoteIdent(schema), quoteIdent(table)]
+    await this.batch(
+      `CREATE SCHEMA IF NOT EXISTS ${s};
+       CREATE TABLE IF NOT EXISTS ${s}.${t} (
+         id varchar(36) NOT NULL PRIMARY KEY,
+         operation varchar(20) NOT NULL,
+         started_on timestamp NOT NULL,
+         execution_time integer NOT NULL,
+         success boolean NOT NULL,
+         installed_by varchar(100) NOT NULL,
+         os_user varchar(100) NOT NULL,
+         host varchar(100) NOT NULL,
+         pipeline varchar(1000),
+         git_commit varchar(64),
+         scripts text NOT NULL,
+         detail text
+       );`,
+    )
+  }
+
+  async insertActivity(schema: string, table: string, a: NewActivity): Promise<void> {
+    await this.rows(
+      `insert into ${quoteIdent(schema)}.${quoteIdent(table)} (id, operation, started_on, execution_time, success, installed_by, os_user, host, pipeline, git_commit, scripts, detail)
+       values ($1, $2, $3::timestamptz at time zone 'UTC', $4, $5, current_user, $6, $7, $8, $9, $10, $11)`,
+      [a.id, a.operation, a.started_on, a.execution_time, a.success, a.os_user, a.host, a.pipeline, a.git_commit, a.scripts.join('\n'), a.detail],
+    )
+  }
+
+  async readActivity(schema: string, table: string, limit: number): Promise<Activity[]> {
+    if (!(await this.historyExists(schema, table))) return []
+    const rows = await this.rows(
+      `select id, operation, to_char(started_on, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), execution_time, success, installed_by, os_user, host, pipeline, git_commit, scripts, detail
+       from ${quoteIdent(schema)}.${quoteIdent(table)} order by started_on desc, id limit $1`,
+      [limit],
+    )
+    return rows.map(activityRow)
+  }
+
   async userObjects(schemas: string[], table: string): Promise<number> {
     const [n] = await this.row(
       `select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
-       where n.nspname = any($1) and c.relkind in ('r', 'p', 'v', 'm', 'S') and c.relname <> $2 and c.relname <> $3
+       where n.nspname = any($1) and c.relkind in ('r', 'p', 'v', 'm', 'S') and c.relname <> all($2)
          and not exists (select 1 from pg_depend d where d.objid = c.oid and d.deptype in ('a', 'i', 'e'))`,
-      [schemas, table, `${table}_lock`],
+      [schemas, ownTables(table)],
     )
     return Number(n)
   }

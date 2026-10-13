@@ -3,6 +3,7 @@
 
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import * as activity from '../../../packages/liftoff/src/core/activity.ts'
 import * as checks from '../../../packages/liftoff/src/core/checks.ts'
 import * as ci from '../../../packages/liftoff/src/core/ci.ts'
 import * as compare from '../../../packages/liftoff/src/core/compare.ts'
@@ -188,6 +189,7 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
 
   /* F04: run */
   migrations_info: (a) => runner.info(load(a.path), s(a, 'env')),
+  overview: (a) => activity.overview(load(a.path)),
   migrate: (a, h) => runner.migrate(load(a.path), s(a, 'env'), { outOfOrder: b(a, 'outOfOrder'), allowNonEmpty: b(a, 'allowNonEmpty'), only: a.only as string[] | undefined, acceptDifferences: b(a, 'acceptDifferences') }, h.log),
   /** A project without scripts starts from this database: B0001, checked, recorded there. */
   adopt: (a, h) => adopt(load(a.path), s(a, 'env'), undefined, undefined, h.log),

@@ -9,6 +9,7 @@
 
 import { compares, type Project } from './config.ts'
 import { configError } from './errors.ts'
+import { ownTables } from './db.ts'
 import {
   P_DROP,
   P_DROP_OTHER,
@@ -186,7 +187,7 @@ export function normalize(def: string): string {
 
 export async function introspect(c: SqlServerConn, schemas: string[], excludeTable: string): Promise<MsModel> {
   const names = schemas.map(lit).join(', ')
-  const inScope = `SELECT t.object_id FROM sys.tables t JOIN sys.schemas s ON s.schema_id = t.schema_id WHERE s.name IN (${names}) AND t.is_ms_shipped = 0 AND t.name <> ${lit(excludeTable)}`
+  const inScope = `SELECT t.object_id FROM sys.tables t JOIN sys.schemas s ON s.schema_id = t.schema_id WHERE s.name IN (${names}) AND t.is_ms_shipped = 0 AND t.name NOT IN (${ownTables(excludeTable).map(lit).join(', ')})`
   const m = emptyMsModel()
   const s = (v: unknown) => (v ?? '') as string
 
