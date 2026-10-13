@@ -141,9 +141,9 @@ test('schema model as the source: pull, check, gate and generate from the comman
     const run = (args: string[]) => liftoff(dir, [...args, '--output-type', 'json'])
 
     // Pull one object, then the rest.
-    let r = run(['model', '--path', 'public/tables/customers.sql'])
+    let r = run(['model', '--path', 'tables/public.customers.sql'])
     assert.equal(r.code, 0, r.stderr)
-    assert.deepEqual(fs.readdirSync(path.join(dir, 'schema-model/public/tables')), ['customers.sql'])
+    assert.deepEqual(fs.readdirSync(path.join(dir, 'schema-model/tables')), ['public.customers.sql'])
     assert.equal(run(['model']).code, 0)
     assert.equal(run(['model', '--check']).code, 0)
 
@@ -161,11 +161,11 @@ test('schema model as the source: pull, check, gate and generate from the comman
     assert.equal(run(['check', '--model']).code, 0)
 
     // A broken file: exit 12, the file named in the JSON.
-    fs.mkdirSync(path.join(dir, 'schema-model/public/views'), { recursive: true })
-    fs.writeFileSync(path.join(dir, 'schema-model/public/views/bad.sql'), 'CREATE VIEW public.bad AS SELECT nope FROM public.orders;\n')
+    fs.mkdirSync(path.join(dir, 'schema-model/views'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'schema-model/views/public.bad.sql'), 'CREATE VIEW public.bad AS SELECT nope FROM public.orders;\n')
     r = run(['model', '--check'])
     assert.equal(r.code, 12, r.stderr)
-    assert.deepEqual(json(r).error.problems.map((p: { path: string }) => p.path), ['public/views/bad.sql'])
+    assert.deepEqual(json(r).error.problems.map((p: { path: string }) => p.path), ['views/public.bad.sql'])
   } finally {
     delete process.env.LIFTOFF_ENV_CI_SCRATCH_URL
     delete process.env.LIFTOFF_ENV_CI_SCRATCH_ROLE

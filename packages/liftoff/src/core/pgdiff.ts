@@ -8,6 +8,7 @@
 // tables, column privileges). No rename detection.
 
 import { compares, type Project } from './config.ts'
+import { configError } from './errors.ts'
 import {
   P_DROP,
   P_DROP_OTHER,
@@ -811,20 +812,25 @@ export function files(m: Model): Map<string, string> {
     }
     return s
   }
-  const put = (p: string, body: string) => out.set(p, `${body.trimEnd()}\n`)
-  const [S, N] = [(k: string) => fileName(unkey(k)[0]), (k: string) => fileName(unkey(k)[1])]
-  for (const [k, t] of sorted(m.tables)) put(`${S(k)}/tables/${N(k)}.sql`, tableDdl(k, t) + extras([`TABLE ${qk(k)}`]))
-  for (const [k, v] of sorted(m.views)) put(`${S(k)}/${v.materialized ? 'materialized-views' : 'views'}/${N(k)}.sql`, viewDdl(k, v) + extras(viewNamesOf(k)))
+  const put = (p: string, body: string) => {
+    // Only possible when a schema or object name has a dot in it (a.b + c and a + b.c).
+    if (out.has(p)) throw configError(`two objects would share the schema-model file ${p}; rename one of them`)
+    out.set(p, `${body.trimEnd()}\n`)
+  }
+  // <type>/<schema>.<name>.sql: the same name in two schemas gets two files, and the name alone says which.
+  const at = (type: string, k: string) => `${type}/${fileName(unkey(k)[0])}.${fileName(unkey(k)[1])}.sql`
+  for (const [k, t] of sorted(m.tables)) put(at('tables', k), tableDdl(k, t) + extras([`TABLE ${qk(k)}`]))
+  for (const [k, v] of sorted(m.views)) put(at(v.materialized ? 'materialized-views' : 'views', k), viewDdl(k, v) + extras(viewNamesOf(k)))
   for (const [k, f] of sorted(m.functions)) {
     const d = `${f.procedure ? 'PROCEDURE' : 'FUNCTION'} ${q(unkey(k)[0])}.${q(f.name)}(${f.args})`
-    put(`${S(k)}/${f.procedure ? 'procedures' : 'functions'}/${N(k)}.sql`, f.def + extras([d]))
+    put(at(f.procedure ? 'procedures' : 'functions', k), f.def + extras([d]))
   }
-  for (const [k, labels] of sorted(m.enums)) put(`${S(k)}/types/${N(k)}.sql`, enumDdl(k, labels) + extras([`TYPE ${qk(k)}`]))
-  for (const [k, d] of sorted(m.domains)) put(`${S(k)}/domains/${N(k)}.sql`, domainDdl(k, d) + extras([`DOMAIN ${qk(k)}`]))
-  for (const [k, s] of sorted(m.sequences)) put(`${S(k)}/sequences/${N(k)}.sql`, sequenceDdl(k, s) + extras([`SEQUENCE ${qk(k)}`]))
+  for (const [k, labels] of sorted(m.enums)) put(at('types', k), enumDdl(k, labels) + extras([`TYPE ${qk(k)}`]))
+  for (const [k, d] of sorted(m.domains)) put(at('domains', k), domainDdl(k, d) + extras([`DOMAIN ${qk(k)}`]))
+  for (const [k, s] of sorted(m.sequences)) put(at('sequences', k), sequenceDdl(k, s) + extras([`SEQUENCE ${qk(k)}`]))
   for (const [tk, def] of sorted(m.triggers)) {
     const [s, t, name] = unkey(tk)
-    put(`${fileName(s)}/triggers/${fileName(t)}.${fileName(name)}.sql`, def)
+    put(`triggers/${fileName(s)}.${fileName(t)}.${fileName(name)}.sql`, def)
   }
   for (const [name, schema] of sorted(m.extensions)) put(`extensions/${fileName(name)}.sql`, extensionDdl(name, schema))
   return out

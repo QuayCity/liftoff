@@ -103,7 +103,7 @@ test('the diff loop on SQL Server', { skip: !base && 'set LIFTOFF_TEST_MSSQL' },
 
   // 7. The schema model writes one file per object.
   const paths = (await model.status(cfg, undefined)).map((f) => f.path)
-  for (const f of ['dbo/tables/orders.sql', 'dbo/views/order_notes.sql', 'dbo/procedures/add_order.sql', 'dbo/triggers/orders_touch.sql', 'dbo/sequences/invoice_no.sql', 'dbo/types/money_amount.sql']) {
+  for (const f of ['tables/dbo.orders.sql', 'views/dbo.order_notes.sql', 'procedures/dbo.add_order.sql', 'triggers/dbo.orders_touch.sql', 'sequences/dbo.invoice_no.sql', 'types/dbo.money_amount.sql']) {
     assert.ok(paths.includes(f), `${f} in ${paths}`)
   }
 })

@@ -90,7 +90,7 @@ In the **Schema Model** view, **Compare with Dev**. It lists `dbo.customers` and
 dev has them, the model files do not. Click one (**Show the Difference**) for a diff editor: an
 empty file on the left, the `CREATE TABLE` on the right.
 
-**Pull All into Schema Model**. The files appear: `schema-model/dbo/tables/customers.sql` and
+**Pull All into Schema Model**. The files appear: `schema-model/tables/dbo.customers.sql` and
 `orders.sql`. Source Control shows them as new.
 
 ## Step 5: generate the migration
@@ -125,7 +125,7 @@ on prod? This is a production database.**). Click **Run**.
 
 ## Step 8: the next change, from the model
 
-This time, change the model file itself. Open `schema-model/dbo/tables/customers.sql` and add a
+This time, change the model file itself. Open `schema-model/tables/dbo.customers.sql` and add a
 column inside the `CREATE TABLE`:
 
 ```sql

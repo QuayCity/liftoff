@@ -71,8 +71,8 @@ test('Compare on PostgreSQL: two databases, a URL, a snapshot, the model and the
 
   // The migrations and the schema model as sides (both are built on scratch).
   p.write('V1__customers.sql', 'create table customers (id int primary key);\n')
-  fs.mkdirSync(path.join(p.dir, 'schema-model/public/tables'), { recursive: true })
-  fs.writeFileSync(path.join(p.dir, 'schema-model/public/tables/customers.sql'), 'CREATE TABLE public.customers (id integer PRIMARY KEY, email text NOT NULL);\n')
+  fs.mkdirSync(path.join(p.dir, 'schema-model/tables'), { recursive: true })
+  fs.writeFileSync(path.join(p.dir, 'schema-model/tables/public.customers.sql'), 'CREATE TABLE public.customers (id integer PRIMARY KEY, email text NOT NULL);\n')
   r = await cmp.compare(cfg, side('model'), side('migrations'), undefined)
   assert.deepEqual(r.changes.map((c) => `${c.kind} ${c.id}`), ['changed table:public.customers'])
   assert.deepEqual([r.source, r.target], ['the schema model', 'the migrations'])

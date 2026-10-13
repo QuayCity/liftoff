@@ -463,7 +463,7 @@ const COMMANDS: Record<string, Command> = {
     options: {
       source: { type: 'string', help: 'Dev environment (default: the first with role "dev")' },
       status: { type: 'boolean', help: 'List what differs instead of writing' },
-      path: { type: 'string', multiple: true, help: 'Only this object file, e.g. public/tables/orders.sql (repeatable)', value: 'FILE' },
+      path: { type: 'string', multiple: true, help: 'Only this object file, e.g. tables/public.orders.sql (repeatable)', value: 'FILE' },
       check: { type: 'boolean', help: 'Check the schema model builds (on the scratch database); exits 12 naming each file that does not' },
       scratch: { type: 'string', help: 'Scratch environment for --check (default: the first with role "scratch")' },
     },
@@ -473,7 +473,7 @@ const COMMANDS: Record<string, Command> = {
         const n = await model.check(cfg, str(v, 'scratch'), log)
         return [{ files: n }, `The schema model builds: ${n} object file(s)`]
       }
-      const changes = model.pick(await model.status(cfg, str(v, 'source')), v.path as string[] | undefined)
+      const changes = model.pick(await model.status(cfg, str(v, 'source'), log), v.path as string[] | undefined)
       const list = changes.map((c) => `${kindOf(c)} ${c.path}`).join('\n')
       if (flag(v, 'status')) return [changes, list || 'The schema model is up to date']
       const n = model.save(cfg, changes)

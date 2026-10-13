@@ -280,8 +280,8 @@ const fake = {
   ],
   gitAhead: 0,
   modelChanges: [
-    { path: 'public/tables/orders.sql', object_type: 'tables', kind: 'changed', before: 'CREATE TABLE public.orders (\n    id bigserial,\n    note text\n);\n', after: 'CREATE TABLE public.orders (\n    id bigserial,\n    note text,\n    paid_at timestamp with time zone\n);\n' },
-    { path: 'public/tables/customer.sql', object_type: 'tables', kind: 'added', before: null, after: 'CREATE TABLE public.customer (\n    id bigint NOT NULL\n);\n' },
+    { path: 'tables/public.orders.sql', object_type: 'tables', kind: 'changed', before: 'CREATE TABLE public.orders (\n    id bigserial,\n    note text\n);\n', after: 'CREATE TABLE public.orders (\n    id bigserial,\n    note text,\n    paid_at timestamp with time zone\n);\n' },
+    { path: 'tables/public.customer.sql', object_type: 'tables', kind: 'added', before: null, after: 'CREATE TABLE public.customer (\n    id bigint NOT NULL\n);\n' },
   ] as ModelChange[],
   gitRejectPush: new URLSearchParams(location.search).has('rejectpush'),
   notGit: new URLSearchParams(location.search).has('nogit'),
@@ -390,7 +390,7 @@ const fakeApi: Api = {
   },
   modelFiles: async () => {
     await wait()
-    return ['public/functions/tax(amount numeric).sql', 'public/tables/customer.sql', 'public/tables/orders.sql', 'public/views/order_totals.sql']
+    return ['functions/public.tax(amount numeric).sql', 'tables/public.customer.sql', 'tables/public.orders.sql', 'views/public.order_totals.sql']
   },
   objectHistory: async (_p, file) => {
     await wait()

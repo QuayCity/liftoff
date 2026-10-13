@@ -112,7 +112,7 @@ CREATE TABLE dbo.customers (
 every pull request shows the change to the table itself."
 
 **Do:** the **Pull All into Schema Model** button at the top of the view (the cloud with a down arrow).
-**See:** `schema-model/dbo/tables/customers.sql`, and **The schema model matches dev**.
+**See:** `schema-model/tables/dbo.customers.sql`, and **The schema model matches dev**.
 
 **Do:** the view's **…** menu → **Generate Migration from Schema Model**, description
 `customers`.
@@ -199,7 +199,7 @@ we remove it."
 
 **Say:** "Changes can also start in the model file itself."
 
-**Do:** open `schema-model/dbo/tables/customers.sql` and add a column inside the `CREATE TABLE`
+**Do:** open `schema-model/tables/dbo.customers.sql` and add a column inside the `CREATE TABLE`
 (with a comma after the line before it):
 
 ```sql

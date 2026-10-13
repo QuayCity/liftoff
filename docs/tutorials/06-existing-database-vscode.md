@@ -92,12 +92,12 @@ Right-click **dev** → **Run Pending Migrations**. Dev is empty, so it is built
 production's schema without its data.
 
 **Schema Model** view → **Compare with Dev**: every object is listed, since the folder is empty.
-**Pull All into Schema Model**. `schema-model/dbo/` now has `tables/`, `views/`, `functions/`,
-`procedures/` and `triggers/`, one file per object. Commit: `schema model`.
+**Pull All into Schema Model**. `schema-model/` now has `tables/`, `views/`, `functions/`,
+`procedures/` and `triggers/`, one file per object, named like `dbo.orders.sql`. Commit: `schema model`.
 
 ## Step 5: the first change under LiftOff
 
-Open `schema-model/dbo/tables/products.sql` and add a column inside the `CREATE TABLE`:
+Open `schema-model/tables/dbo.products.sql` and add a column inside the `CREATE TABLE`:
 
 ```sql
     [weight_kg] decimal(6,2) NULL

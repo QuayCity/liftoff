@@ -27,10 +27,49 @@ export type ModelChange = {
   after: string | null
 }
 
-function readFolder(root: string): Map<string, string> {
+/** The folders objects are filed under: <type>/<schema>.<name>.sql. */
+const TYPES = new Set(['tables', 'views', 'materialized-views', 'functions', 'procedures', 'triggers', 'sequences', 'types', 'domains'])
+
+/**
+ * LiftOff 0.1 filed objects as <schema>/<type>/<name>.sql. Moves those files to
+ * <type>/<schema>.<name>.sql, so the same name in two schemas stays apart by its file name too.
+ * git sees renames, so each object keeps its history. Returns how many files moved.
+ */
+export function upgradeLayout(root: string, log: Log = quiet): number {
+  const base = path.join(root, FOLDER)
+  if (!fs.existsSync(base)) return 0
+  let moved = 0
+  for (const f of fs.readdirSync(base, { recursive: true, withFileTypes: true }) as fs.Dirent[]) {
+    if (!f.isFile() || !f.name.endsWith('.sql')) continue
+    const parts = path.relative(base, path.join(f.parentPath, f.name)).split(path.sep)
+    if (parts.length !== 3 || !TYPES.has(parts[1])) continue
+    const [schema, type, name] = parts
+    const to = path.join(base, type, `${schema}.${name}`)
+    if (fs.existsSync(to)) {
+      log('warn', `${FOLDER}/${parts.join('/')} not moved: ${FOLDER}/${type}/${schema}.${name} already exists`)
+      continue
+    }
+    fs.mkdirSync(path.dirname(to), { recursive: true })
+    fs.renameSync(path.join(base, ...parts), to)
+    moved++
+  }
+  if (!moved) return 0
+  // The <schema>/<type>/ folders that are empty now.
+  for (const d of fs.readdirSync(base, { withFileTypes: true })) {
+    if (!d.isDirectory() || TYPES.has(d.name) || d.name === 'extensions') continue
+    const dir = path.join(base, d.name)
+    for (const sub of fs.readdirSync(dir)) if (TYPES.has(sub) && !fs.readdirSync(path.join(dir, sub)).length) fs.rmdirSync(path.join(dir, sub))
+    if (!fs.readdirSync(dir).length) fs.rmdirSync(dir)
+  }
+  log('info', `Moved ${moved} file(s) in ${FOLDER}/ to the layout <type>/<schema>.<name>.sql; commit the renames`)
+  return moved
+}
+
+function readFolder(root: string, log: Log = quiet): Map<string, string> {
   const base = path.join(root, FOLDER)
   const out = new Map<string, string>()
   if (!fs.existsSync(base)) return out
+  upgradeLayout(root, log)
   for (const f of fs.readdirSync(base, { recursive: true, withFileTypes: true }) as fs.Dirent[]) {
     if (!f.isFile() || !f.name.endsWith('.sql')) continue
     const full = path.join(f.parentPath, f.name)
@@ -61,13 +100,13 @@ export function compareFiles(onDisk: Map<string, string>, dev: Map<string, strin
   return out
 }
 
-export async function status(cfg: Config, dev: string | undefined): Promise<ModelChange[]> {
+export async function status(cfg: Config, dev: string | undefined, log: Log = quiet): Promise<ModelChange[]> {
   const [name, env] = cfg.pickRole(dev, 'dev')
   const c = await open(name, env)
   try {
     const s = await modelOf(cfg, c)
     const files = s.engine === 'pg' ? pgd.files(s.model) : ms.files(s.model)
-    return compareFiles(readFolder(cfg.root), files)
+    return compareFiles(readFolder(cfg.root, log), files)
   } finally {
     await c.close()
   }
@@ -115,7 +154,7 @@ export function pick(changes: ModelChange[], only: string[] | undefined): ModelC
  * real errors in those files.
  */
 export async function applyModel(cfg: Config, c: Conn, log: Log = quiet): Promise<number> {
-  const files = [...readFolder(cfg.root)].sort(([a], [b]) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0))
+  const files = [...readFolder(cfg.root, log)].sort(([a], [b]) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0))
   if (!files.length) throw configError(`the ${FOLDER} folder is empty; save dev into it first (liftoff model)`)
   const d = dialect[c.engine]
   let todo = files

@@ -197,14 +197,14 @@ test('compare, generate and the rest on PostgreSQL', { skip: !base && 'set LIFTO
 
   // 12. The schema model: save everything from dev, then only real changes show.
   const first = await model.status(cfg, undefined)
-  assert.ok(first.some((c) => c.path === 'public/tables/orders.sql') && first.some((c) => c.path === 'extensions/pgcrypto.sql'), JSON.stringify(first.map((c) => c.path)))
+  assert.ok(first.some((c) => c.path === 'tables/public.orders.sql') && first.some((c) => c.path === 'extensions/pgcrypto.sql'), JSON.stringify(first.map((c) => c.path)))
   model.save(cfg, first)
   assert.deepEqual(await model.status(cfg, undefined), [], 'nothing differs right after saving')
-  const orders = fs.readFileSync(path.join(p.dir, 'schema-model/public/tables/orders.sql'), 'utf8')
+  const orders = fs.readFileSync(path.join(p.dir, 'schema-model/tables/public.orders.sql'), 'utf8')
   assert.ok(orders.includes('CREATE TABLE public.orders') && orders.includes('GRANT SELECT ON TABLE public.orders TO liftoff_reader'), orders)
   await sql(cfg, 'dev', 'alter table orders add column shipped_at timestamptz')
   const next = await model.status(cfg, undefined)
-  assert.deepEqual(next.map((c) => [c.path, c.kind]), [['public/tables/orders.sql', 'changed']])
+  assert.deepEqual(next.map((c) => [c.path, c.kind]), [['tables/public.orders.sql', 'changed']])
   assert.ok(next[0].after!.includes('shipped_at'))
   assert.throws(() => model.save(cfg, [{ path: '../escape.sql', object_type: 'x', kind: 'added', before: null, after: 'x' }]), /not a schema-model file/)
   await sql(cfg, 'dev', 'alter table orders drop column shipped_at')

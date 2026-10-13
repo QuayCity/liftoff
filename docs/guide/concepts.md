@@ -115,7 +115,7 @@ deploy, so a script is never run on a database that is not what you think it is.
 ## The schema model
 
 The **schema model** is the `schema-model/` folder: one `CREATE` statement per object, in a file
-per object (`dbo/tables/customers.sql`). It is optional. With it, git shows the history of each
+per object (`tables/dbo.customers.sql`). It is optional. With it, git shows the history of each
 table, view and function, and pull requests show the change to the object itself instead of only
 the migration script. LiftOff can write migrations from the model as well as from dev. See
 [The schema model](schema-model.md).

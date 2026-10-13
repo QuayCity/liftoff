@@ -11,7 +11,7 @@ test('S20-H1 the history of one object: its commits and what each changed', asyn
   const objects = dialog.getByRole('region', { name: 'Objects' })
   const commits = dialog.getByRole('region', { name: 'Commits' })
 
-  await objects.getByRole('button', { name: 'public/tables/orders' }).click()
+  await objects.getByRole('button', { name: 'tables/public.orders' }).click()
   await expect(commits.getByRole('button')).toHaveCount(3)
   await expect(commits.getByRole('button').first()).toContainText('Track when orders are paid')
   await expect(dialog.getByRole('region', { name: 'What the commit changed' })).toContainText('paid_at')

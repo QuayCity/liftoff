@@ -74,16 +74,16 @@ export async function run(): Promise<void> {
   // Schema Model: dev has orders, the files do not. Pull it, then the view is clear.
   const view = lo.schemaModel!
   const changes = await vscode.commands.executeCommand<ModelChange[]>('liftoff.model.compare')
-  assert.deepEqual(changes?.map((c) => [c.path, c.kind]), [['public/tables/orders.sql', 'added']])
+  assert.deepEqual(changes?.map((c) => [c.path, c.kind]), [['tables/public.orders.sql', 'added']])
   const [orderItem] = view.getChildren()
   assert.equal(orderItem.description, 'table · new in dev')
   assert.equal(await vscode.commands.executeCommand('liftoff.model.pull', orderItem), 1)
-  const pulled = path.join(workspace, 'schema-model', 'public', 'tables', 'orders.sql')
+  const pulled = path.join(workspace, 'schema-model', 'tables', 'public.orders.sql')
   assert.match(fs.readFileSync(pulled, 'utf8'), /CREATE TABLE public\.orders/i)
   assert.match(String(view.getChildren()[0].label), /matches dev/)
 
   // A hand-written file that does not build gets an error in Problems.
-  const bad = vscode.Uri.file(path.join(workspace, 'schema-model', 'public', 'views', 'bad.sql'))
+  const bad = vscode.Uri.file(path.join(workspace, 'schema-model', 'views', 'public.bad.sql'))
   fs.mkdirSync(path.dirname(bad.fsPath), { recursive: true })
   fs.writeFileSync(bad.fsPath, 'CREATE VIEW public.bad AS SELECT nope FROM public.orders;\n')
   assert.equal(await vscode.commands.executeCommand('liftoff.model.check'), false)

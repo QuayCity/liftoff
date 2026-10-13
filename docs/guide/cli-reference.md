@@ -156,7 +156,7 @@ Usage: liftoff model [OPTIONS]
 Options:
       --source <SOURCE>              Dev environment (default: the first with role "dev")
       --status                       List what differs instead of writing
-      --path <FILE>                  Only this object file, e.g. public/tables/orders.sql (repeatable)
+      --path <FILE>                  Only this object file, e.g. tables/public.orders.sql (repeatable)
       --check                        Check the schema model builds (on the scratch database); exits 12 naming each file that does not
       --scratch <SCRATCH>            Scratch environment for --check (default: the first with role "scratch")
 ```

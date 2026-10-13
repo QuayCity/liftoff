@@ -181,7 +181,7 @@ export function groupProblems(byEnvironment: Map<string, Problem[]>): Map<string
 
 /** One object that differs between the dev database and the schema-model folder (`liftoff model --status`). */
 export type ModelChange = {
-  /** relative to schema-model/, e.g. public/tables/orders.sql */
+  /** relative to schema-model/, e.g. tables/public.orders.sql */
   path: string
   /** tables, views, functions, … */
   object_type: string

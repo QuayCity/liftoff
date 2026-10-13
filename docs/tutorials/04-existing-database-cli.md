@@ -326,17 +326,17 @@ Updated 8 file(s) in schema-model
 ```
 
 ```
-schema-model/dbo/functions/order_total.sql
-schema-model/dbo/procedures/orders_for_customer.sql
-schema-model/dbo/tables/customers.sql
-schema-model/dbo/tables/order_lines.sql
-schema-model/dbo/tables/orders.sql
-schema-model/dbo/tables/products.sql
-schema-model/dbo/triggers/orders_touch.sql
-schema-model/dbo/views/order_summary.sql
+schema-model/functions/dbo.order_total.sql
+schema-model/procedures/dbo.orders_for_customer.sql
+schema-model/tables/dbo.customers.sql
+schema-model/tables/dbo.order_lines.sql
+schema-model/tables/dbo.orders.sql
+schema-model/tables/dbo.products.sql
+schema-model/triggers/dbo.orders_touch.sql
+schema-model/views/dbo.order_summary.sql
 ```
 
-From now on `git log schema-model/dbo/tables/orders.sql` is the history of the orders table.
+From now on `git log schema-model/tables/dbo.orders.sql` is the history of the orders table.
 
 ```sh
 git add -A

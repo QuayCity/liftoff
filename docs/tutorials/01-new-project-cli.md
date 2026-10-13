@@ -394,13 +394,13 @@ liftoff model
 ```
 
 ```
-added    dbo/tables/customers.sql
-added    dbo/tables/orders.sql
-added    dbo/views/customer_totals.sql
+added    tables/dbo.customers.sql
+added    tables/dbo.orders.sql
+added    views/dbo.customer_totals.sql
 Updated 3 file(s) in schema-model
 ```
 
-`schema-model/dbo/tables/customers.sql`:
+`schema-model/tables/dbo.customers.sql`:
 
 ```sql
 CREATE TABLE [dbo].[customers] (

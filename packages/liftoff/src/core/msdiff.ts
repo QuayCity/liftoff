@@ -8,6 +8,7 @@
 // Every statement ends with GO: CREATE VIEW / PROCEDURE / FUNCTION / TRIGGER must start a batch.
 
 import { compares, type Project } from './config.ts'
+import { configError } from './errors.ts'
 import {
   P_DROP,
   P_DROP_OTHER,
@@ -561,12 +562,17 @@ function alterColumn(t: string, o: MsColumn, c: MsColumn, steps: Step[]): boolea
 export function files(m: MsModel): Map<string, string> {
   const f = (s: string) => s.replace(/[/\\:*?"<>|]/g, '_')
   const out = new Map<string, string>()
-  const put = (p: string, body: string) => out.set(p, `${body.trimEnd()}\n`)
-  const [S, N] = [(k: string) => f(unkey(k)[0]), (k: string) => f(unkey(k)[1])]
-  for (const [k, t] of sorted(m.tables)) put(`${S(k)}/tables/${N(k)}.sql`, tableDdl(k, t))
+  const put = (p: string, body: string) => {
+    // Only possible when a schema or object name has a dot in it (a.b + c and a + b.c).
+    if (out.has(p)) throw configError(`two objects would share the schema-model file ${p}; rename one of them`)
+    out.set(p, `${body.trimEnd()}\n`)
+  }
+  // <type>/<schema>.<name>.sql: the same name in two schemas gets two files, and the name alone says which.
+  const at = (type: string, k: string) => `${type}/${f(unkey(k)[0])}.${f(unkey(k)[1])}.sql`
+  for (const [k, t] of sorted(m.tables)) put(at('tables', k), tableDdl(k, t))
   const dir: Record<ModuleKind, string> = { view: 'views', procedure: 'procedures', function: 'functions', trigger: 'triggers' }
-  for (const [k, md] of sorted(m.modules)) put(`${S(k)}/${dir[md.kind]}/${N(k)}.sql`, go(md.def))
-  for (const [k, s] of sorted(m.sequences)) put(`${S(k)}/sequences/${N(k)}.sql`, sequenceDdl(k, s))
-  for (const [k, ddl] of sorted(m.types)) put(`${S(k)}/types/${N(k)}.sql`, go(ddl))
+  for (const [k, md] of sorted(m.modules)) put(at(dir[md.kind], k), go(md.def))
+  for (const [k, s] of sorted(m.sequences)) put(at('sequences', k), sequenceDdl(k, s))
+  for (const [k, ddl] of sorted(m.types)) put(at('types', k), go(ddl))
   return out
 }

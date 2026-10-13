@@ -5,25 +5,33 @@ object's `CREATE` statement.
 
 ```
 schema-model/
-  dbo/
-    tables/
-      customers.sql
-      orders.sql
-    views/
-      customer_totals.sql
-    procedures/
-      add_customer.sql
-    functions/
-    triggers/
-    sequences/
-    types/
+  tables/
+    dbo.customers.sql
+    dbo.orders.sql
+    sales.customers.sql
+  views/
+    dbo.customer_totals.sql
+  procedures/
+    dbo.add_customer.sql
+  functions/
+  triggers/
+  sequences/
+  types/
 ```
 
-On PostgreSQL there are also `extensions/`, `domains/` and `materialized-views/`.
+One folder per kind of object; each file is named `<schema>.<name>.sql`, so the same table name in
+two schemas gets two files, and an editor tab says which one it is. A trigger is
+`<schema>.<table>.<trigger>.sql`. On PostgreSQL there are also `extensions/` (no schema),
+`domains/` and `materialized-views/`.
+
+LiftOff 0.1 filed objects as `<schema>/<type>/<name>.sql`. A project in that layout is moved to
+this one by the next schema model command (`model`, `check --model`, the Changes screen or the
+Schema Model view), which says how many files it moved. git sees them as renames: commit them, and
+each object keeps its history.
 
 It is optional. Migration scripts say how to get from one version to the next; the model says
 what each object looks like now. With both in git:
-- `git log schema-model/dbo/tables/customers.sql` is the history of one table;
+- `git log schema-model/tables/dbo.customers.sql` is the history of one table;
 - a pull request shows the change to the table itself next to the migration script;
 - you can make small changes by editing a file, instead of changing a database.
 
@@ -32,7 +40,7 @@ what each object looks like now. With both in git:
 ```sh
 liftoff model            # write dev into schema-model/
 liftoff model --status   # list what differs; write nothing
-liftoff model --path dbo/tables/customers.sql     # only this file (repeatable)
+liftoff model --path tables/dbo.customers.sql     # only this file (repeatable)
 ```
 
 `model` compares the dev database with the folder and writes the files that differ: new objects

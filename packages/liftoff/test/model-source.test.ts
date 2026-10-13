@@ -57,7 +57,7 @@ test('PostgreSQL: dev -> schema model -> migration, then a hand edit of the mode
     // 1. Pull dev into the schema model; it builds back into an identical database.
     const pulled = await model.status(cfg, 'dev')
     model.save(cfg, pulled)
-    assert.ok(fs.existsSync(path.join(p.dir, 'schema-model/public/tables/orders.sql')), JSON.stringify(pulled.map((c) => c.path)))
+    assert.ok(fs.existsSync(path.join(p.dir, 'schema-model/tables/public.orders.sql')), JSON.stringify(pulled.map((c) => c.path)))
     assert.equal(await model.check(cfg, 'ci_scratch'), 10, 'type, domain, sequence, 4 tables, function, 2 views')
 
     // 2. No migrations yet: the model is ahead by everything; generate the first migration from it.
@@ -71,7 +71,7 @@ test('PostgreSQL: dev -> schema model -> migration, then a hand edit of the mode
     assert.deepEqual((await diff.devVsMigrations(cfg, 'dev', 'ci_scratch')).changes.map((c) => c.id), [])
 
     // 3. A simple change straight in the model file: the next migration is exactly that change.
-    const orders = path.join(p.dir, 'schema-model/public/tables/orders.sql')
+    const orders = path.join(p.dir, 'schema-model/tables/public.orders.sql')
     fs.writeFileSync(orders, fs.readFileSync(orders, 'utf8').replace('    total numeric(10,2) DEFAULT 0 NOT NULL', '    total numeric(10,2) DEFAULT 0 NOT NULL,\n    paid_at timestamp with time zone'))
     cmp = await model.versusMigrations(cfg, 'ci_scratch')
     assert.deepEqual(cmp.changes.map((c) => c.id), ['table:public.orders'], fs.readFileSync(orders, 'utf8'))
@@ -82,10 +82,10 @@ test('PostgreSQL: dev -> schema model -> migration, then a hand edit of the mode
     assert.deepEqual((await model.versusMigrations(cfg, 'ci_scratch')).changes, [])
 
     // 4. A broken edit: the build names the file and the database's error.
-    fs.writeFileSync(path.join(p.dir, 'schema-model/public/views/broken.sql'), 'CREATE VIEW public.broken AS\nSELECT no_such_column FROM public.orders;\n')
+    fs.writeFileSync(path.join(p.dir, 'schema-model/views/public.broken.sql'), 'CREATE VIEW public.broken AS\nSELECT no_such_column FROM public.orders;\n')
     await assert.rejects(model.check(cfg, 'ci_scratch'), (e: unknown) => {
       assert.ok(e instanceof ModelInvalidError)
-      assert.deepEqual(e.problems.map((x) => x.path), ['public/views/broken.sql'])
+      assert.deepEqual(e.problems.map((x) => x.path), ['views/public.broken.sql'])
       assert.match(e.problems[0].message, /no_such_column/)
       return true
     })
