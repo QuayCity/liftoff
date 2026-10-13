@@ -88,8 +88,12 @@
       "artifactName": "LiftOff-${version}-${arch}.${ext}"
     }
   },
+  "overrides": {
+    "global-agent": "^4.1.3",
+    "@electron/asar": "^4.3.1",
+    "electron-winstaller": "file:./installer/no-winstaller"
+  },
   "allowScripts": {
-    "esbuild": true,
-    "electron-winstaller": true
+    "esbuild": true
   }
 }

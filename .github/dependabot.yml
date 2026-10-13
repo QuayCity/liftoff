@@ -1,0 +1,33 @@
+# Dependabot opens pull requests when a dependency has a new version: every Monday, one pull
+# request per folder for the minor and patch updates together, and one per major update so
+# those get a look of their own. Security fixes come as soon as an advisory is published (turn
+# on Dependabot alerts and security updates under Settings > Code security).
+# The Tests workflow runs on every pull request, so an update that breaks something shows there.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /packages/liftoff
+      - /apps/desktop
+      - /apps/vscode
+      - /e2e
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: ci

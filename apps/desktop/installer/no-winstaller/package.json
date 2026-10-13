@@ -1,0 +1,7 @@
+{
+  "name": "electron-winstaller",
+  "version": "0.0.0-none",
+  "description": "Stands in for electron-winstaller, which only electron-builder's Squirrel.Windows target uses. LiftOff builds NSIS only, and the real one pulls in the deprecated rimraf 2, glob 7 and inflight.",
+  "private": true,
+  "license": "MIT"
+}
