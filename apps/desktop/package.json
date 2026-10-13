@@ -87,5 +87,9 @@
     "appImage": {
       "artifactName": "LiftOff-${version}-${arch}.${ext}"
     }
+  },
+  "allowScripts": {
+    "esbuild": true,
+    "electron-winstaller": true
   }
 }

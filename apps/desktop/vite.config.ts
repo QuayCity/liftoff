@@ -14,5 +14,7 @@ const csp: Plugin = {
 export default defineConfig({
   // Relative asset paths: the desktop app loads dist/index.html from disk.
   base: './',
+  // One ~510 kB bundle read from disk, not downloaded: splitting it would gain nothing.
+  build: { chunkSizeWarningLimit: 1024 },
   plugins: [react(), tailwindcss(), csp],
 })

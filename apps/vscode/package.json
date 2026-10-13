@@ -195,7 +195,7 @@
       },
       {
         "command": "liftoff.compare",
-        "title": "Compare\u2026",
+        "title": "Compare…",
         "category": "LiftOff",
         "icon": "$(git-compare)"
       },
@@ -235,24 +235,24 @@
       },
       {
         "command": "liftoff.dataCompare",
-        "title": "Compare Data\u2026",
+        "title": "Compare Data…",
         "category": "LiftOff",
         "icon": "$(table)"
       },
       {
         "command": "liftoff.snapshot",
-        "title": "Save a Snapshot\u2026",
+        "title": "Save a Snapshot…",
         "category": "LiftOff",
         "icon": "$(device-camera)"
       },
       {
         "command": "liftoff.rebaseline",
-        "title": "Rebaseline Project\u2026",
+        "title": "Rebaseline Project…",
         "category": "LiftOff"
       },
       {
         "command": "liftoff.adopt",
-        "title": "Adopt Existing Database\u2026",
+        "title": "Adopt Existing Database…",
         "category": "LiftOff"
       }
     ],
@@ -440,7 +440,7 @@
         "liftoff.generateUndo": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Also write the matching undo script (`U\u2026`) when generating a migration from the schema model."
+          "markdownDescription": "Also write the matching undo script (`U…`) when generating a migration from the schema model."
         }
       }
     }
@@ -457,7 +457,10 @@
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.90.0",
     "@vscode/test-electron": "^2.4.0",
-    "@vscode/vsce": "^3.0.0",
+    "@vscode/vsce": "^4.0.0",
     "typescript": "~5.8.0"
+  },
+  "allowScripts": {
+    "@vscode/vsce-sign": true
   }
 }
