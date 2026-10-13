@@ -454,11 +454,11 @@
     "package": "npm run build && npm run bundle-cli && vsce package"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^20.19.43",
     "@types/vscode": "^1.90.0",
-    "@vscode/test-electron": "^2.4.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.0.0",
-    "typescript": "~5.8.0"
+    "typescript": "^7.0.2"
   },
   "allowScripts": {
     "@vscode/vsce-sign": true

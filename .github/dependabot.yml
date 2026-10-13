@@ -15,6 +15,12 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    ignore:
+      # @types/node describes the Node the code runs on, not the newest Node: 24 for the CLI and
+      # the desktop app (Electron 44), 20 for the extension (VS Code 1.90, its oldest supported
+      # version). Raise these by hand when the runtime moves.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
     groups:
       minor-and-patch:
         update-types: [minor, patch]
