@@ -2,7 +2,7 @@
   "name": "liftoff",
   "displayName": "LiftOff: Database Migrations",
   "description": "Plain-SQL migrations, written from your dev database and run from VS Code.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "liftoff",
   "license": "MIT",
   "icon": "media/icon.png",
