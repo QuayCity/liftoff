@@ -72,7 +72,9 @@ export type DataComparison = { id: string; source: string; target: string; engin
 export type RowPage = { columns: string[]; key: string[]; total: number; rows: { key: string[]; source: (string | null)[] | null; target: (string | null)[] | null }[] }
 export type SyncWhat = { insert: boolean; update: boolean; delete: boolean }
 export type Generated = { file_name: string; version: string; sql: string; undo: { file_name: string; sql: string } | null }
-export type CheckReport = { environment: string; applied_up_to: string | null; drift: Change[] | null; changes: Change[] | null; dry_run_sql: string | null; not_compared: string[] }
+export type Finding = { rule: string; severity: 'info' | 'warn' | 'error'; script: string; line: number; message: string; /** the reason in the script's allow comment */ allowed?: string }
+export type LintReport = { scripts: string[]; findings: Finding[]; errors: number; warnings: number }
+export type CheckReport = { environment: string; applied_up_to: string | null; drift: Change[] | null; changes: Change[] | null; dry_run_sql: string | null; rules: LintReport | null; not_compared: string[] }
 export type Comparison = { changes: Change[]; not_compared: string[] }
 export type LogEvent = { level: 'info' | 'warn'; message: string }
 export type ScriptView = { kind: 'versioned' | 'repeatable' | 'undo' | 'baseline'; version: string | null; description: string; file_name: string; sql: string }
@@ -243,7 +245,7 @@ type Api = {
   changesDiff(path: string): Promise<Comparison>
   migrationGenerate(path: string, changes: Change[], description: string, withUndo: boolean): Promise<Generated>
   undo(path: string, env: string): Promise<{ script: string; version: string | null }>
-  check(path: string, env: string, opts: { drift: boolean; changes: boolean; dryRun: boolean }): Promise<CheckReport>
+  check(path: string, env: string, opts: { drift: boolean; changes: boolean; dryRun: boolean; rules: boolean }): Promise<CheckReport>
   migrationSave(path: string, fileName: string, sql: string): Promise<string>
   /** Compare two sides: an environment name, a database URL, 'model', 'migrations' or 'snapshot:<file>' */
   compareRun(path: string, source: string, target: string): Promise<CompareResult>
@@ -316,7 +318,7 @@ const real: Api = {
   changesDiff: (path) => invoke('changes_diff', { path }),
   migrationGenerate: (path, changes, description, withUndo) => invoke('migration_generate', { path, changes, description, withUndo }),
   undo: (path, env) => invoke('undo', { path, env }),
-  check: (path, env, o) => invoke('check', { path, env, drift: o.drift, changes: o.changes, dryRun: o.dryRun }),
+  check: (path, env, o) => invoke('check', { path, env, drift: o.drift, changes: o.changes, dryRun: o.dryRun, rules: o.rules }),
   migrationSave: (path, fileName, sql) => invoke('migration_save', { path, fileName, sql }),
   compareRun: (path, source, target) => invoke('compare_run', { path, source, target }),
   compareScript: (sourceLabel, targetLabel, changes) => invoke('compare_script', { sourceLabel, targetLabel, changes }),
@@ -674,6 +676,17 @@ const fakeApi: Api = {
       drift: o.drift ? (env === 'staging' ? [drifted] : []) : null,
       changes: o.changes ? fakeInfo(env).filter((i) => i.state === 'pending').map((i) => ({ ...drifted, id: `table:${i.description}`, name: `public.${i.description.replaceAll(' ', '_')}`, kind: 'added' as const, before: null })) : null,
       not_compared: [],
+      rules: o.rules
+        ? {
+            scripts: fakeInfo(env).filter((i) => i.state === 'pending').map((i) => i.script),
+            findings: env === 'production' ? [] : [
+              { rule: 'table-without-primary-key', severity: 'warn', script: 'V20261007.1102__tax_function.sql', line: 3, message: 'table tax_rates has no primary key' },
+              { rule: 'drop-column', severity: 'warn', script: 'V20261007.1102__tax_function.sql', line: 9, message: 'drops column legacy_rate of orders', allowed: 'moved to tax_rates in the previous release' },
+            ],
+            errors: 0,
+            warnings: env === 'production' ? 0 : 1,
+          }
+        : null,
       dry_run_sql: o.dryRun ? `-- Dry run for ${env}: nothing below has been executed.\n\n-- V20261007.1102__tax_function.sql\nBEGIN;\ncreate function tax(amount numeric) ...;\nCOMMIT;\n` : null,
     }
   },

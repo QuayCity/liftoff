@@ -26,6 +26,7 @@ that fits your situation.
 | [Project files and connections](guide/configuration.md) | `liftoff.toml`, `liftoff.user.toml`, connection URLs, passwords, Microsoft Entra ID, environment variables, placeholders, filters |
 | [Migration scripts](guide/scripts.md) | naming, numbering, transactions, `GO` batches, repeatable, undo and baseline scripts |
 | [Writing migrations from your changes](guide/generating.md) | `diff` and `generate`, data-loss warnings, hand-written scripts |
+| [Rules on your scripts](guide/rules.md) | `lint`: dropped tables, deletes without `WHERE`, grants, naming; severities, custom rules, allowing a finding |
 | [Deploying](guide/deploying.md) | `info`, `migrate`, `check`, drift, `validate`, `repair`, `undo`, running one script, `clean` |
 | [Existing databases](guide/existing-databases.md) | `adopt`, the baseline check on other environments, `baseline`, `capture` |
 | [The schema model](guide/schema-model.md) | one file per object, pulling changes, generating from the model, the pull-request check |

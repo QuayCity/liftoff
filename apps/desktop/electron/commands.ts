@@ -212,7 +212,7 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
   },
   check: (a, h) => {
     const cfg = load(a.path)
-    return checks.check(cfg, s(a, 'env'), undefined, { drift: b(a, 'drift'), changes: b(a, 'changes'), dryRun: b(a, 'dryRun') }, h.log)
+    return checks.check(cfg, s(a, 'env'), undefined, { drift: b(a, 'drift'), changes: b(a, 'changes'), dryRun: b(a, 'dryRun'), rules: b(a, 'rules') }, h.log)
   },
   migration_save: (a) => diff.save(load(a.path), s(a, 'fileName'), s(a, 'sql')),
   /** After a migration from Compare: recorded on dev when dev already has it (diff.recordWhereAlreadyThere). */

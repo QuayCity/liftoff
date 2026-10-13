@@ -112,6 +112,10 @@ test('compare, generate and the rest on PostgreSQL', { skip: !base && 'set LIFTO
   assert.ok(report.dry_run_sql!.includes(g.file_name) && report.dry_run_sql!.includes('BEGIN;') && report.dry_run_sql!.includes('INSERT INTO public.liftoff_schema_history'))
   assert.equal(await state('test', g.file_name), 'pending', 'a dry run changes nothing')
   assert.ok(checks.reportHtml(report, 'shop', '2026-10-08').includes('<h2>Pending changes ('))
+  // The rules run on the pending scripts only.
+  const ruled = (await checks.check(cfg, 'test', undefined, { rules: true })).rules!
+  assert.deepEqual(ruled.scripts, [g.file_name])
+  assert.ok(checks.reportHtml({ ...report, rules: ruled }, 'shop', '2026-10-08').includes('<h2>Rules ('))
   assert.equal((await runner.migrate(cfg, 'test')).applied.length, 1, 'redo after undo')
   await sql(cfg, 'test', 'alter table orders add column hotfix int')
   const drift = (await checks.check(cfg, 'test', undefined, { drift: true })).drift!

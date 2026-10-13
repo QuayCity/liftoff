@@ -10,6 +10,7 @@ import { registerDataCompare } from './dataCompare'
 import { importFlyway, type ImportAnswers } from './flywayImport'
 import { newProject, type NewProjectAnswers } from './newProject'
 import { registerSchemaModel, type SchemaModelView } from './modelView'
+import { checkRules, Rules } from './rules'
 import { SettingsPanel } from './settingsPanel'
 import {
   describe,
@@ -77,6 +78,8 @@ export class Liftoff implements vscode.TreeDataProvider<Item> {
   schemaModel: SchemaModelView | undefined
   /** the Compare view (compareView.ts) */
   compare: CompareView | undefined
+  /** the rules on the scripts, as Problems (rules.ts) */
+  rules: Rules | undefined
   /** folders with a Flyway config and no liftoff.toml, for the import */
   flywayDirs: string[] = []
   /** what `info` last returned per environment; only environments someone opened are loaded */
@@ -463,6 +466,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
     vscode.commands.registerCommand('liftoff.markApplied', (item: MigrationItem, confirmed?: boolean) => markApplied(lo, item, confirmed === true)),
     vscode.commands.registerCommand('liftoff.validate', (item?: EnvironmentItem) => validate(lo, item)),
     vscode.commands.registerCommand('liftoff.checkDrift', (item?: EnvironmentItem) => checkDrift(lo, item)),
+    vscode.commands.registerCommand('liftoff.lint', () => checkRules(lo, lo.rules!)),
     vscode.commands.registerCommand('liftoff.testConnection', (item?: EnvironmentItem) => testConnection(lo, item)),
     vscode.commands.registerCommand('liftoff.showLog', () => lo.log.show()),
     vscode.commands.registerCommand('liftoff.importFlyway', (answers?: ImportAnswers) => importFlyway(lo, answers)),
@@ -478,9 +482,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (['liftoff.toml', 'liftoff.user.toml'].includes(path.basename(doc.fileName))) void lo.load()
       else if (doc.fileName.endsWith('.sql')) void lo.reloadOpened()
+      lo.rules?.onSave(doc.fileName)
     }),
   )
+  lo.rules = new Rules(lo)
+  context.subscriptions.push(lo.rules.diagnostics)
   await lo.load()
+  void lo.rules.lint()
   lo.schemaModel = registerSchemaModel(context, lo)
   lo.compare = registerCompare(context, lo)
   registerDataCompare(context, lo)

@@ -167,6 +167,21 @@ export async function run(): Promise<void> {
   const afterRestart = await vscode.commands.executeCommand<MigrateResult>('liftoff.migrate', envItem)
   assert.equal(afterRestart?.baseline_check?.restart, true, JSON.stringify(afterRestart))
 
+  // The rules: a finding is a Problem on its line; an allow comment, once saved, clears it.
+  const wipe = vscode.Uri.file(path.join(workspace, 'migrations', 'V0002__wipe.sql'))
+  fs.writeFileSync(wipe.fsPath, 'select 1;\ndelete from orders;\n')
+  const lint = await vscode.commands.executeCommand<{ errors: number }>('liftoff.lint')
+  assert.equal(lint?.errors, 1)
+  const [problem] = vscode.languages.getDiagnostics(wipe)
+  assert.deepEqual([problem.severity, problem.code, problem.range.start.line], [vscode.DiagnosticSeverity.Error, 'delete-without-where', 1])
+  const wipeDoc = await vscode.workspace.openTextDocument(wipe)
+  const allow = new vscode.WorkspaceEdit()
+  allow.insert(wipe, new vscode.Position(0, 0), '-- liftoff:allow delete-without-where: the table is refilled by the next script\n')
+  await vscode.workspace.applyEdit(allow)
+  await wipeDoc.save()
+  await until('the allowed finding to leave Problems', () => vscode.languages.getDiagnostics(wipe).length === 0)
+  fs.rmSync(wipe.fsPath)
+
   fs.writeFileSync(path.join(workspace, '.suite-passed'), '')
   console.log('liftoff suite: all checks passed')
 }

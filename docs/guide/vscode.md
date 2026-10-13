@@ -31,6 +31,10 @@ scripts it leaves behind.
 A script that already ran somewhere gets a warning in the editor while you type in it, so the
 change goes into a new script instead.
 
+[The rules](rules.md) run on the scripts when the project opens and on each one you save: the
+findings show in **Problems** and as squiggles on their line. **LiftOff: Check the Rules on the
+Scripts** (the checklist button at the top of the view) checks every script again.
+
 ## The Schema Model view
 
 **Compare with Dev** lists the objects where the dev database and `schema-model/` differ. Click

@@ -117,6 +117,12 @@
         "category": "LiftOff"
       },
       {
+        "command": "liftoff.lint",
+        "title": "Check the Rules on the Scripts",
+        "category": "LiftOff",
+        "icon": "$(checklist)"
+      },
+      {
         "command": "liftoff.testConnection",
         "title": "Test Connection",
         "category": "LiftOff"
@@ -267,6 +273,11 @@
           "command": "liftoff.refresh",
           "when": "view == liftoff.environments",
           "group": "navigation"
+        },
+        {
+          "command": "liftoff.lint",
+          "when": "view == liftoff.environments && liftoff.hasProject",
+          "group": "navigation@1"
         },
         {
           "command": "liftoff.model.compare",

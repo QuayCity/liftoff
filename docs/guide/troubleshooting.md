@@ -16,6 +16,7 @@ exit code in a form a script can read.
 | 12 | refused: validation failed, the database differs from the baseline script, a script is numbered before the base branch, or the schema model does not build |
 | 13 | drift found |
 | 14 | the schema model has changes no migration makes |
+| 15 | a rule at error severity fired on a script: fix the script, or allow the finding with a reason (see [Rules](rules.md#allowing-a-finding)) |
 
 ## Project and settings
 

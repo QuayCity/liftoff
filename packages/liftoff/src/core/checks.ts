@@ -1,5 +1,5 @@
 // Pre-deploy checks: drift (C16), the changes report (C15) and the dry run (C10), from one
-// scratch rebuild.
+// scratch rebuild, and the rules on the pending scripts.
 
 import type { Config } from './config.ts'
 import type { Change } from './changes.ts'
@@ -7,9 +7,10 @@ import { open } from './db.ts'
 import { diffSchemas, modelOf, notComparedBetween, rebuildScratch, scratchEnv } from './diff.ts'
 import { configError } from './errors.ts'
 import { compareVersions, parseVersion } from './migration.ts'
+import { FINDINGS_CSS, findingsHtml, lint, type LintReport } from './rules.ts'
 import * as runner from './runner.ts'
 
-export type CheckOptions = { drift?: boolean; changes?: boolean; dryRun?: boolean }
+export type CheckOptions = { drift?: boolean; changes?: boolean; dryRun?: boolean; rules?: boolean }
 
 export type CheckReport = {
   environment: string
@@ -20,6 +21,8 @@ export type CheckReport = {
   /** what the pending scripts will change on the environment */
   changes: Change[] | null
   dry_run_sql: string | null
+  /** the rules on the scripts still pending on the environment */
+  rules: LintReport | null
   /** objects that exist but were not compared (row-level security, rules, …) */
   not_compared: string[]
 }
@@ -33,7 +36,7 @@ export const hasDrift = (r: CheckReport) => !!r.drift?.length
  */
 export async function check(cfg: Config, envName: string | undefined, scratch: string | undefined, opts: CheckOptions, log: runner.Log = runner.quiet): Promise<CheckReport> {
   const [name, env] = cfg.pick(envName)
-  const report: CheckReport = { environment: name, applied_up_to: null, drift: null, changes: null, dry_run_sql: null, not_compared: [] }
+  const report: CheckReport = { environment: name, applied_up_to: null, drift: null, changes: null, dry_run_sql: null, rules: null, not_compared: [] }
 
   if (opts.drift || opts.changes) {
     const [scratchName, scratchEnvironment] = scratchEnv(cfg, scratch)
@@ -76,6 +79,11 @@ export async function check(cfg: Config, envName: string | undefined, scratch: s
       await s.close()
     }
   }
+  if (opts.rules) {
+    const pending = (await runner.info(cfg, name)).filter((i) => i.state === 'pending' || i.state === 'outdated').map((i) => i.script)
+    report.rules = pending.length ? lint(cfg, { scripts: pending }) : { scripts: [], findings: [], errors: 0, warnings: 0 }
+    log('info', `Rules: ${report.rules.errors} error(s), ${report.rules.warnings} warning(s) in ${report.rules.scripts.length} pending script(s)`)
+  }
   if (opts.dryRun) report.dry_run_sql = (await runner.migrate(cfg, name, { dryRun: true }, log)).dry_run_sql
   return report
 }
@@ -100,12 +108,13 @@ export function reportHtml(r: CheckReport, project: string, generatedAt: string)
   if (r.not_compared.length) body += `<h2>Not compared</h2><ul>${r.not_compared.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`
   body += section('Drift', r.drift, 'No drift: the database matches its applied scripts.')
   body += section('Pending changes', r.changes, 'The pending scripts change nothing.')
+  if (r.rules) body += findingsHtml(r.rules)
   if (r.dry_run_sql !== null) body += `<h2>Dry-run script</h2><pre>${esc(r.dry_run_sql)}</pre>`
   return (
     `<!doctype html><html lang=en><head><meta charset=utf-8><title>Checks for ${esc(r.environment)}</title><style>` +
     'body{font:14px system-ui,sans-serif;margin:2rem;max-width:72rem;color:#15181c}' +
     'pre{background:#eef0f3;padding:.75rem;overflow:auto;white-space:pre-wrap}' +
     '.cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.ok{color:#17734a}.warn{color:#b42d25;margin-left:.5rem}' +
-    `summary{cursor:pointer;padding:.25rem 0}</style></head><body>${body}</body></html>`
+    `summary{cursor:pointer;padding:.25rem 0}${FINDINGS_CSS}</style></head><body>${body}</body></html>`
   )
 }

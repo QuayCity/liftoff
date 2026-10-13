@@ -90,7 +90,8 @@ the top. When a database differs from the baseline script, a dialog lists the di
 with **Cancel** and **Record anyway**.
 
 **Checks**: before a deploy. **Check for drift**, **Preview pending changes**, **Dry-run script**,
-and **Save report…** for the HTML report.
+**Check the rules** ([the rules](rules.md) on the scripts still pending there; allowed findings
+show with their reason), and **Save report…** for the HTML report.
 
 ## Changes
 

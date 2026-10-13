@@ -20,6 +20,7 @@ import * as diff from '../core/diff.ts'
 import { asLiftoffError, configError, driftError, LiftoffError, modelAheadError } from '../core/errors.ts'
 import * as flyway from '../core/flyway.ts'
 import * as model from '../core/model.ts'
+import * as rules from '../core/rules.ts'
 import * as runner from '../core/runner.ts'
 import { createSample } from '../core/sample.ts'
 import { FlywayArgError, translate, type Adhoc } from './flyway-args.ts'
@@ -293,9 +294,10 @@ const COMMANDS: Record<string, Command> = {
     },
   },
   check: {
-    help: 'Pre-deploy checks: drift, what the pending scripts change, and the dry-run script. With no flags, runs all three. Exits 13 when drift is found.',
+    help: 'Pre-deploy checks: drift, what the pending scripts change, the dry-run script, and the rules on the pending scripts. With no flags, runs all four. Exits 13 when drift is found, 15 when a rule at error severity fires.',
     options: {
       drift: { type: 'boolean', help: 'Compare the environment with what its applied scripts build' },
+      rules: { type: 'boolean', help: 'The rules (liftoff lint) on the scripts still pending on the environment' },
       changes: { type: 'boolean', help: 'What the pending scripts will change' },
       'dry-run': { type: 'boolean', help: 'The SQL that would run' },
       scratch: { type: 'string', help: 'Scratch environment rebuilt for the comparison (default: the first with role "scratch")' },
@@ -312,8 +314,14 @@ const COMMANDS: Record<string, Command> = {
         process.stdout.write(ctx.json ? `${JSON.stringify({ ok: false, result: cmp, error: err.report() })}\n` : `Not covered by a migration script:\n${text}\n`)
         throw new Reported(err)
       }
-      const all = !(flag(v, 'drift') || flag(v, 'changes') || flag(v, 'dry-run'))
-      const r = await checks.check(cfg, ctx.env, str(v, 'scratch'), { drift: all || flag(v, 'drift'), changes: all || flag(v, 'changes'), dryRun: all || flag(v, 'dry-run') }, log)
+      const all = !(flag(v, 'drift') || flag(v, 'changes') || flag(v, 'dry-run') || flag(v, 'rules'))
+      const r = await checks.check(
+        cfg,
+        ctx.env,
+        str(v, 'scratch'),
+        { drift: all || flag(v, 'drift'), changes: all || flag(v, 'changes'), dryRun: all || flag(v, 'dry-run'), rules: all || flag(v, 'rules') },
+        log,
+      )
       const report = str(v, 'report')
       if (report) {
         fs.writeFileSync(report, checks.reportHtml(r, cfg.project.name, new Date().toISOString()))
@@ -325,13 +333,47 @@ const COMMANDS: Record<string, Command> = {
         text.push(`${title}: ${list.length || 'none'}`)
         text.push(...list.map((c) => `  ${kindOf(c)} ${c.name}${c.destructive ? '  (may lose data)' : ''}`))
       }
+      if (r.rules) text.push(`Rules: ${r.rules.errors} error(s), ${r.rules.warnings} warning(s)`, ...r.rules.findings.map((f) => `  ${findingLine(f)}`))
       if (r.dry_run_sql !== null) text.push(`Dry run:\n${r.dry_run_sql}`)
-      if (checks.hasDrift(r)) {
-        // The report is the useful part: print it, then fail with the drift exit code.
-        process.stdout.write(ctx.json ? `${JSON.stringify({ ok: false, result: r, error: driftError(r.environment).report() })}\n` : `${text.join('\n')}\n`)
-        throw new Reported(driftError(r.environment))
+      const failure = checks.hasDrift(r) ? driftError(r.environment) : r.rules?.errors ? rules.rulesError(r.rules) : undefined
+      if (failure) {
+        // The report is the useful part: print it, then fail with the exit code.
+        process.stdout.write(ctx.json ? `${JSON.stringify({ ok: false, result: r, error: failure.report() })}\n` : `${text.join('\n')}\n`)
+        throw new Reported(failure)
       }
       return [r, text.join('\n')]
+    },
+  },
+  lint: {
+    help: 'Check the SQL of the versioned and repeatable scripts against the rules in liftoff.toml ([rules]). Exits 15 when a rule at error severity fires that no -- liftoff:allow comment covers.',
+    options: {
+      script: { type: 'string', multiple: true, help: 'Only this script (file name; repeatable). Default: every versioned and repeatable script', value: 'FILE' },
+      since: { type: 'string', help: 'Only the scripts that are not on this git branch or commit yet (e.g. origin/main); for pull requests', value: 'REF' },
+      report: { type: 'string', help: 'Also write a self-contained HTML report to this file', value: 'FILE' },
+      list: { type: 'boolean', help: 'List the rules with the severity each runs at, and stop' },
+    },
+    async run(ctx, v) {
+      const cfg = load(ctx)
+      if (flag(v, 'list')) {
+        const eff = rules.effective(cfg.rules)
+        const list = [
+          ...Object.entries(rules.RULES).map(([id, r]) => ({ id, severity: eff[id].severity, pattern: eff[id].pattern ?? null, engine: r.engine ?? null, help: r.help, custom: false })),
+          ...cfg.rules.custom.map((c) => ({ id: c.id, severity: c.severity, pattern: c.pattern, engine: null, help: c.message, custom: true })),
+        ]
+        return [list, list.map((r) => `${r.id.padEnd(26)} ${r.severity.padEnd(5)}  ${r.help}${r.engine ? ` (${r.engine === 'sqlserver' ? 'SQL Server' : 'PostgreSQL'})` : ''}`).join('\n')]
+      }
+      const r = rules.lint(cfg, { scripts: v.script as string[] | undefined, since: str(v, 'since') })
+      const report = str(v, 'report')
+      if (report) {
+        fs.writeFileSync(report, rules.lintReportHtml(r, cfg.project.name, new Date().toISOString()))
+        log('info', `Report written to ${report}`)
+      }
+      const text = [...r.findings.map(findingLine), `${r.scripts.length} script(s): ${r.errors} error(s), ${r.warnings} warning(s)`].join('\n')
+      if (r.errors) {
+        process.stdout.write(ctx.json ? `${JSON.stringify({ ok: false, result: r, error: rules.rulesError(r).report() })}\n` : `${text}\n`)
+        throw new Reported(rules.rulesError(r))
+      }
+      return [r, text]
     },
   },
   validate: {
@@ -746,6 +788,10 @@ const COMMANDS: Record<string, Command> = {
 }
 
 /** The report was already printed on stdout; only the message (stderr) and the exit code are left. */
+/** `V0003__x.sql:12  warn   drop-table  drops table orders` */
+const findingLine = (f: rules.Finding) =>
+  `${`${f.script}:${f.line}`.padEnd(30)} ${(f.allowed !== undefined ? 'allowed' : f.severity).padEnd(7)} ${f.rule.padEnd(26)} ${f.message}${f.allowed ? `  (${f.allowed})` : ''}`
+
 class Reported extends Error {
   readonly error: LiftoffError
   constructor(error: LiftoffError) {

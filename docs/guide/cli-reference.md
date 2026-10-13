@@ -21,7 +21,7 @@ Flyway-style options (`-url=…`, `-user=…`, `-locations=filesystem:…`) are 
 ## Commands
 
 - **Projects and settings:** [`init`](#init), [`settings`](#settings), [`project`](#project), [`test-connection`](#test-connection), [`create-scratch`](#create-scratch)
-- **Writing migrations:** [`diff`](#diff), [`generate`](#generate), [`add`](#add), [`capture`](#capture), [`model`](#model)
+- **Writing migrations:** [`diff`](#diff), [`generate`](#generate), [`add`](#add), [`capture`](#capture), [`model`](#model), [`lint`](#lint)
 - **Deploying:** [`info`](#info), [`migrate`](#migrate), [`check`](#check), [`validate`](#validate), [`repair`](#repair), [`undo`](#undo), [`mark-applied`](#mark-applied), [`baseline`](#baseline), [`clean`](#clean)
 - **Existing databases and baselines:** [`adopt`](#adopt), [`squash`](#squash), [`rebaseline`](#rebaseline)
 - **Compare:** [`compare`](#compare), [`snapshot`](#snapshot), [`data-compare`](#data-compare)
@@ -161,6 +161,20 @@ Options:
       --scratch <SCRATCH>            Scratch environment for --check (default: the first with role "scratch")
 ```
 
+### lint
+
+Check the SQL of the versioned and repeatable scripts against the rules in liftoff.toml ([rules]). Exits 15 when a rule at error severity fires that no -- liftoff:allow comment covers.
+
+```
+Usage: liftoff lint [OPTIONS]
+
+Options:
+      --script <FILE>                Only this script (file name; repeatable). Default: every versioned and repeatable script
+      --since <REF>                  Only the scripts that are not on this git branch or commit yet (e.g. origin/main); for pull requests
+      --report <FILE>                Also write a self-contained HTML report to this file
+      --list                         List the rules with the severity each runs at, and stop
+```
+
 ## Deploying
 
 ### info
@@ -191,13 +205,14 @@ Options:
 
 ### check
 
-Pre-deploy checks: drift, what the pending scripts change, and the dry-run script. With no flags, runs all three. Exits 13 when drift is found.
+Pre-deploy checks: drift, what the pending scripts change, the dry-run script, and the rules on the pending scripts. With no flags, runs all four. Exits 13 when drift is found, 15 when a rule at error severity fires.
 
 ```
 Usage: liftoff check [OPTIONS]
 
 Options:
       --drift                        Compare the environment with what its applied scripts build
+      --rules                        The rules (liftoff lint) on the scripts still pending on the environment
       --changes                      What the pending scripts will change
       --dry-run                      The SQL that would run
       --scratch <SCRATCH>            Scratch environment rebuilt for the comparison (default: the first with role "scratch")

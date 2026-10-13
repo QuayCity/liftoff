@@ -61,13 +61,14 @@ database whose existing tables have nothing to do with this project.
 liftoff -e prod check
 ```
 
-does three things, without changing the database:
+does four things, without changing the database:
 
 1. **Drift**: rebuilds the scratch database from the scripts prod has run, and compares prod
    with it. Anything different was changed outside the scripts.
 2. **Pending changes**: what the pending scripts will change, object by object, with the
    changes that may lose data marked.
 3. **The dry-run script**: the exact SQL `migrate` would run.
+4. **Rules**: [the rules](rules.md) on the scripts still pending on prod.
 
 ```
 Drift: none
@@ -79,10 +80,11 @@ BEGIN TRANSACTION;
 …
 ```
 
-`--drift`, `--changes` and `--dry-run` run one part only. `--report check.html` also writes the
+`--drift`, `--changes`, `--dry-run` and `--rules` run one part only. `--report check.html` also writes the
 result as one self-contained HTML page, to attach to a change request or keep from a pipeline.
 
-`check` exits with **13 when drift is found**, so a pipeline stops before deploying.
+`check` exits with **13 when drift is found** and **15 when a rule at error severity fires**, so a
+pipeline stops before deploying.
 
 ### When there is drift
 
@@ -184,6 +186,7 @@ Every command exits with one of these, so scripts and pipelines can act on them:
 | 12 | refused: validation failed, the database differs from the baseline script, a script is numbered before the base branch, or the schema model does not build |
 | 13 | drift found |
 | 14 | the schema model has changes no migration makes |
+| 15 | a rule at error severity fired on a script (`lint`, `check`; see [Rules](rules.md)) |
 
 With `--output-type json`, every command prints one JSON object on stdout: `{"ok": true, …}`, or
 `{"ok": false, "error": {"code": "…", "exit_code": 12, "message": "…"}}`. Progress messages go

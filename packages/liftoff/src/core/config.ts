@@ -6,6 +6,7 @@ import * as path from 'node:path'
 import { parse, stringify } from 'smol-toml'
 import { configError } from './errors.ts'
 import { keychainDelete, keychainEnabled, keychainGet, keychainSet } from './keychain.ts'
+import { NO_RULES, parseRules, type RulesConfig } from './rules.ts'
 
 export const PROJECT_FILE = 'liftoff.toml'
 export const USER_FILE = 'liftoff.user.toml'
@@ -89,10 +90,13 @@ export class Config {
   readonly project: Project
   /** in the order they are listed (byOrder) */
   readonly environments: Map<string, Environment>
+  /** `[rules]`: what liftoff lint checks in the scripts */
+  readonly rules: RulesConfig
 
-  constructor(root: string, project: Project, environments: Map<string, Environment>) {
+  constructor(root: string, project: Project, environments: Map<string, Environment>, rules: RulesConfig = NO_RULES) {
     this.root = root
     this.project = project
+    this.rules = rules
     this.environments = new Map([...environments].sort(([a, x], [b, y]) => byOrder({ name: a, ...x }, { name: b, ...y })))
   }
 
@@ -134,7 +138,7 @@ export class Config {
         placeholders: {},
       })
     }
-    return new Config(root, project, environments)
+    return new Config(root, project, environments, parseRules(table.rules))
   }
 
   /** A project without liftoff.toml, for one-off CLI runs with `-url` (Flyway style). */

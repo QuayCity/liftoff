@@ -96,6 +96,18 @@ test.describe('F04 Environments', () => {
     await expectNoA11yViolations(page, 'Checks with drift')
   })
 
+  test('F08-H2 the rules on the pending scripts, with allowed findings and their reason', async ({ page }) => {
+    const details = page.getByRole('region', { name: 'staging details' })
+    await details.getByRole('tab', { name: 'Checks' }).click()
+    await details.getByRole('button', { name: 'Check the rules' }).click()
+    await expect(details.getByText(/1 warning in \d+ pending scripts?/)).toBeVisible()
+    const findings = details.getByRole('table', { name: 'Rule findings' })
+    await expect(findings.getByRole('row').filter({ hasText: 'table-without-primary-key' })).toContainText('warn')
+    await expect(findings.getByRole('row').filter({ hasText: 'drop-column' })).toContainText('allowed')
+    await expect(findings).toContainText('moved to tax_rates in the previous release')
+    await expectNoA11yViolations(page, 'Checks with rule findings')
+  })
+
   test('X-A11Y Environments', async ({ page }) => {
     await expectNoA11yViolations(page, 'Environments (light)')
     await page.goto('/?open=1&ws=Environments&theme=dark')

@@ -47,7 +47,7 @@ test('pull requests: the schema model job (generate and check), deployments only
   // Every workflow checks the numbering of new scripts on pull requests; the schema model job is extra.
   const plain = githubActions(cfg, base)
   assert.ok(plain.includes("  pull_request:\n    paths: ['db/migrations/**', 'liftoff.toml']") && !plain.includes('schema-model'), plain)
-  assert.ok(plain.includes('fetch-depth: 0') && plain.includes('liftoff renumber --check --after "origin/$BASE"'), plain)
+  assert.ok(plain.includes('fetch-depth: 0') && plain.includes('liftoff renumber --check --after "origin/$BASE"') && plain.includes('liftoff lint --since "origin/$BASE"'), plain)
   assert.ok(plain.includes('BASE: ${{ github.base_ref }}'), 'the branch name goes in as a variable, not into the script')
   // Writing the script: renumber before committing, with the optional token that lets checks run again.
   assert.ok(gen.indexOf('liftoff renumber --after "origin/$BASE"') > gen.indexOf('liftoff generate --from model'), gen)

@@ -7,7 +7,7 @@ const help = (...args: string[]) => execFileSync(process.execPath, ['src/cli/mai
 
 const GROUPS: [string, string[]][] = [
   ['Projects and settings', ['init', 'settings', 'project', 'test-connection', 'create-scratch']],
-  ['Writing migrations', ['diff', 'generate', 'add', 'capture', 'model']],
+  ['Writing migrations', ['diff', 'generate', 'add', 'capture', 'model', 'lint']],
   ['Deploying', ['info', 'migrate', 'check', 'validate', 'repair', 'undo', 'mark-applied', 'baseline', 'clean']],
   ['Existing databases and baselines', ['adopt', 'squash', 'rebaseline']],
   ['Compare', ['compare', 'snapshot', 'data-compare']],

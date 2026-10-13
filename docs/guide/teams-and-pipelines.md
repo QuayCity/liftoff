@@ -46,7 +46,8 @@ liftoff ci --stage test --stage prod --write     # write .github/workflows/lifto
 
 The workflow:
 
-- **On pull requests**: checks that new scripts are numbered after the base branch.
+- **On pull requests**: checks that new scripts are numbered after the base branch, and runs
+  [the rules](rules.md) on them (`lint --since`).
 - **On pushes to main** (`--branch` for another) that change the scripts or `liftoff.toml`:
   deploys to each stage in order, each one waiting for the one before. Per stage: `validate`,
   `check --drift` (stopping on drift, with the HTML report kept as a build artifact), then

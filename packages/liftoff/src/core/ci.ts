@@ -52,13 +52,14 @@ function scratchService(engine: string): { service: string; url: string; prepare
 }
 
 /** The pull-request job: the schema model must build, and its changes need a migration script. */
-/** Every pull request: the scripts it adds must be numbered after everything on the branch it goes into. */
+/** Every pull request: the scripts it adds must be numbered after everything on the branch it goes into, and pass the rules. */
 function orderJob(o: CiOptions): string {
   return (
-    "  migration-order:\n    name: 'New migration scripts come after the base branch'\n    if: github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n" +
+    "  migration-order:\n    name: 'New migration scripts: order and rules'\n    if: github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n" +
     '    steps:\n      - uses: actions/checkout@v7\n        with:\n          fetch-depth: 0\n' +
     `      - name: Install LiftOff\n        run: ${yamlStr(o.install)}\n` +
-    '      - name: Check the numbering\n        env:\n          BASE: ${{ github.base_ref }}\n        run: liftoff renumber --check --after "origin/$BASE"\n'
+    '      - name: Check the numbering\n        env:\n          BASE: ${{ github.base_ref }}\n        run: liftoff renumber --check --after "origin/$BASE"\n' +
+    '      - name: The rules on the new scripts\n        env:\n          BASE: ${{ github.base_ref }}\n        run: liftoff lint --since "origin/$BASE"\n'
   )
 }
 
@@ -118,7 +119,7 @@ export function githubActions(cfg: Config, o: CiOptions): string {
   let y =
     `# Written by LiftOff. Add these repository secrets: ${o.stages.map((s) => envVar(s, 'PASSWORD')).join(', ')}\n` +
     `# (and ${o.stages.map((s) => envVar(s, 'URL')).join(', ')} if the connection URL is not in liftoff.toml).\n` +
-    '# Pull requests: make "New migration scripts come after the base branch" a required check, and turn on\n' +
+    '# Pull requests: make "New migration scripts: order and rules" a required check, and turn on\n' +
     '# "Require branches to be up to date before merging", so every script is numbered after what merged first.\n' +
     (o.model === 'generate'
       ? '# Optional secret LIFTOFF_PUSH_TOKEN (a fine-grained token with contents: write): with it, the checks run\n# again on the commit that adds the migration script (GitHub does not start them for its own token).\n'

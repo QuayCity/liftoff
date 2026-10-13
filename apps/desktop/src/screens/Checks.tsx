@@ -1,7 +1,7 @@
-// S13 checks for one environment: drift, what the pending scripts change, the dry-run script.
-import { FileSearch, GitCompareArrows, ShieldAlert } from 'lucide-react'
+// S13 checks for one environment: drift, what the pending scripts change, the dry-run script, the rules.
+import { FileSearch, GitCompareArrows, ListChecks, ShieldAlert } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { api, errorText, type Change, type CheckReport, type Project } from '../api'
+import { api, errorText, type Change, type CheckReport, type LintReport, type Project } from '../api'
 import { Button, cx } from '../ui/controls'
 import { LogConsole, type LogLine } from '../ui/data'
 import { Badge, CodeBlock, InlineAlert } from '../ui/display'
@@ -9,7 +9,7 @@ import { DiffView } from '../ui/diffview'
 import { useToast } from '../ui/overlays'
 import { NotCompared } from './Changes'
 
-type Which = 'drift' | 'changes' | 'dryRun'
+type Which = 'drift' | 'changes' | 'dryRun' | 'rules'
 
 export function Checks({ project, env, onDrift }: {
   project: Project; env: string; onDrift: (env: string, drifted: boolean) => void
@@ -35,7 +35,7 @@ export function Checks({ project, env, onDrift }: {
     setLog([])
     listening.current = true
     try {
-      const r = await api.check(project.root, env, { drift: which === 'drift', changes: which === 'changes', dryRun: which === 'dryRun' })
+      const r = await api.check(project.root, env, { drift: which === 'drift', changes: which === 'changes', dryRun: which === 'dryRun', rules: which === 'rules' })
       setReport({ which, r })
       if (r.drift) onDrift(env, r.drift.length > 0)
     } catch (e) {
@@ -52,9 +52,10 @@ export function Checks({ project, env, onDrift }: {
         <Button icon={ShieldAlert} loading={running === 'drift'} disabled={!!running} onClick={() => run('drift')}>Check for drift</Button>
         <Button icon={GitCompareArrows} loading={running === 'changes'} disabled={!!running} onClick={() => run('changes')}>Preview pending changes</Button>
         <Button icon={FileSearch} loading={running === 'dryRun'} disabled={!!running} onClick={() => run('dryRun')}>Dry-run script</Button>
+        <Button icon={ListChecks} loading={running === 'rules'} disabled={!!running} onClick={() => run('rules')}>Check the rules</Button>
       </div>
       <p className="text-xs font-normal text-muted">
-        Drift and previews rebuild the scratch database from your scripts; nothing is changed on {env}.
+        Drift and previews rebuild the scratch database from your scripts; nothing is changed on {env}. The rules read the pending scripts ([rules] in liftoff.toml).
       </p>
       {running && <LogConsole lines={log} status="streaming" />}
       {error && <InlineAlert tone="danger" title="Check failed">{error}</InlineAlert>}
@@ -75,6 +76,7 @@ export function Checks({ project, env, onDrift }: {
           beforeLabel={`${env} now`} afterLabel="After the pending scripts"
         />
       )}
+      {!running && report?.which === 'rules' && report.r.rules && <RuleFindings env={env} report={report.r.rules} />}
       {!running && report?.which === 'dryRun' && report.r.dry_run_sql && <CodeBlock label={`Dry-run script for ${env}`} code={report.r.dry_run_sql} />}
       {!running && report && (
         <div>
@@ -88,6 +90,39 @@ export function Checks({ project, env, onDrift }: {
           }}>Save report…</Button>
         </div>
       )}
+    </div>
+  )
+}
+
+/** The rules on the pending scripts: a summary, then one row per finding. */
+export function RuleFindings({ env, report }: { env: string; report: LintReport }) {
+  const n = report.scripts.length
+  const of = `${n} pending script${n === 1 ? '' : 's'}`
+  const summary = report.errors
+    ? <InlineAlert tone="danger" title={`${report.errors} rule error${report.errors === 1 ? '' : 's'}`}>Fix them, or allow them with a reason in the script (-- liftoff:allow rule: why). Deploying to {env} from a pipeline stops here.</InlineAlert>
+    : report.warnings
+      ? <InlineAlert tone="warning" title={`${report.warnings} warning${report.warnings === 1 ? '' : 's'} in ${of}`}>Worth a look before deploying.</InlineAlert>
+      : <InlineAlert tone="success" title={n ? `The rules pass on ${of}` : 'Nothing pending'}>{report.findings.length ? 'Only notes and allowed findings below.' : `Nothing to report for ${env}.`}</InlineAlert>
+  if (!report.findings.length) return summary
+  const tone = { error: 'text-danger font-semibold', warn: 'text-warning font-semibold', info: 'text-muted' }
+  return (
+    <div className="flex flex-col gap-3">
+      {summary}
+      <table aria-label="Rule findings" className="w-full text-sm">
+        <thead className="text-left text-xs text-muted">
+          <tr><th className="py-1 pr-3 font-normal">Script</th><th className="py-1 pr-3 font-normal">Severity</th><th className="py-1 pr-3 font-normal">Rule</th><th className="py-1 font-normal">Finding</th></tr>
+        </thead>
+        <tbody>
+          {report.findings.map((f, i) => (
+            <tr key={i} className="border-t border-border align-top">
+              <td className="py-1.5 pr-3 font-mono text-xs">{f.script}:{f.line}</td>
+              <td className={cx('py-1.5 pr-3', f.allowed !== undefined ? 'text-muted' : tone[f.severity])}>{f.allowed !== undefined ? 'allowed' : f.severity}</td>
+              <td className="py-1.5 pr-3 font-mono text-xs">{f.rule}</td>
+              <td className="py-1.5">{f.message}{f.allowed ? <span className="text-muted"> ({f.allowed})</span> : null}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

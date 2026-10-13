@@ -16,6 +16,8 @@ export type ErrorCode =
   | 'LIFTOFF_MODEL_INVALID'
   /** the schema model has changes no migration script makes */
   | 'LIFTOFF_MODEL_AHEAD'
+  /** a rule at error severity fired on a script (liftoff lint, liftoff check) */
+  | 'LIFTOFF_RULES'
   | 'LIFTOFF_GIT'
   | 'LIFTOFF_GIT_PUSH_REJECTED'
   | 'LIFTOFF_GIT_NOT_A_REPOSITORY'

@@ -233,6 +233,11 @@ Once a project has any placeholders, a `${name}` with no value is an error that 
 nothing runs. A project without placeholders runs its scripts untouched, so `${` in a string is
 left alone.
 
+## Rules
+
+`[rules]` sets how strict `liftoff lint` and `liftoff check` are with your scripts: a severity
+per rule, naming patterns and your own rules. See [Rules on your scripts](rules.md#settings-rules-in-liftofftoml).
+
 ## Filters
 
 Filters leave objects out of comparisons: `diff`, `generate`, `check`, `compare`, `model` and
