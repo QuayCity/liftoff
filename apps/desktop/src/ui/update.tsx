@@ -1,7 +1,7 @@
 // Updates of the app itself: the Update button in the title bar and the start page, and the
 // choice on the Settings screen. The main process (electron/updates.ts) does the work.
 
-import { Download, ExternalLink, RotateCw } from 'lucide-react'
+import { Download, ExternalLink, RotateCw, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { updates, type UpdateInfo, type UpdateMode } from '../api'
 import { Button, Field, Select } from './controls'
@@ -21,7 +21,8 @@ export function useUpdate(): UpdateInfo | null {
   return info
 }
 
-/** Nothing when there is nothing to do; otherwise Update, the download's progress, or Restart. */
+/** Nothing when there is nothing to do; otherwise Update, the download's progress, Restart, or
+ * (on the first start after an update) What's new. */
 export function UpdateButton() {
   const info = useUpdate()
   const s = info?.status
@@ -30,12 +31,13 @@ export function UpdateButton() {
   if (s.state === 'downloading') return <Button size="sm" variant="primary" loading disabled>Downloading {s.percent}%</Button>
   if (s.state === 'ready') return <Button size="sm" variant="primary" icon={RotateCw} onClick={() => void updates.install()}>Restart to update</Button>
   if (s.state === 'manual') return <Button size="sm" icon={ExternalLink} onClick={() => void updates.openPage()}>Download {s.version}</Button>
+  if (info.updated) return <Button size="sm" icon={Sparkles} onClick={() => void updates.openNotes()}>What's new in {info.updated}</Button>
   return null
 }
 
 const MODES: Record<UpdateMode, string> = {
+  auto: 'Download updates automatically; I choose when to restart',
   notify: 'Tell me when there is an update',
-  auto: 'Download and install updates automatically',
   off: 'Never check for updates',
 }
 

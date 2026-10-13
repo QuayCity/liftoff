@@ -22,10 +22,12 @@ export type UpdateState =
   | { state: 'downloading'; version: string; percent: number }
   | { state: 'ready'; version: string }
   | { state: 'failed'; message: string }
-export type UpdateInfo = { mode: UpdateMode; current: string; status: UpdateState }
+/** `updated`: the version this start updated to, until its notes are opened (What's new). */
+export type UpdateInfo = { mode: UpdateMode; current: string; status: UpdateState; updated?: string }
 
 const LATEST = 'https://api.github.com/repos/sanderstad/liftoff/releases/latest'
 const EVERY = 6 * 60 * 60 * 1000
+const NOTES = (v: string) => `https://github.com/sanderstad/liftoff/releases/tag/v${v}`
 
 export class Updater {
   private status: UpdateState = { state: 'idle' }
@@ -34,17 +36,23 @@ export class Updater {
   private timer?: NodeJS.Timeout
   private readonly settingsFile: string
   private readonly url: string
+  private updated?: string
   mode: UpdateMode
 
   constructor(configDir: string, private readonly onChange: (info: UpdateInfo) => void) {
     this.settingsFile = path.join(configDir, 'settings.json')
     this.mode = readMode(this.settingsFile)
+    // The first start of a newer version than last time offers its release notes, as VS Code does.
+    const last = readSettings(this.settingsFile).last_version
+    const current = app.getVersion()
+    if (typeof last === 'string' && newer(current, last)) this.updated = current
+    if (last !== current) this.save({ last_version: current })
     // Tests point this at a local server; nothing else sets it.
     this.url = process.env.LIFTOFF_UPDATE_URL ?? LATEST
   }
 
   info(): UpdateInfo {
-    return { mode: this.mode, current: app.getVersion(), status: this.status }
+    return { mode: this.mode, current: app.getVersion(), status: this.status, ...(this.updated ? { updated: this.updated } : {}) }
   }
 
   /** Checks shortly after the start and then every six hours, unless updates are off. */
@@ -59,8 +67,7 @@ export class Updater {
 
   setMode(mode: UpdateMode): UpdateInfo {
     this.mode = mode
-    fs.mkdirSync(path.dirname(this.settingsFile), { recursive: true })
-    fs.writeFileSync(this.settingsFile, JSON.stringify({ ...readSettings(this.settingsFile), updates: mode }, null, 2))
+    this.save({ updates: mode })
     if (mode === 'off' && this.status.state !== 'ready') this.set({ state: 'idle' })
     this.start()
     if (mode === 'auto' && this.status.state === 'available') void this.download()
@@ -149,6 +156,18 @@ export class Updater {
     }
   }
 
+  /** What's new: the release notes of the version just updated to, in the browser. Shown once. */
+  openNotes(): UpdateInfo {
+    void shell.openExternal(NOTES(app.getVersion()))
+    this.updated = undefined
+    return this.set(this.status)
+  }
+
+  private save(patch: Record<string, unknown>): void {
+    fs.mkdirSync(path.dirname(this.settingsFile), { recursive: true })
+    fs.writeFileSync(this.settingsFile, JSON.stringify({ ...readSettings(this.settingsFile), ...patch }, null, 2))
+  }
+
   openPage(): void {
     if (this.release?.html_url.startsWith('https://github.com/')) void shell.openExternal(this.release.html_url)
   }
@@ -180,5 +199,6 @@ function readSettings(file: string): Record<string, unknown> {
 
 function readMode(file: string): UpdateMode {
   const m = readSettings(file).updates
-  return m === 'auto' || m === 'off' ? m : 'notify'
+  // Like VS Code: unless the person chose otherwise, updates download by themselves.
+  return m === 'notify' || m === 'off' ? m : 'auto'
 }

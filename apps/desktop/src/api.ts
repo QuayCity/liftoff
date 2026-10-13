@@ -115,15 +115,16 @@ export type UpdateState =
   | { state: 'downloading'; version: string; percent: number }
   | { state: 'ready'; version: string }
   | { state: 'failed'; message: string }
-export type UpdateInfo = { mode: UpdateMode; current: string; status: UpdateState }
-type UpdateAction = 'info' | 'mode' | 'check' | 'download' | 'install' | 'page'
+export type UpdateInfo = { mode: UpdateMode; current: string; status: UpdateState; updated?: string }
+type UpdateAction = 'info' | 'mode' | 'check' | 'download' | 'install' | 'page' | 'notes'
 
-/** The browser preview pretends: ?update=available, downloading or ready shows that state. */
+/** The browser preview pretends: ?update=available, ready or updated shows that state. */
 const fakeUpdate = (() => {
-  let info: UpdateInfo = { mode: 'notify', current: '0.1.0', status: { state: 'idle' } }
+  let info: UpdateInfo = { mode: 'auto', current: '0.1.0', status: { state: 'idle' } }
   const shown = new URLSearchParams(location.search).get('update')
   if (shown === 'available') info.status = { state: 'available', version: '0.2.0', page: 'https://github.com/sanderstad/liftoff/releases/tag/v0.2.0' }
   if (shown === 'ready') info.status = { state: 'ready', version: '0.2.0' }
+  if (shown === 'updated') info = { ...info, current: '0.2.0', updated: '0.2.0' }
   const listeners = new Set<(i: UpdateInfo) => void>()
   const set = (status: UpdateState) => {
     info = { ...info, status }
@@ -134,6 +135,10 @@ const fakeUpdate = (() => {
     async update(action: UpdateAction, mode?: UpdateMode): Promise<UpdateInfo | undefined> {
       if (action === 'mode' && mode) {
         info = { ...info, mode }
+        return set(info.status)
+      }
+      if (action === 'notes') {
+        info = { ...info, updated: undefined }
         return set(info.status)
       }
       if (action === 'check') return set(info.status.state === 'available' ? info.status : { state: 'latest', version: info.current })
@@ -158,6 +163,7 @@ export const updates = {
   download: () => (bridge ?? fakeUpdate).update('download') as Promise<UpdateInfo>,
   install: () => (bridge ?? fakeUpdate).update('install'),
   openPage: () => (bridge ?? fakeUpdate).update('page'),
+  openNotes: () => (bridge ?? fakeUpdate).update('notes'),
   onChange: (cb: (info: UpdateInfo) => void) => (bridge ?? fakeUpdate).onUpdate(cb),
 }
 

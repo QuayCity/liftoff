@@ -76,9 +76,17 @@ test('U-H2 an update: the button on the start page and in a project, and the cho
   await app.getByRole('button', { name: 'Check now' }).click()
   await expect(app.getByRole('status')).toHaveText('LiftOff 0.1.0 is the latest version.')
   const mode = app.getByLabel('Updates')
-  await expect(mode).toHaveValue('notify')
+  await expect(mode).toHaveValue('auto')
   await mode.selectOption('off')
   await expect(app.getByText('LiftOff contacts nothing but your databases.')).toBeVisible()
   await expectNoA11yViolations(page, 'Settings, This app')
+  checkConsole()
+})
+
+test("U-H5 after an update: What's new, until it is opened", async ({ page }) => {
+  const checkConsole = watchConsole(page)
+  await page.goto('/?update=updated')
+  await page.getByRole('button', { name: "What's new in 0.2.0" }).click()
+  await expect(page.getByRole('button', { name: /What's new/ })).toBeHidden()
   checkConsole()
 })

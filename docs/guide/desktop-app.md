@@ -145,17 +145,18 @@ changes asks first. **This app**: settings for LiftOff on this computer, in ever
 
 ## Updates
 
-When there is a newer LiftOff, an **Update to x.y.z** button appears at the top, on the start page
-and in the title bar. Click it: the new version downloads (the button shows how far), its
-SHA-256 checksum is checked against the one GitHub publishes, and the button becomes **Restart to
-update**. Click that to install and start the new version; your projects and settings stay.
+When there is a newer LiftOff, it downloads in the background, its SHA-256 checksum is checked
+against the one GitHub publishes, and a **Restart to update** button appears at the top, on the
+start page and in the title bar. Click it when it suits you: the new version installs and starts,
+and your projects and settings stay. The first start of the new version shows **What's new in
+x.y.z**, which opens its release notes; it goes away once opened.
 
 **Settings > This app > Updates** chooses how:
 
 | choice | what happens |
 | --- | --- |
-| **Tell me when there is an update** (the default) | checks at start and every six hours, and shows the button |
-| **Download and install updates automatically** | downloads on its own; only **Restart to update** appears, so the restart is still your choice |
+| **Download updates automatically; I choose when to restart** (the default) | checks at start and every six hours, downloads a new version, and shows **Restart to update** |
+| **Tell me when there is an update** | shows **Update to x.y.z** instead; clicking it downloads, with the progress on the button, then **Restart to update** |
 | **Never check for updates** | no checks: the app connects to nothing but your databases |
 
 **Check now** checks straight away and says what it found.

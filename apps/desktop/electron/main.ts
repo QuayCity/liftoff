@@ -61,6 +61,7 @@ app.whenReady().then(() => {
     if (action === 'download') return updater.download()
     if (action === 'install') return updater.install()
     if (action === 'page') return updater.openPage()
+    if (action === 'notes') return updater.openNotes()
     return updater.info()
   })
 

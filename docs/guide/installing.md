@@ -145,6 +145,6 @@ telemetry and no account. A CI runner only needs to reach the databases.
 
 The desktop app also looks for updates of itself: it asks GitHub for the latest LiftOff release
 (`api.github.com`), and downloads the new setup or AppImage from GitHub when you update. Nothing
-about you or your projects is sent. **Settings > This app > Updates** chooses: tell me (the
-default), install automatically, or never check, which leaves the databases as its only
-connections. See [The desktop app](desktop-app.md#updates).
+about you or your projects is sent. **Settings > This app > Updates** chooses: download automatically and let
+you choose when to restart (the default), only tell you, or never check, which leaves the
+databases as its only connections. See [The desktop app](desktop-app.md#updates).
