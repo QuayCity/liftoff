@@ -153,6 +153,59 @@ liftoff add --description "grants" --repeatable      # migrations/R__grants.sql
 Data changes (filling a new column, seeding a lookup table) are hand-written scripts, or lines
 added to a generated one before it runs anywhere.
 
+## Scripts for some environments only
+
+Test data, a demo account, a setting only production needs: one line at the top of the script
+says where it runs.
+
+```sql
+-- liftoff:for test
+INSERT INTO customers (id, name) VALUES (1, 'Test customer');
+```
+
+The expression is matched against the environment's **name** and its **role** (`dev`, `test`,
+`prod`, `scratch`), without case: `-- liftoff:for test` runs on every environment with the role
+`test`, and also on one named `test`. Combine words with `and`, `or` (or a comma), `not` and
+parentheses:
+
+| line | runs on |
+| --- | --- |
+| `-- liftoff:for test` | test environments |
+| `-- liftoff:for dev, test` | dev and test environments |
+| `-- liftoff:for not prod` | everything but production |
+| `-- liftoff:for prod and not prod-us` | production environments except the one named `prod-us` |
+
+On the other environments the script is **excluded**: `info` lists it as such, `migrate` passes
+over it, and nothing is recorded, so the scripts after it are not out of order. A drift check
+rebuilds the scratch database the way the checked environment runs the scripts, so a table
+created only on test is not drift there. Works on versioned and repeatable scripts; one
+`-- liftoff:for` line per script.
+
+The line is part of the script, so adding it to a script that already ran changes its checksum
+([never edit a script that has run](#never-edit-a-script-that-has-run)).
+
+## Topics
+
+A topic says what a script belongs to: a ticket, a feature, a release.
+
+```sql
+-- liftoff:topic JIRA-142, billing
+ALTER TABLE invoices ADD COLUMN due_date date;
+```
+
+`migrate --topic` runs the pending scripts whose topics match an expression, and nothing else; the
+same words as above (`and`, `or`, `not`, parentheses):
+
+```sh
+liftoff -e prod migrate --topic JIRA-142
+liftoff -e test migrate --topic "billing and not experimental"
+liftoff -e prod migrate --topic JIRA-142 --dry-run      # see first what it picks
+```
+
+It works like [running one script](deploying.md#running-one-script): older pending scripts it
+does not pick stay behind (it says which), and a plain `migrate` then needs `--out-of-order` for
+them. Topics show next to the script in `info --output-type json`, the desktop app and VS Code.
+
 ## Placeholders
 
 `${name}` in a script is replaced when it runs; see

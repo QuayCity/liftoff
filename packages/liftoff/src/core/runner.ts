@@ -5,7 +5,7 @@
 import type { Config, Environment } from './config.ts'
 import { BaselineDiffersError, configError, DbError, MigrationError, notBaselinedError, validateError } from './errors.ts'
 import { dialect, open, type Conn, type EngineName, type Held, type HistoryRow } from './db.ts'
-import { applyPlaceholders, compareVersions, parseVersion, scan, versionNote, type Kind, type Script, type Version } from './migration.ts'
+import { applyPlaceholders, compareVersions, holds, isFor, parseExpression, parseVersion, scan, versionNote, type Kind, type Script, type Version } from './migration.ts'
 import { quoteIdent } from './postgres.ts'
 import { quote as quoteTsql } from './sqlserver.ts'
 
@@ -24,6 +24,8 @@ export type State =
   | 'baseline'
   /** in the history, newer than any file here (another branch ran it) */
   | 'future'
+  /** `-- liftoff:for` leaves this environment out; never runs here */
+  | 'excluded'
 
 export type MigrationInfo = {
   kind: Kind
@@ -35,6 +37,10 @@ export type MigrationInfo = {
   execution_time_ms: number | null
   /** an applied versioned script whose file changed afterwards */
   checksum_mismatch: boolean
+  /** the script's `-- liftoff:for` expression */
+  for?: string
+  /** the script's `-- liftoff:topic` words */
+  topics?: string[]
 }
 
 export type Level = 'info' | 'warn'
@@ -46,8 +52,11 @@ export const quiet: Log = () => {}
 
 const ver = (r: HistoryRow) => (r.version === null ? undefined : parseVersion(r.version))
 
-/** Each script's state, from the files and the history table. */
-export function compute(scripts: Script[], allRows: HistoryRow[]): MigrationInfo[] {
+/** Where a script's `-- liftoff:for` is evaluated: an environment's name and role. */
+export type Target = { name: string; role: string }
+
+/** Each script's state, from the files and the history table; with `env`, scripts not for it are `excluded`. */
+export function compute(scripts: Script[], allRows: HistoryRow[], env?: Target): MigrationInfo[] {
   // Rows before the latest numbering restart belong to the old numbering: kept for the record, not
   // compared. The restart row itself is the baseline the new numbering starts from.
   const restart = allRows.findLastIndex((r) => r.type === 'RESTART')
@@ -91,6 +100,7 @@ export function compute(scripts: Script[], allRows: HistoryRow[]): MigrationInfo
     let state: State
     if (row) state = row.success ? 'applied' : 'failed'
     else if (baseline && compareVersions(v, baseline) <= 0) state = 'below_baseline'
+    else if (env && !isFor(s, env)) state = 'excluded'
     else if (maxApplied && compareVersions(v, maxApplied) < 0) state = 'ignored'
     else state = 'pending'
     versioned.push([
@@ -104,6 +114,7 @@ export function compute(scripts: Script[], allRows: HistoryRow[]): MigrationInfo
         installed_on: row?.installed_on ?? null,
         execution_time_ms: row?.execution_time ?? null,
         checksum_mismatch: !!row && row.success && row.checksum !== s.checksum,
+        ...marksOf(s),
       },
     ])
   }
@@ -130,7 +141,7 @@ export function compute(scripts: Script[], allRows: HistoryRow[]): MigrationInfo
   }
   for (const s of scripts.filter((s) => s.kind === 'repeatable')) {
     const row = lastFor(s.description)
-    const state: State = !row ? 'pending' : !row.success ? 'failed' : row.checksum === s.checksum ? 'applied' : 'outdated'
+    const state: State = env && !isFor(s, env) ? 'excluded' : !row ? 'pending' : !row.success ? 'failed' : row.checksum === s.checksum ? 'applied' : 'outdated'
     out.push({
       kind: 'repeatable',
       version: null,
@@ -140,6 +151,7 @@ export function compute(scripts: Script[], allRows: HistoryRow[]): MigrationInfo
       installed_on: row?.installed_on ?? null,
       execution_time_ms: row?.execution_time ?? null,
       checksum_mismatch: false,
+      ...marksOf(s),
     })
   }
   const gone: HistoryRow[] = []
@@ -156,6 +168,13 @@ export function compute(scripts: Script[], allRows: HistoryRow[]): MigrationInfo
   return out
 }
 
+const marksOf = (s: Script): Pick<MigrationInfo, 'for' | 'topics'> => ({ ...(s.for !== undefined && { for: s.for }), ...(s.topics && { topics: s.topics }) })
+
+/** The environment whose `-- liftoff:for` rules apply: `as` (a scratch rebuild for another environment), else itself. */
+function targetOf(cfg: Config, name: string, env: Environment, as?: string): Target {
+  return as ? { name: as, role: cfg.pick(as)[1].role } : { name, role: env.role }
+}
+
 /** Opens the environment, runs `work`, closes the connection. */
 async function withEnv<T>(cfg: Config, envName: string | undefined, work: (c: Conn, name: string, env: Environment) => Promise<T>): Promise<T> {
   const [name, env] = cfg.pick(envName)
@@ -169,7 +188,7 @@ async function withEnv<T>(cfg: Config, envName: string | undefined, work: (c: Co
 
 export async function info(cfg: Config, envName: string | undefined): Promise<MigrationInfo[]> {
   const scripts = scan(cfg.migrationsDir())
-  return withEnv(cfg, envName, async (c) => compute(scripts, await c.readHistory(cfg.historySchema(), cfg.project.history_table)))
+  return withEnv(cfg, envName, async (c, name, env) => compute(scripts, await c.readHistory(cfg.historySchema(), cfg.project.history_table), targetOf(cfg, name, env)))
 }
 
 export type Applied = { script: string; version: string | null; execution_time_ms: number; transactional: boolean }
@@ -220,6 +239,10 @@ export type MigrateOptions = {
   scratch?: string
   /** adopt: the database must match the baseline exactly (nothing created, nothing accepted) */
   baselineMustMatch?: boolean
+  /** run the pending scripts whose `-- liftoff:topic` words satisfy this expression, and nothing else */
+  topic?: string
+  /** decide `-- liftoff:for` as if this were that environment (a scratch database rebuilt to check it) */
+  as?: string
 }
 
 const waiting = (log: Log) => () => log('info', 'Another run holds the lock on this database; waiting')
@@ -233,6 +256,8 @@ export async function migrate(cfg: Config, envName: string | undefined, opts: Mi
     if (!target) throw configError(`target '${opts.target}' must be numbers separated by . or _`)
   }
   if (opts.only && opts.target !== undefined) throw configError('use --only or --target, not both')
+  if (opts.topic !== undefined && (opts.only || opts.target !== undefined)) throw configError('use --topic on its own, without --only or --target')
+  if (opts.topic !== undefined) parseExpression(opts.topic, '--topic')
   const scripts = scan(cfg.migrationsDir())
   const note = versionNote(scripts)
   if (note) log('warn', note)
@@ -243,14 +268,14 @@ export async function migrate(cfg: Config, envName: string | undefined, opts: Mi
     log('info', `Connected to ${name} (${s.database} as ${s.user}, ${c.engine} ${s.version})`)
     const [schema, table] = [cfg.historySchema(), cfg.project.history_table]
     if (opts.dryRun) {
-      const result = dryRun(cfg, c.engine, name, scripts, await c.readHistory(schema, table), opts, target)
+      const result = dryRun(cfg, c.engine, name, targetOf(cfg, name, env, opts.as), scripts, await c.readHistory(schema, table), opts, target)
       result.execution_time_ms = Date.now() - started
       return result
     }
     const held = await c.lock(schema, table, cfg.project.lock, waiting(log), () => open(name, env))
     let result: MigrateResult
     try {
-      result = await migrateLocked(c, cfg, name, scripts, opts, target, log)
+      result = await migrateLocked(c, cfg, name, targetOf(cfg, name, env, opts.as), scripts, opts, target, log)
     } finally {
       // Released on failure too (a dropped connection or an expired lease would free it as well).
       await held.release()
@@ -263,6 +288,11 @@ export async function migrate(cfg: Config, envName: string | undefined, opts: Mi
 /** The scripts migrate would run, in order. */
 function plan(infos: MigrationInfo[], opts: MigrateOptions, target: Version | undefined): MigrationInfo[] {
   if (opts.only) return picked(infos, opts.only)
+  if (opts.topic !== undefined) {
+    const e = parseExpression(opts.topic, '--topic')
+    const runnable: State[] = ['pending', 'ignored', 'outdated']
+    return infos.filter((i) => (i.kind === 'versioned' || i.kind === 'repeatable') && runnable.includes(i.state) && holds(e, new Set((i.topics ?? []).map((t) => t.toLowerCase()))))
+  }
   return infos.filter((i) => {
     let runs = false
     if (i.kind === 'versioned') runs = i.state === 'pending' || (i.state === 'ignored' && !!opts.outOfOrder)
@@ -381,15 +411,15 @@ function sqlFor(cfg: Config, env: string, s: Script): string {
   return applyPlaceholders(s.sql, cfg.placeholders(env), cfg.usesPlaceholders(), s.fileName)
 }
 
-function dryRun(cfg: Config, engine: EngineName, name: string, scripts: Script[], rows: HistoryRow[], opts: MigrateOptions, target: Version | undefined): MigrateResult {
+function dryRun(cfg: Config, engine: EngineName, name: string, as: Target, scripts: Script[], rows: HistoryRow[], opts: MigrateOptions, target: Version | undefined): MigrateResult {
   const d = dialect[engine]
   const q = engine === 'SQL Server' ? quoteTsql : quoteIdent
-  let infos = compute(scripts, rows)
-  validate(infos, { ...opts, outOfOrder: opts.outOfOrder || !!opts.only })
+  let infos = compute(scripts, rows, as)
+  validate(infos, { ...opts, outOfOrder: opts.outOfOrder || !!opts.only || opts.topic !== undefined })
   const [schema, table] = [q(cfg.historySchema()), q(cfg.project.history_table)]
   let sql = `-- Dry run for ${name}: nothing below has been executed.\n-- History table: ${schema}.${table}\n`
   const result: MigrateResult = { environment: name, applied: [], execution_time_ms: 0, dry_run_sql: null }
-  const b = rows.length === 0 && !opts.only ? baselineScript(scripts, target) : undefined
+  const b = rows.length === 0 && !opts.only && opts.topic === undefined ? baselineScript(scripts, target) : undefined
   if (b) {
     sql += `\n-- ${b.fileName} (empty database: built from the baseline script)\n${d.begin};\n${sqlFor(cfg, name, b).trimEnd()}\nCOMMIT;\n`
     result.applied.push({ script: b.fileName, version: b.version?.text ?? null, execution_time_ms: 0, transactional: true })
@@ -414,7 +444,7 @@ function dryRun(cfg: Config, engine: EngineName, name: string, scripts: Script[]
   return result
 }
 
-async function migrateLocked(c: Conn, cfg: Config, name: string, scripts: Script[], opts: MigrateOptions, target: Version | undefined, log: Log): Promise<MigrateResult> {
+async function migrateLocked(c: Conn, cfg: Config, name: string, as: Target, scripts: Script[], opts: MigrateOptions, target: Version | undefined, log: Log): Promise<MigrateResult> {
   const [schema, table] = [cfg.historySchema(), cfg.project.history_table]
   await c.ensureHistory(schema, table)
   let rows = await c.readHistory(schema, table)
@@ -422,7 +452,7 @@ async function migrateLocked(c: Conn, cfg: Config, name: string, scripts: Script
 
   // Scripts that create what already exists fail half-way; ask for a baseline instead.
   // (--only never builds from a B script: it runs what it names.)
-  const useBaseline = !opts.only
+  const useBaseline = !opts.only && opts.topic === undefined
   if (!rows.length && !opts.allowNonEmpty && !(useBaseline && baselineScript(scripts, target)) && (await c.userObjects(cfg.project.schemas, table)) > 0) {
     throw notBaselinedError(name)
   }
@@ -448,12 +478,13 @@ async function migrateLocked(c: Conn, cfg: Config, name: string, scripts: Script
     result.applied.push({ script: b.fileName, version: b.version?.text ?? null, execution_time_ms: Date.now() - t, transactional: true })
     rows = await c.readHistory(schema, table)
   }
-  const infos = compute(scripts, rows)
-  // Being older than what ran stops a plain migrate; with --only, only the picked scripts run.
-  validate(infos, { ...opts, outOfOrder: opts.outOfOrder || !!opts.only })
+  const infos = compute(scripts, rows, as)
+  // Being older than what ran stops a plain migrate; with --only or --topic, only the picked scripts run.
+  validate(infos, { ...opts, outOfOrder: opts.outOfOrder || !!opts.only || opts.topic !== undefined })
 
   const todo = plan(infos, opts, target)
-  if (opts.only) {
+  if (opts.topic !== undefined && !todo.length) log('info', `No pending script on ${name} has a topic matching '${opts.topic}'`)
+  if (opts.only || opts.topic !== undefined) {
     result.left_behind = leftBehind(infos, todo)
     if (result.left_behind.length) {
       log('warn', `Not run, and older than what ran: ${result.left_behind.join(', ')}. A plain migrate now needs --out-of-order to run them.`)
@@ -640,7 +671,8 @@ export async function clean(cfg: Config, envName: string | undefined, log: Log =
  */
 export async function markApplied(cfg: Config, envName: string | undefined, script: string, log: Log = quiet): Promise<void> {
   await withSession(cfg, envName, log, async (s) => {
-    const i = compute(s.scripts, s.rows).find((i) => i.script === script)
+    const env = cfg.pick(s.name)[1]
+    const i = compute(s.scripts, s.rows, { name: s.name, role: env.role }).find((i) => i.script === script)
     if (!i) throw configError(`no script named ${script} in the migrations folder`)
     if (i.state !== 'pending' && i.state !== 'outdated') throw validateError(`${script} is ${i.state.replaceAll('_', '')} on ${s.name}; only pending scripts can be recorded`)
     await record(s.c, s.scripts.find((x) => x.fileName === script)!, 0, true, s.schema, s.table, 'SQL')

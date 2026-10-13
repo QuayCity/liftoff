@@ -1,9 +1,9 @@
-import { AlertTriangle, ArrowDownToLine, CheckCircle2, CircleDashed, CircleSlash, Clock, Copy, FileQuestion, Info, Loader2, RotateCcw, Undo2, XCircle, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, ArrowDownToLine, CheckCircle2, CircleDashed, CircleSlash, Clock, Copy, EyeOff, FileQuestion, Info, Loader2, RotateCcw, Undo2, XCircle, type LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { IconButton, cx } from './controls'
 import { toneText } from './overlays'
 
-export type MigrationState = 'pending' | 'applied' | 'failed' | 'outdated' | 'ignored' | 'missing' | 'baseline' | 'undone' | 'future'
+export type MigrationState = 'pending' | 'applied' | 'failed' | 'outdated' | 'ignored' | 'missing' | 'baseline' | 'undone' | 'future' | 'excluded'
 
 // Colour is never the only cue: every state has its own icon and word.
 const pill: Record<MigrationState, [string, LucideIcon, string]> = {
@@ -16,6 +16,7 @@ const pill: Record<MigrationState, [string, LucideIcon, string]> = {
   baseline: ['Baseline', ArrowDownToLine, 'bg-accent-subtle text-accent'],
   undone: ['Undone', Undo2, 'bg-accent-subtle text-accent'],
   future: ['Future', CircleDashed, 'bg-accent-subtle text-accent'],
+  excluded: ['Not here', EyeOff, 'bg-surface-sunken text-muted'],
 }
 
 export function StatePill({ state }: { state: MigrationState }) {

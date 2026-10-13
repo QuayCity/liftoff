@@ -24,7 +24,7 @@ that fits your situation.
 | [Concepts](guide/concepts.md) | projects, environments and roles, the scratch database, scripts, the history table, the schema model, drift |
 | [Installing](guide/installing.md) | the `liftoff` program, the VS Code extension, the desktop app, what each needs |
 | [Project files and connections](guide/configuration.md) | `liftoff.toml`, `liftoff.user.toml`, connection URLs, passwords, Microsoft Entra ID, environment variables, placeholders, filters |
-| [Migration scripts](guide/scripts.md) | naming, numbering, transactions, `GO` batches, repeatable, undo and baseline scripts |
+| [Migration scripts](guide/scripts.md) | naming, numbering, transactions, `GO` batches, repeatable, undo and baseline scripts, scripts for some environments only, topics |
 | [Writing migrations from your changes](guide/generating.md) | `diff` and `generate`, data-loss warnings, hand-written scripts |
 | [Rules on your scripts](guide/rules.md) | `lint`: dropped tables, deletes without `WHERE`, grants, naming; severities, custom rules, allowing a finding |
 | [Deploying](guide/deploying.md) | `info`, `migrate`, `check`, drift, `validate`, `repair`, `undo`, running one script, `clean` |

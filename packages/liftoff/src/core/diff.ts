@@ -56,12 +56,12 @@ export function scratchEnv(cfg: Config, scratch: string | undefined): [string, E
 }
 
 /** Erases the scratch database and runs the migrations into it (up to `target` when given). Close the result. */
-export async function rebuildScratch(cfg: Config, name: string, env: Environment, target: string | undefined, log: runner.Log, skipRepeatables = false): Promise<Conn> {
+export async function rebuildScratch(cfg: Config, name: string, env: Environment, target: string | undefined, log: runner.Log, skipRepeatables = false, as?: string): Promise<Conn> {
   log('info', `Rebuilding scratch database '${name}' from migrations${target ? ` up to ${target}` : ''}`)
   const s = await open(name, env)
   try {
     await s.resetSchemas(cfg.project.schemas)
-    await runner.migrate(cfg, name, { outOfOrder: true, target, allowNonEmpty: true, skipRepeatables }, log)
+    await runner.migrate(cfg, name, { outOfOrder: true, target, allowNonEmpty: true, skipRepeatables, as }, log)
     return s
   } catch (e) {
     await s.close()

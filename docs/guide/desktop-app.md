@@ -66,7 +66,9 @@ file; `${env.NAME}` is kept as written.
 
 ### An environment
 
-The selected environment shows its scripts and their state on that database. Two tabs:
+The selected environment shows its scripts and their state on that database, with their topics;
+a script that is not for this environment ([`-- liftoff:for`](scripts.md#scripts-for-some-environments-only))
+is listed as **Not here**. Two tabs:
 
 **Migrations**: the scripts, with **Run only this** and **Mark as applied…** (record it without
 running it, for a database that already has its changes; it asks first) on each pending one, and

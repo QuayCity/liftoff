@@ -201,6 +201,7 @@ Options:
       --dry-run                      Print the SQL that would run instead of running it
       --allow-non-empty              Run every script on a database that has tables but no history (normally refused)
       --rerun-repeatables            Also re-run repeatable scripts that have not changed
+      --topic <EXPRESSION>           Run only the pending scripts whose -- liftoff:topic words match, e.g. 'JIRA-12' or 'billing and not experimental'
 ```
 
 ### check

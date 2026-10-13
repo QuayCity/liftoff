@@ -52,7 +52,8 @@ export async function check(cfg: Config, envName: string | undefined, scratch: s
     // "0" builds nothing: an environment without history should match an empty database.
     // Repeatables only when the environment ran some: they may need tables from later versions.
     const ranRepeatables = infos.some((i) => i.kind === 'repeatable' && i.state !== 'pending')
-    const s = await rebuildScratch(cfg, scratchName, scratchEnvironment, applied ?? '0', log, !ranRepeatables)
+    // Built as `name` would run them, so scripts meant for other environments do not count.
+    const s = await rebuildScratch(cfg, scratchName, scratchEnvironment, applied ?? '0', log, !ranRepeatables, name)
     try {
       const expected = await modelOf(cfg, s)
       if (opts.drift) {
@@ -69,7 +70,7 @@ export async function check(cfg: Config, envName: string | undefined, scratch: s
       }
       if (opts.changes) {
         log('info', 'Running the pending scripts on the scratch database')
-        await runner.migrate(cfg, scratchName, { outOfOrder: true }, log)
+        await runner.migrate(cfg, scratchName, { outOfOrder: true, as: name }, log)
         const after = await modelOf(cfg, s)
         report.changes = diffSchemas(after, expected)
         if (!report.not_compared.length) report.not_compared = notComparedBetween(after, expected, 'after the scripts', 'now')

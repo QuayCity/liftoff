@@ -11,7 +11,8 @@ Flyway Project**.
 ## The Environments view
 
 Every environment in `liftoff.toml` and `liftoff.user.toml`, and under each one every migration
-script with its state there: pending, applied, failed, or edited since it ran. Click a script to
+script with its state there: pending, applied, failed, edited since it ran, or not for this
+environment ([`-- liftoff:for`](scripts.md#scripts-for-some-environments-only)), with its topics. Click a script to
 open it. The view reloads when either file is saved.
 
 An environment's menu (right-click, or the icons on hover):

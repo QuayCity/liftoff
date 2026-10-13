@@ -5,6 +5,9 @@ import * as path from 'node:path'
 import { test } from 'node:test'
 import {
   applyPlaceholders,
+  holds,
+  isFor,
+  parseExpression,
   checksum,
   compareVersions,
   needsNoTransaction,
@@ -117,4 +120,34 @@ test('from V9990 on, a note says to rebaseline with a restart', () => {
   assert.match(versionNote([mk('baseline', '9995')]) ?? '', /9995/)
   assert.equal(versionNote([mk('versioned', '20261008.1104')]), undefined, 'timestamps have no limit')
   assert.equal(versionNote([]), undefined)
+})
+
+test('for and topic expressions: not, and, or (or a comma), parentheses; no case', () => {
+  const t = (expr: string, ...words: string[]) => holds(parseExpression(expr, 'x'), new Set(words))
+  assert.equal(t('prod', 'prod'), true)
+  assert.equal(t('PROD', 'prod'), true)
+  assert.equal(t('not prod', 'test'), true)
+  assert.equal(t('dev, test', 'test'), true)
+  assert.equal(t('test or dev and eu', 'test'), true, 'and binds tighter than or')
+  assert.equal(t('(test or dev) and eu', 'test'), false)
+  assert.equal(t('!prod and not scratch', 'dev'), true)
+  for (const bad of ['', 'prod and', '(prod', 'prod)', 'and', 'prod test']) assert.throws(() => parseExpression(bad, 'V1__x.sql: liftoff:for'), /V1__x\.sql: liftoff:for/)
+})
+
+test('scripts carry their -- liftoff:for and -- liftoff:topic lines', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-for-'))
+  fs.writeFileSync(path.join(dir, 'V1__seed.sql'), '-- liftoff:for dev or test\n-- liftoff:topic JIRA-12, billing\ninsert into t values (1);\n')
+  fs.writeFileSync(path.join(dir, 'V2__plain.sql'), 'select 1;\n')
+  const [seed, plain] = scan(dir)
+  assert.deepEqual([seed.for, seed.topics], ['dev or test', ['JIRA-12', 'billing']])
+  assert.deepEqual([plain.for, plain.topics], [undefined, undefined])
+  assert.equal(isFor(seed, { name: 'qa', role: 'test' }), true, 'by role')
+  assert.equal(isFor(seed, { name: 'live', role: 'prod' }), false)
+  assert.equal(isFor(plain, { name: 'live', role: 'prod' }), true)
+  fs.writeFileSync(path.join(dir, 'V3__twice.sql'), '-- liftoff:for dev\n-- liftoff:for test\n')
+  assert.throws(() => scan(dir), /one -- liftoff:for line per script/)
+  fs.writeFileSync(path.join(dir, 'V3__twice.sql'), '-- liftoff:for dev and\n')
+  assert.throws(() => scan(dir), /V3__twice.sql: liftoff:for 'dev and': it ends too early/)
+  fs.writeFileSync(path.join(dir, 'V3__twice.sql'), '-- liftoff:topic not\n')
+  assert.throws(() => scan(dir), /'not' cannot be a topic/)
 })

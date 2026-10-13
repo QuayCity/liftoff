@@ -23,6 +23,7 @@ test('describe says when it ran and whether it was edited since', () => {
   assert.equal(describe(row('V1__a.sql', 'applied')), 'applied · 2026-10-08 12:00:00 UTC')
   assert.equal(describe(row('V1__a.sql', 'applied', true)), 'applied · edited after it ran · 2026-10-08 12:00:00 UTC')
   assert.equal(describe(row('V2__b.sql', 'pending')), 'pending')
+  assert.equal(describe({ ...row('V3__c.sql', 'excluded'), for: 'test', topics: ['JIRA-7'] }), 'not for this environment · for test · JIRA-7')
 })
 
 test('edited and failed scripts become editor problems, grouped per file', () => {

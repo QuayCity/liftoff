@@ -140,6 +140,9 @@ runs `V0007` and nothing else, and says which older pending scripts it left behi
 count as out of order: the next plain `migrate` refuses them until you run
 `migrate --out-of-order` (or `--only` them too).
 
+To run everything that belongs to one ticket or feature, give the scripts a topic and use
+`migrate --topic JIRA-142` (see [Topics](scripts.md#topics)).
+
 ## Mark a script as applied: `mark-applied`
 
 ```sh

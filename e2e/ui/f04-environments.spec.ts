@@ -108,6 +108,17 @@ test.describe('F04 Environments', () => {
     await expectNoA11yViolations(page, 'Checks with rule findings')
   })
 
+  test('F04-H9 a script not for this environment says so, with its for expression; topics show as badges', async ({ page }) => {
+    await page.getByRole('region', { name: 'local environment' }).click()
+    const table = page.getByRole('region', { name: 'local details' }).getByRole('table', { name: 'Migrations on local' })
+    const fixtures = table.getByRole('row').filter({ hasText: 'test fixtures' })
+    await expect(fixtures).toContainText('Not here')
+    await expect(fixtures).toContainText('for test')
+    await expect(fixtures.getByRole('button')).toHaveCount(0)
+    await expect(table.getByRole('row').filter({ hasText: 'tax' })).toContainText('JIRA-142')
+    await expectNoA11yViolations(page, 'Environments with an excluded script')
+  })
+
   test('X-A11Y Environments', async ({ page }) => {
     await expectNoA11yViolations(page, 'Environments (light)')
     await page.goto('/?open=1&ws=Environments&theme=dark')

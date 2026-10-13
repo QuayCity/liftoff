@@ -289,8 +289,16 @@ export function Environments({ project, onProject }: { project: Project; onProje
                 empty={<EmptyState icon={Database} text="No migration scripts yet. Write one from your changes in the Changes tab." />}
                 columns={[
                   { header: 'Version', cell: (r) => <span className="font-mono">{r.version ?? 'repeatable'}</span> },
-                  { header: 'Description', cell: (r) => <span className="block max-w-80 truncate" title={r.description}>{r.description}</span> },
-                  { header: 'State', cell: (r) => <span className="inline-flex items-center gap-2"><StatePill state={pillState(r.state)} />{r.checksum_mismatch && <span className="text-xs text-danger">changed after it ran</span>}</span> },
+                  {
+                    header: 'Description',
+                    cell: (r) => (
+                      <span className="inline-flex max-w-96 items-center gap-1.5">
+                        <span className="truncate" title={r.description}>{r.description}</span>
+                        {r.topics?.map((t) => <Badge key={t}>{t}</Badge>)}
+                      </span>
+                    ),
+                  },
+                  { header: 'State', cell: (r) => <span className="inline-flex items-center gap-2"><StatePill state={pillState(r.state)} />{r.checksum_mismatch && <span className="text-xs text-danger">changed after it ran</span>}{r.for !== undefined && <span className="text-xs text-muted">for {r.for}</span>}</span> },
                   { header: 'Ran on', cell: (r) => local(r.installed_on), className: 'text-muted whitespace-nowrap' },
                   { header: 'Took', cell: (r) => (r.execution_time_ms != null ? `${r.execution_time_ms} ms` : '—'), className: 'text-right tabular-nums' },
                   {

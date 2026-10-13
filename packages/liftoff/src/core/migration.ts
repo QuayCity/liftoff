@@ -44,6 +44,10 @@ export type Script = {
   sql: string
   /** a baseline script that starts the numbering again (`-- liftoff:restart` in it) */
   restart?: boolean
+  /** `-- liftoff:for <expression>`: the environments it runs on (by name or role); none: all */
+  for?: string
+  /** `-- liftoff:topic a, b`: what it belongs to (a ticket, a feature), for `migrate --topic` */
+  topics?: string[]
 }
 
 /** The line that marks a baseline script as a numbering restart (liftoff rebaseline --restart). */
@@ -91,7 +95,7 @@ export function scan(dir: string): Script[] {
       throw configError(`${f.name} is not valid UTF-8`)
     }
     const restart = parsed.kind === 'baseline' && new RegExp(`^${RESTART_MARK}\\b`, 'm').test(sql)
-    scripts.push({ kind: parsed.kind, version, description: parsed.description, fileName: f.name, path: file, checksum: checksum(bytes), sql, restart })
+    scripts.push({ kind: parsed.kind, version, description: parsed.description, fileName: f.name, path: file, checksum: checksum(bytes), sql, restart, ...marks(sql, f.name) })
   }
   for (const kind of ['versioned', 'undo', 'baseline'] as const) {
     const same = scripts.filter((s) => s.kind === kind).sort((a, b) => compareVersions(a.version, b.version))
@@ -107,6 +111,77 @@ export function scan(dir: string): Script[] {
       compareVersions(a.version, b.version) ||
       (a.description < b.description ? -1 : a.description > b.description ? 1 : 0),
   )
+}
+
+/** The `-- liftoff:for` and `-- liftoff:topic` lines of a script, checked. */
+function marks(sql: string, file: string): Pick<Script, 'for' | 'topics'> {
+  const out: Pick<Script, 'for' | 'topics'> = {}
+  const fors = [...sql.matchAll(/^[ \t]*--[ \t]*liftoff:for[ \t]+(.*?)[ \t]*\r?$/gm)].map((m) => m[1])
+  if (fors.length > 1) throw configError(`${file}: one -- liftoff:for line per script (combine them with and / or)`)
+  if (fors.length) {
+    parseExpression(fors[0], `${file}: liftoff:for`)
+    out.for = fors[0]
+  }
+  const topics = [...sql.matchAll(/^[ \t]*--[ \t]*liftoff:topics?[ \t]+(.*?)[ \t]*\r?$/gm)].flatMap((m) => m[1].split(/[\s,]+/).filter(Boolean))
+  for (const t of topics) if (!WORD.test(t) || OPERATORS.has(t.toLowerCase())) throw configError(`${file}: '${t}' cannot be a topic (letters, digits, - _ . and no and / or / not)`)
+  if (topics.length) out.topics = [...new Set(topics)]
+  return out
+}
+
+/** A word in a `for` or `topic` expression: an environment name, a role or a topic. */
+const WORD = /^[\p{L}\p{N}_.-]+$/u
+const OPERATORS = new Set(['and', 'or', 'not'])
+
+type Expr = { word: string } | { not: Expr } | { and: Expr[] } | { or: Expr[] }
+
+/**
+ * `prod or test`, `not prod`, `dev, test` (a comma is or), `(eu or us) and not prod`. `not` binds
+ * tightest, then `and`, then `or`. Words compare without case.
+ */
+export function parseExpression(text: string, what: string): Expr {
+  const tokens = text.match(/[()!,]|[^\s()!,]+/g) ?? []
+  let i = 0
+  const fail = (msg: string): never => {
+    throw configError(`${what} '${text}': ${msg}`)
+  }
+  const or = (): Expr => {
+    const parts = [and()]
+    while (tokens[i] === ',' || tokens[i]?.toLowerCase() === 'or') (i++, parts.push(and()))
+    return parts.length === 1 ? parts[0] : { or: parts }
+  }
+  const and = (): Expr => {
+    const parts = [not()]
+    while (tokens[i]?.toLowerCase() === 'and') (i++, parts.push(not()))
+    return parts.length === 1 ? parts[0] : { and: parts }
+  }
+  const not = (): Expr => {
+    const t = tokens[i++]
+    if (t === undefined) return fail('it ends too early')
+    if (t === '!' || t.toLowerCase() === 'not') return { not: not() }
+    if (t === '(') {
+      const e = or()
+      if (tokens[i++] !== ')') fail('a ( has no )')
+      return e
+    }
+    if (!WORD.test(t) || OPERATORS.has(t.toLowerCase())) return fail(`unexpected '${t}'`)
+    return { word: t.toLowerCase() }
+  }
+  const e = or()
+  if (i < tokens.length) fail(`unexpected '${tokens[i]}'`)
+  return e
+}
+
+/** Whether the expression holds when exactly `words` are true. */
+export function holds(e: Expr, words: Set<string>): boolean {
+  if ('word' in e) return words.has(e.word)
+  if ('not' in e) return !holds(e.not, words)
+  if ('and' in e) return e.and.every((x) => holds(x, words))
+  return e.or.some((x) => holds(x, words))
+}
+
+/** Whether a script runs on an environment: its `for` expression against the name and the role. */
+export function isFor(s: Pick<Script, 'for' | 'fileName'>, env: { name: string; role: string }): boolean {
+  return s.for === undefined || holds(parseExpression(s.for, `${s.fileName}: liftoff:for`), new Set([env.name.toLowerCase(), env.role.toLowerCase()]))
 }
 
 /**

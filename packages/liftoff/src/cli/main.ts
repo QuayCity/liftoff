@@ -274,13 +274,14 @@ const COMMANDS: Record<string, Command> = {
       'dry-run': { type: 'boolean', help: 'Print the SQL that would run instead of running it' },
       'allow-non-empty': { type: 'boolean', help: 'Run every script on a database that has tables but no history (normally refused)' },
       'rerun-repeatables': { type: 'boolean', help: 'Also re-run repeatable scripts that have not changed' },
+      topic: { type: 'string', help: "Run only the pending scripts whose -- liftoff:topic words match, e.g. 'JIRA-12' or 'billing and not experimental'", value: 'EXPRESSION' },
     },
     async run(ctx, v) {
       const cfg = load(ctx)
       const r = await runner.migrate(
         cfg,
         ctx.env,
-        { outOfOrder: flag(v, 'out-of-order'), target: str(v, 'target'), dryRun: flag(v, 'dry-run'), allowNonEmpty: flag(v, 'allow-non-empty'), rerunRepeatables: flag(v, 'rerun-repeatables'), only: v.only as string[] | undefined, acceptDifferences: flag(v, 'accept-differences'), scratch: str(v, 'scratch') },
+        { outOfOrder: flag(v, 'out-of-order'), target: str(v, 'target'), dryRun: flag(v, 'dry-run'), allowNonEmpty: flag(v, 'allow-non-empty'), rerunRepeatables: flag(v, 'rerun-repeatables'), only: v.only as string[] | undefined, topic: str(v, 'topic'), acceptDifferences: flag(v, 'accept-differences'), scratch: str(v, 'scratch') },
         log,
       )
       return [r, r.dry_run_sql ?? `Applied ${r.applied.length} migration(s) to ${r.environment} in ${r.execution_time_ms} ms`]

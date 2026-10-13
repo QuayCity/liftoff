@@ -24,10 +24,14 @@ export type Project = {
 export type Recent = { name: string; path: string; exists: boolean }
 export type EnvInput = { url: string; user: string | null; password: string | null; role: Role; allow_clean: boolean }
 export type ServerInfo = { version: string; user: string; database: string }
-export type State = 'pending' | 'applied' | 'failed' | 'outdated' | 'ignored' | 'below_baseline' | 'missing' | 'baseline' | 'future'
+export type State = 'pending' | 'applied' | 'failed' | 'outdated' | 'ignored' | 'below_baseline' | 'missing' | 'baseline' | 'future' | 'excluded'
 export type MigrationInfo = {
   kind: 'versioned' | 'repeatable' | 'undo' | 'baseline'; version: string | null; description: string; script: string
   state: State; installed_on: string | null; execution_time_ms: number | null; checksum_mismatch: boolean
+  /** `-- liftoff:for`: the environments it runs on */
+  for?: string
+  /** `-- liftoff:topic` words */
+  topics?: string[]
 }
 export type MigrateResult = {
   environment: string; applied: { script: string; version: string | null; execution_time_ms: number; transactional: boolean }[]; execution_time_ms: number
@@ -377,15 +381,21 @@ const fake = {
   notGit: new URLSearchParams(location.search).has('nogit'),
 }
 const fakeProject = (): Project => ({ ...fake.project, has_scripts: !new URLSearchParams(location.search).has('noscripts'), notes: new URLSearchParams(location.search).has('nearlimit') ? ['the scripts have reached version 9991; rebaseline with a restart (liftoff rebaseline --restart) so the numbering starts again at 0001'] : [] })
-const fakeInfo = (env: string): MigrationInfo[] =>
-  fake.scripts.map(([version, description], i) => {
+const fakeInfo = (env: string): MigrationInfo[] => [
+  ...fake.scripts.map(([version, description], i): MigrationInfo => {
     const done = i < (fake.applied[env] ?? 0)
     return {
       kind: 'versioned', version, description, script: `V${version}__${description.replaceAll(' ', '_')}.sql`,
       state: done ? 'applied' : 'pending', installed_on: done ? `2026-10-0${i + 1}T09:1${i}:00Z` : null,
       execution_time_ms: done ? 40 + i * 37 : null, checksum_mismatch: false,
+      ...(description.includes('tax') && { topics: ['JIRA-142'] }),
     }
-  })
+  }),
+  // Test fixtures (-- liftoff:for test): listed on the dev database as not for it.
+  ...(env === 'local'
+    ? [{ kind: 'repeatable', version: null, description: 'test fixtures', script: 'R__test_fixtures.sql', for: 'test', state: 'excluded', installed_on: null, execution_time_ms: null, checksum_mismatch: false } satisfies MigrationInfo]
+    : []),
+]
 
 const fakeApi: Api = {
   recentProjects: async () => [

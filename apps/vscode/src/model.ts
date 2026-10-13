@@ -37,6 +37,7 @@ export type State =
   | 'missing'
   | 'baseline'
   | 'future'
+  | 'excluded'
 
 /** One row of `liftoff info` */
 export type MigrationInfo = {
@@ -49,6 +50,10 @@ export type MigrationInfo = {
   execution_time_ms: number | null
   /** applied, but the file was edited afterwards */
   checksum_mismatch: boolean
+  /** `-- liftoff:for`: the environments it runs on */
+  for?: string
+  /** `-- liftoff:topic` words */
+  topics?: string[]
 }
 
 /** `liftoff migrate` */
@@ -118,6 +123,7 @@ export const stateText: Record<State, string> = {
   missing: 'applied, file missing',
   baseline: 'baseline',
   future: 'applied, newer than these files',
+  excluded: 'not for this environment',
 }
 
 /** Codicon names (https://code.visualstudio.com/api/references/icons-in-labels). */
@@ -131,6 +137,7 @@ export const stateIcon: Record<State, string> = {
   missing: 'question',
   baseline: 'milestone',
   future: 'arrow-up',
+  excluded: 'eye-closed',
 }
 
 /** "2 pending", "up to date", "1 failed, 3 pending" */
@@ -147,7 +154,8 @@ export function summary(infos: MigrationInfo[]): string {
 export function describe(info: MigrationInfo): string {
   const when = info.installed_on ? ` · ${info.installed_on.replace('T', ' ').replace('Z', ' UTC')}` : ''
   const edited = info.checksum_mismatch ? ' · edited after it ran' : ''
-  return stateText[info.state] + edited + (info.state === 'applied' ? when : '')
+  const marks = (info.for !== undefined ? ` · for ${info.for}` : '') + (info.topics?.length ? ` · ${info.topics.join(', ')}` : '')
+  return stateText[info.state] + edited + (info.state === 'applied' ? when : '') + marks
 }
 
 export type Problem = { script: string; severity: 'error' | 'warning'; message: string }
