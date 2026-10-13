@@ -40,6 +40,43 @@ export function Environments({ project, onProject }: { project: Project; onProje
   const [captured, setCaptured] = useState<{ env: string; g: Generated } | null>(null)
   // Drift results from the Checks tab, shown on the board until the next check.
   const [drift, setDrift] = useState<Record<string, boolean>>({})
+
+  // The cards' order: dragged, or Alt+Left / Alt+Right on a name. Written as `order` in the files.
+  const [dragging, setDragging] = useState<string | null>(null)
+  const [over, setOver] = useState<string | null>(null)
+  const reorder = (name: string, to: number) => {
+    const names = envs.map((e) => e.name).filter((n) => n !== name)
+    names.splice(Math.max(0, Math.min(to, names.length)), 0, name)
+    if (names.every((n, i) => n === envs[i].name)) return
+    api.envOrder(project.root, names).then(onProject, (e) => toast({ tone: 'danger', title: `The order was not saved: ${errorText(e)}` }))
+  }
+  const dragFor = (name: string, index: number) => ({
+    dragging: dragging === name,
+    over: over === name && dragging !== null && dragging !== name,
+    props: {
+      draggable: true,
+      onDragStart: (e: React.DragEvent) => {
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', name)
+        setDragging(name)
+      },
+      onDragOver: (e: React.DragEvent) => {
+        if (!dragging) return
+        e.preventDefault()
+        setOver(name)
+      },
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault()
+        if (dragging) reorder(dragging, index)
+        setDragging(null)
+        setOver(null)
+      },
+      onDragEnd: () => {
+        setDragging(null)
+        setOver(null)
+      },
+    },
+  })
   const [importFor, setImportFor] = useState<string | null>(null)
   const [notBaselined, setNotBaselined] = useState<string | null>(null)
   // A database whose objects differ from the baseline script it would be marked with.
@@ -197,8 +234,9 @@ export function Environments({ project, onProject }: { project: Project; onProje
     <div className="flex flex-col gap-6 p-6">
       {!project.has_scripts && envs.length > 0 && <AdoptPrompt envs={envs} busy={running !== null} onAdopt={adoptDb} />}
       <div className="flex gap-4 overflow-x-auto pb-1">
-        {envs.map((e) => (
-          <EnvironmentColumn key={e.name} env={column(e)} selected={e.name === selected} busy={running !== null} onOpen={() => setSelected(e.name)} onRun={() => run(e.name)} />
+        {envs.map((e, i) => (
+          <EnvironmentColumn key={e.name} env={column(e)} selected={e.name === selected} onOpen={() => setSelected(e.name)}
+            onMove={(by) => reorder(e.name, i + by)} drag={dragFor(e.name, i)} />
         ))}
         <button
           onClick={() => setDialog({})}

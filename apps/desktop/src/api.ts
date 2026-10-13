@@ -202,6 +202,8 @@ type Api = {
   convertFlyway(path: string): Promise<{ report: ConvertReport; project: Project }>
   historyImport(path: string, env: string, table: string, acceptEdited: boolean): Promise<HistoryImport>
   envSave(path: string, name: string, env: EnvInput, shared: boolean): Promise<Project>
+  /** Lists the environments in this order (writes `order` in their files). */
+  envOrder(path: string, names: string[]): Promise<Project>
   envTest(path: string, name: string): Promise<ServerInfo>
   /** `path` and `name` when editing a saved environment: its saved password and URL fill the gaps */
   envTestDraft(env: EnvInput, path?: string, name?: string): Promise<ServerInfo>
@@ -271,6 +273,7 @@ const real: Api = {
   convertFlyway: (path) => invoke('project_convert_flyway', { path }),
   historyImport: (path, env, table, acceptEdited) => invoke('history_import', { path, env, table, acceptEdited }),
   envSave: (path, name, env, shared) => invoke('env_save', { path, name, env, shared }),
+  envOrder: (path, names) => invoke('env_order', { path, names }),
   envTest: (path, name) => invoke('env_test', { path, name }),
   envTestDraft: (env, path, name) => invoke('env_test_draft', { env, path, name }),
   migrationsInfo: (path, env) => invoke('migrations_info', { path, env }),
@@ -346,9 +349,9 @@ const fake = {
     root: 'C:/repos/shop-db', name: 'shop-db', engine: 'postgresql', schemas: ['public'], migrations: 'migrations', history_table: 'liftoff_schema_history', filters: [], lock: 'advisory' as LockMode, has_scripts: true, notes: [],
     environments: [
       { name: 'local', role: 'dev', url: 'postgres://me@localhost:5432/shop', user: null, has_password: true, allow_clean: false, shared: true },
-      { name: 'scratch', role: 'scratch', url: 'postgres://me@localhost:5432/shop_scratch', user: null, has_password: true, allow_clean: false, shared: true },
       { name: 'staging', role: 'test', url: 'postgres://deploy@staging.internal:5432/shop', user: null, has_password: true, allow_clean: false, shared: true },
       { name: 'production', role: 'prod', url: 'postgres://deploy@prod.internal:5432/shop', user: null, has_password: true, allow_clean: false, shared: true },
+      { name: 'scratch', role: 'scratch', url: 'postgres://me@localhost:5432/shop_scratch', user: null, has_password: true, allow_clean: false, shared: true },
     ],
   } as Project,
   scripts: [
@@ -455,6 +458,11 @@ const fakeApi: Api = {
     return { environment: env, imported: 4, skipped: ['rank 0: "public" (schema creation marker)'], edited: [], attention: [] }
   },
   envSave: async () => fakeProject(),
+  envOrder: async (_path, names) => {
+    const all = fake.project.environments
+    fake.project.environments = [...names.map((n) => all.find((e) => e.name === n)!), ...all.filter((e) => !names.includes(e.name))]
+    return fakeProject()
+  },
   envTest: async (_p, name) => {
     await wait(400)
     if (name === 'production') throw fail('LIFTOFF_CONNECT', "could not connect to 'production': timed out", 10)

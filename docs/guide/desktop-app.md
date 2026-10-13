@@ -34,8 +34,14 @@ problem and the screens keep the last good state.
 
 ## Environments
 
-The list on the left has every environment with its role. **Add environment** opens the
-connection dialog.
+Each environment has a card along the top: its role, whether it connects, how many scripts are
+pending, when it last ran, and drift. Click a card to show that environment below. **Add
+environment** opens the connection dialog.
+
+The cards are in the project's order: dev, test, prod, and the scratch database last, unless
+you change it. **Drag a card** to another place, or press Alt+Left / Alt+Right on its name; the
+order is written as `order` in `liftoff.toml` (or `liftoff.user.toml` for an environment that
+is only yours). A new environment goes after the others, and a scratch database stays last.
 
 ### The connection dialog
 

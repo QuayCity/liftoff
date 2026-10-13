@@ -124,16 +124,16 @@ it). Commit message `customers`, then **Commit 4 files**.
 ## 3. Deploy to test and production
 
 **Do:** **Environments**. Each environment has a card: connected, how many scripts are pending,
-when it last ran, drift. Click **test**'s name on its card. **See:** V0001 **pending**.
+when it last ran, drift. Click **test**'s card. **See:** V0001 **pending**.
 
-**Do:** **Run pending** (on the card, or below the list). **See:** the log, then V0001 **applied**, with the time.
+**Do:** **Run pending**, below the list of scripts. **See:** the log, then V0001 **applied**, with the time.
 
 **Say:** "Each script runs in a transaction, and the database keeps a history of what ran. Run it
 again and nothing happens."
 
 **Say:** "Before production I want to know three things, without changing anything."
 
-**Do:** click **prod**'s name, then the **Checks** tab. Click each in turn:
+**Do:** click **prod**'s card, then the **Checks** tab. Click each in turn:
 
 | click | see | say |
 | --- | --- | --- |

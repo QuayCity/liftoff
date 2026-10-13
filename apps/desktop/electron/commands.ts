@@ -9,10 +9,10 @@ import * as compare from '../../../packages/liftoff/src/core/compare.ts'
 import { DataSession } from '../../../packages/liftoff/src/core/datacompare.ts'
 import { rebaseline } from '../../../packages/liftoff/src/core/rebaseline.ts'
 import { adopt } from '../../../packages/liftoff/src/core/adopt.ts'
-import { Config, init, interpolate, PROJECT_FILE, readSettings, redactUrl, saveProject, saveSettings, type Environment, type Project, type Role } from '../../../packages/liftoff/src/core/config.ts'
+import { Config, init, interpolate, orderEnvironments, PROJECT_FILE, readSettings, redactUrl, saveProject, saveSettings, type Environment, type Project, type Role } from '../../../packages/liftoff/src/core/config.ts'
 import { open } from '../../../packages/liftoff/src/core/db.ts'
 import * as diff from '../../../packages/liftoff/src/core/diff.ts'
-import { LiftoffError } from '../../../packages/liftoff/src/core/errors.ts'
+import { configError, LiftoffError } from '../../../packages/liftoff/src/core/errors.ts'
 import * as flyway from '../../../packages/liftoff/src/core/flyway.ts'
 import * as git from '../../../packages/liftoff/src/core/git.ts'
 import { scan, versionNote } from '../../../packages/liftoff/src/core/migration.ts'
@@ -168,6 +168,12 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
     // As in the VS Code settings: an unchanged URL keeps what is written (variables, a password in
     // it); no password typed keeps the stored one; the environment's placeholders stay.
     saveSettings(root, { environments: [{ name: s(a, 'name'), url: env.url, user: env.user ?? null, password: env.password, role: env.role, allow_clean: env.allow_clean, shared: b(a, 'shared') }] })
+    return view(load(root))
+  },
+  env_order: (a) => {
+    const root = s(a, 'path')
+    if (!Array.isArray(a.names) || !a.names.every((n) => typeof n === 'string')) throw configError('names must be a list of environment names')
+    orderEnvironments(root, a.names as string[])
     return view(load(root))
   },
   env_test: (a) => {

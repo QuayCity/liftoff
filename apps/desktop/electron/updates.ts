@@ -51,8 +51,10 @@ export class Updater {
   private updated?: string
   private latest?: LatestRelease
   mode: UpdateMode
+  private readonly onChange: (info: UpdateInfo) => void
 
-  constructor(configDir: string, private readonly onChange: (info: UpdateInfo) => void) {
+  constructor(configDir: string, onChange: (info: UpdateInfo) => void) {
+    this.onChange = onChange
     this.settingsFile = path.join(configDir, 'settings.json')
     this.resultFile = path.join(configDir, 'update-result.json')
     const result = readSettings(this.resultFile)

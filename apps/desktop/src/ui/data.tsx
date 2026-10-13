@@ -1,5 +1,5 @@
 import { AlertTriangle, ChevronDown, ChevronRight, Minus, Pencil, Play, Plus, type LucideIcon } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type ReactNode } from 'react'
 import { Button, Checkbox, Select, cx } from './controls'
 import { Badge, CodeBlock, InlineAlert, Spinner } from './display'
 
@@ -228,16 +228,39 @@ export type Env = {
   lastRun?: { when: string; at: string; failed?: boolean }; drift?: 'none' | 'detected'
 }
 
-export function EnvironmentColumn({ env, selected, busy, onOpen, onRun }: { env: Env; selected?: boolean; busy?: boolean; onOpen: () => void; onRun: () => void }) {
+/**
+ * One environment's card. Clicking anywhere on it opens it. With `onMove`, it can be dragged to
+ * another place (`drag` from EnvironmentBoard), or moved with Alt+Left / Alt+Right on its name.
+ */
+export function EnvironmentColumn({ env, selected, onOpen, onMove, drag }: {
+  env: Env; selected?: boolean; onOpen: () => void; onMove?: (by: -1 | 1) => void
+  drag?: { dragging: boolean; over: boolean; props: HTMLAttributes<HTMLElement> & { draggable: boolean } }
+}) {
   const dot = { ok: 'bg-success', unreachable: 'bg-danger', checking: 'bg-border-input' }[env.status]
   const statusWord = { ok: 'Connected', unreachable: 'Unreachable', checking: 'Checking…' }[env.status]
   return (
     <section
       aria-label={`${env.name} environment`}
-      className={cx('flex w-60 shrink-0 flex-col gap-3 rounded-lg border bg-surface p-4 shadow-card', selected ? 'border-accent' : 'border-border')}
+      onClick={onOpen}
+      {...drag?.props}
+      className={cx(
+        'flex w-60 shrink-0 cursor-pointer flex-col gap-3 rounded-lg border bg-surface p-4 shadow-card hover:border-accent/60',
+        selected ? 'border-accent' : 'border-border', drag?.dragging && 'opacity-50', drag?.over && 'ring-2 ring-accent',
+      )}
     >
       <header className="flex items-center justify-between">
-        <button onClick={onOpen} className="text-lg hover:underline">{env.name}</button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onOpen() }}
+          onKeyDown={(e) => {
+            if (!onMove || !e.altKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return
+            e.preventDefault()
+            onMove(e.key === 'ArrowLeft' ? -1 : 1)
+          }}
+          aria-pressed={selected}
+          aria-keyshortcuts={onMove ? 'Alt+ArrowLeft Alt+ArrowRight' : undefined}
+          title={onMove ? 'Drag the card, or Alt+Left / Alt+Right, to change the order' : undefined}
+          className="text-lg hover:underline"
+        >{env.name}</button>
         <Badge>{env.role}</Badge>
       </header>
       <p className="flex items-center gap-2 text-sm text-muted"><span aria-hidden className={cx('size-2 rounded-pill', dot)} />{statusWord}</p>
@@ -255,7 +278,6 @@ export function EnvironmentColumn({ env, selected, busy, onOpen, onRun }: { env:
           <dd className={env.drift === 'detected' ? 'text-danger' : ''}>{env.drift === 'detected' ? 'Detected' : env.drift === 'none' ? 'None' : 'Not checked'}</dd>
         </dl>
       )}
-      <Button variant="primary" icon={Play} disabled={!env.pending || env.status !== 'ok' || busy} onClick={onRun}>Run pending</Button>
     </section>
   )
 }

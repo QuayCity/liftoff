@@ -90,6 +90,7 @@ Names use letters, digits, `-` and `_`.
 | `role` | `dev` | `dev`, `scratch`, `test` or `prod` (see [Concepts](concepts.md#environments-and-roles)) |
 | `allow_clean` | `false` | whether `liftoff clean` may erase this database. Scratch databases may always be erased |
 | `placeholders` | none | `${name}` values for this environment; they win over the project's |
+| `order` | none | where it is listed: lower first. Without one, after those with one: dev, test, prod, then scratch databases. The desktop app and the VS Code settings tab set it when you add an environment, and the desktop app when you drag one |
 
 `url`, `user` and `password` may hold `${env.NAME}`, which is replaced by the environment variable
 `NAME` when LiftOff connects. If the variable is not set, only that environment fails, with a

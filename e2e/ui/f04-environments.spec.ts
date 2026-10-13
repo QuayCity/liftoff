@@ -13,7 +13,8 @@ test.describe('F04 Environments', () => {
   test('F04-H1 run pending on staging', async ({ page }) => {
     const staging = page.getByRole('region', { name: 'staging environment' })
     await expect(staging.getByText('2 scripts')).toBeVisible()
-    await staging.getByRole('button', { name: 'Run pending' }).click()
+    await staging.click()
+    await page.getByRole('region', { name: 'staging details' }).getByRole('button', { name: 'Run pending' }).click()
     await expect(page.getByText('Ran 2 scripts on staging', { exact: true })).toBeVisible()
     const table = page.getByRole('table', { name: 'Migrations on staging' })
     await expect(table.getByText('Pending')).toHaveCount(0)
@@ -21,19 +22,34 @@ test.describe('F04 Environments', () => {
     await expect(page.getByRole('log')).toContainText('Applied V20261008.0840__daily_totals_view.sql')
   })
 
-  test('F04-N1 an unreachable target says so and cannot run', async ({ page }) => {
+  test('F04-N1 an unreachable target says so', async ({ page }) => {
     const prod = page.getByRole('region', { name: 'production environment' })
     await expect(prod.getByText('Unreachable')).toBeVisible()
-    await expect(prod.getByRole('button', { name: 'Run pending' })).toBeDisabled()
-    await prod.getByRole('button', { name: 'production' }).click()
+    await prod.click()
     await expect(page.getByRole('alert').filter({ hasText: "Can't read production" })).toBeVisible()
   })
 
   test('F04-E5 double click on Run pending runs once', async ({ page }) => {
-    const staging = page.getByRole('region', { name: 'staging environment' })
-    await staging.getByRole('button', { name: 'Run pending' }).dblclick()
+    await page.getByRole('region', { name: 'staging environment' }).click()
+    await page.getByRole('region', { name: 'staging details' }).getByRole('button', { name: 'Run pending' }).dblclick()
     await expect(page.getByText('Ran 2 scripts on staging', { exact: true })).toHaveCount(1)
     await expect(page.getByText('staging was already up to date', { exact: true })).toHaveCount(0)
+  })
+
+  test('F04-H6 a click anywhere on a card opens it; the order: by role, scratch last; drag or Alt+arrows to change it', async ({ page }) => {
+    const cards = page.getByRole('region', { name: / environment$/ })
+    const order = async () => (await cards.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')!.replace(' environment', ''))))
+    await expect.poll(order).toEqual(['local', 'staging', 'production', 'scratch'])
+    // Not on the name: on the card's text.
+    await page.getByRole('region', { name: 'local environment' }).getByText('Pending').click()
+    await expect(page.getByRole('region', { name: 'local details' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'local environment' }).getByRole('button', { name: 'local' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('region', { name: 'local environment' }).getByRole('button', { name: 'Run pending' })).toHaveCount(0)
+
+    await page.getByRole('region', { name: 'scratch environment' }).dragTo(page.getByRole('region', { name: 'staging environment' }))
+    await expect.poll(order).toEqual(['local', 'scratch', 'staging', 'production'])
+    await page.getByRole('region', { name: 'local environment' }).getByRole('button', { name: 'local' }).press('Alt+ArrowRight')
+    await expect.poll(order).toEqual(['scratch', 'local', 'staging', 'production'])
   })
 
   test('F09-E1/H1 clean needs the exact environment name', async ({ page }) => {

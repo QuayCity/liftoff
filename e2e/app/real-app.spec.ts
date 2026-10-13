@@ -82,7 +82,8 @@ test('F01-H2 open the project from Recent; every database connects', async () =>
 })
 
 test('F04-H1 run pending on test: Postgres gets the table and the history row', async () => {
-  await column('test').getByRole('button', { name: 'Run pending' }).click()
+  await column('test').click()
+  await details('test').getByRole('button', { name: 'Run pending' }).click()
   await expect(page.getByText('Ran 1 script on test', { exact: true })).toBeVisible()
   await expect(details('test').getByRole('table', { name: 'Migrations on test' }).getByText('Applied')).toBeVisible()
   expect(psql('shop_test', "select count(*) from liftoff_schema_history where success and script = 'V1__orders.sql'")).toBe('1')
@@ -129,7 +130,8 @@ test('F15-H2 run only one script on test: Postgres gets that one, not the older 
 test('F04-E2 a failing script is rolled back and its Postgres error is shown', async () => {
   fs.writeFileSync(path.join(project, 'migrations/V2__broken.sql'), 'create table half (id int);\nselect * from no_such_table;\n')
   await details('test').getByRole('button', { name: 'Refresh' }).click()
-  await column('test').getByRole('button', { name: 'Run pending' }).click()
+  await column('test').click()
+  await details('test').getByRole('button', { name: 'Run pending' }).click()
   await expect(page.getByRole('log')).toContainText('relation "no_such_table" does not exist')
   await expect(details('test').getByRole('table', { name: 'Migrations on test' }).getByText('Pending')).toBeVisible()
   expect(psql('shop_test', "select to_regclass('public.half') is null")).toBe('t')
@@ -138,7 +140,8 @@ test('F04-E2 a failing script is rolled back and its Postgres error is shown', a
 })
 
 test('F03-H1 write a migration from dev changes; it is recorded as applied on dev', async () => {
-  await column('dev').getByRole('button', { name: 'Run pending' }).click()
+  await column('dev').click()
+  await details('dev').getByRole('button', { name: 'Run pending' }).click()
   await expect(page.getByText('Ran 1 script on dev', { exact: true })).toBeVisible()
   psql('shop_dev', 'create table customers (id bigint generated always as identity primary key, email text not null unique);')
 
@@ -190,7 +193,8 @@ test('F07-N2 a database with tables but no history asks for a baseline instead o
   await column('test').getByRole('button', { name: 'test' }).click()
   await details('test').getByRole('tab', { name: 'Migrations' }).click()
   await details('test').getByRole('button', { name: 'Refresh' }).click()
-  await column('test').getByRole('button', { name: 'Run pending' }).click()
+  await column('test').click()
+  await details('test').getByRole('button', { name: 'Run pending' }).click()
   const ask = page.getByRole('dialog', { name: 'test already has tables' })
   await expect(ask).toBeVisible()
   await ask.getByRole('button', { name: 'Baseline…' }).click()
@@ -291,6 +295,17 @@ test('F17-H3 compare the data of dev and test in the real app, then apply: Postg
   expect(psql('shop_test', "select string_agg(id || ':' || note, ',' order by id) from prices where id in (7, 8, 5000)")).toBe('7:p7,8:p8')
   psql('shop_dev', 'drop table prices')
   psql('shop_test', 'drop table prices')
+})
+
+test('F04-H7 the cards: dev, test, scratch last; moving one writes order into liftoff.toml', async () => {
+  await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Environments' }).click()
+  const cards = page.getByRole('region', { name: / environment$/ })
+  const order = () => cards.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')!.replace(' environment', '')))
+  await expect.poll(order).toEqual(['dev', 'test', 'scratch'])
+  await column('test').getByRole('button', { name: 'test', exact: true }).press('Alt+ArrowLeft')
+  await expect.poll(order).toEqual(['test', 'dev', 'scratch'])
+  const toml = fs.readFileSync(path.join(project, 'liftoff.toml'), 'utf8')
+  for (const [name, n] of [['test', 1], ['dev', 2], ['scratch', 3]] as const) expect(toml).toMatch(new RegExp(`\\[environments\\.${name}\\][^[]*order = ${n}`))
 })
 
 test('X-CONSOLE no console errors in the real app', async () => {

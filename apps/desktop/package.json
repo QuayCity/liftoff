@@ -9,7 +9,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "node --test src/ui/linediff.test.ts electron/release.test.ts",
-    "build:electron": "node electron/build.mjs",
+    "build:electron": "tsc -p tsconfig.electron.json && node electron/build.mjs",
     "start": "npm run build && npm run build:electron && electron .",
     "dist": "npm run build && npm run build:electron && electron-builder"
   },

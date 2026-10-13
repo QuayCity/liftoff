@@ -144,7 +144,7 @@ function Page() {
           </Section>
 
           <Section title="Environments board">
-            <div className="flex gap-4 overflow-x-auto pb-2">{envs.map((e, i) => <EnvironmentColumn key={e.name} env={e} selected={i === 1} onOpen={() => {}} onRun={() => {}} />)}</div>
+            <div className="flex gap-4 overflow-x-auto pb-2">{envs.map((e, i) => <EnvironmentColumn key={e.name} env={e} selected={i === 1} onOpen={() => {}} />)}</div>
           </Section>
 
           <Section title="Migrations table + command bar">

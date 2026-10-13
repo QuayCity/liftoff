@@ -51,9 +51,22 @@ export type Environment = {
   allow_clean: boolean
   /** `${name}` values for this environment (for secrets use `${env.VAR}` as the value) */
   placeholders: Record<string, string>
+  /** Where it is listed: lower first. Without one: after those with one, by role (see byOrder). */
+  order?: number
 }
 
 const ROLES: Role[] = ['dev', 'scratch', 'test', 'prod']
+
+/** Without an `order`: dev, test, prod, and the scratch database, rarely looked at, last. */
+const ROLE_RANK: Record<Role, number> = { dev: 0, test: 1, prod: 2, scratch: 3 }
+
+/** The order environments are listed in everywhere: by `order`, then by role, then by name. */
+export function byOrder(a: { name: string; role: Role; order?: number | null }, b: { name: string; role: Role; order?: number | null }): number {
+  const [x, y] = [a.order ?? Number.MAX_SAFE_INTEGER, b.order ?? Number.MAX_SAFE_INTEGER]
+  if (x !== y) return x - y
+  if (a.role !== b.role) return ROLE_RANK[a.role] - ROLE_RANK[b.role]
+  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+}
 
 /** `*` any run of characters, `?` one character; case-sensitive like PostgreSQL names. */
 export function glob(pattern: string, text: string): boolean {
@@ -74,13 +87,13 @@ export function compares(project: Project, object: string, schema: string, name:
 export class Config {
   readonly root: string
   readonly project: Project
-  /** sorted by name */
+  /** in the order they are listed (byOrder) */
   readonly environments: Map<string, Environment>
 
   constructor(root: string, project: Project, environments: Map<string, Environment>) {
     this.root = root
     this.project = project
-    this.environments = new Map([...environments].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+    this.environments = new Map([...environments].sort(([a, x], [b, y]) => byOrder({ name: a, ...x }, { name: b, ...y })))
   }
 
   static load(root: string): Config {
@@ -232,7 +245,13 @@ function toEnvironment(name: string, t: Record<string, unknown>): Environment {
     role: role as Role,
     allow_clean: t.allow_clean === true,
     placeholders: t.placeholders === undefined ? {} : stringMap(t.placeholders, `environments.${name}.placeholders`),
+    order: t.order === undefined ? undefined : orderOf(t.order, name),
   }
+}
+
+function orderOf(v: unknown, name: string): number {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) throw configError(`environments.${name}.order must be a whole number, 0 or more`)
+  return v
 }
 
 function stringMap(v: unknown, what: string): Record<string, string> {
@@ -311,12 +330,14 @@ export function saveEnvironment(root: string, name: string, env: Environment, sh
       store = 'user_file'
     }
   }
+  const order = env.order ?? placeOf(root, name, env.role)
   const t: Record<string, unknown> = { url: env.url }
   if (env.user !== undefined) t.user = env.user
   if (password !== undefined && !shared) t.password = password
   t.role = env.role
   t.allow_clean = env.allow_clean
   if (Object.keys(env.placeholders).length) t.placeholders = env.placeholders
+  if (order !== undefined) t.order = order
 
   const file = path.join(root, shared ? PROJECT_FILE : USER_FILE)
   const table = fs.existsSync(file) ? readTable(file) : {}
@@ -334,6 +355,49 @@ export function saveEnvironment(root: string, name: string, env: Environment, sh
   }
   return store
 }
+
+/**
+ * The `order` an environment keeps when it is written again, or gets when it is new: after the
+ * others. A scratch database gets none, so it stays at the end. The first time, the ones without
+ * an order get theirs in the order they are listed now, so nothing moves.
+ */
+function placeOf(root: string, name: string, role: Role): number | undefined {
+  const projectFile = path.join(root, PROJECT_FILE)
+  if (!fs.existsSync(projectFile)) return role === 'scratch' ? undefined : 1
+  const files = readFiles(root)
+  const existing = rawEnvironment(files, name)
+  if (existing) return existing.order
+  if (role === 'scratch') return undefined
+  const listed = environmentNames(files).map((n) => ({ name: n, ...rawEnvironment(files, n)! })).sort(byOrder)
+  const placed = listed.filter((e) => e.order !== undefined || e.role !== 'scratch')
+  if (placed.some((e) => e.order === undefined)) {
+    orderEnvironments(root, placed.map((e) => e.name))
+    return placed.length + 1
+  }
+  return Math.max(0, ...placed.map((e) => e.order!)) + 1
+}
+
+/**
+ * Lists the environments in this order (the desktop app's drag and drop): `order` = 1, 2, 3, … in
+ * the file each one is defined in. Ones not named keep theirs.
+ */
+export function orderEnvironments(root: string, names: string[]): void {
+  const files = readFiles(root)
+  for (const n of names) if (!rawEnvironment(files, n)) throw configError(`no environment '${n}' in ${PROJECT_FILE} or ${USER_FILE}`)
+  const write: Record<'project' | 'user', boolean> = { project: false, user: false }
+  names.forEach((n, i) => {
+    // Where its URL is: the user file wins when both have one.
+    const where = envTable(files.user, n)?.url !== undefined || !envTable(files.project, n) ? 'user' : 'project'
+    const t = envTable(files[where], n)!
+    if (t.order === i + 1) return
+    t.order = i + 1
+    write[where] = true
+  })
+  if (write.project) writeTable(path.join(root, PROJECT_FILE), files.project)
+  if (write.user) writeTable(path.join(root, USER_FILE), files.user)
+}
+
+const environmentNames = (files: Files) => [...new Set([files.project, files.user].flatMap((t) => Object.keys((t.environments ?? {}) as object)))]
 
 /** Drops a plain-text password left in the user file once the keychain holds it. */
 function removeUserPassword(root: string, name: string): void {
@@ -431,6 +495,8 @@ export type EnvironmentSettings = {
   shared: boolean
   /** a password is stored: in the keychain, the user file, or the URL */
   has_password: boolean
+  /** as written; the list is already in the order shown (byOrder) */
+  order: number | null
 }
 
 export type Settings = { project: Project; environments: EnvironmentSettings[] }
@@ -477,8 +543,7 @@ function rawEnvironment(files: Files, name: string): Environment | undefined {
 export function readSettings(root: string): Settings {
   const files = readFiles(root)
   if (!isTable(files.project.project)) throw configError(`${PROJECT_FILE}: missing [project]`)
-  const names = new Set([files.project, files.user].flatMap((t) => Object.keys((t.environments ?? {}) as object)))
-  const environments = [...names].sort().map((name): EnvironmentSettings => {
+  const environments = environmentNames(files).map((name): EnvironmentSettings => {
     const e = rawEnvironment(files, name)!
     return {
       name,
@@ -489,9 +554,10 @@ export function readSettings(root: string): Settings {
       placeholders: e.placeholders,
       shared: envTable(files.project, name)?.url !== undefined,
       has_password: e.password !== undefined || redactUrl(e.url) !== e.url || keychainGet(root, name) !== undefined,
+      order: e.order ?? null,
     }
   })
-  return { project: toProject(files.project.project), environments }
+  return { project: toProject(files.project.project), environments: environments.sort(byOrder) }
 }
 
 /** Applies an editor's changes: removals, then the project, then each environment. */

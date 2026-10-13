@@ -3,7 +3,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { test } from 'node:test'
-import { applyEnvVars, compares, Config, glob, init, interpolate, PROJECT_FILE, readSettings, redactUrl, saveEnvironment, saveSettings, USER_FILE, type Environment, type Project } from './config.ts'
+import { applyEnvVars, compares, Config, glob, init, interpolate, orderEnvironments, PROJECT_FILE, readSettings, redactUrl, saveEnvironment, saveSettings, USER_FILE, type Environment, type Project } from './config.ts'
 import { keychainDelete } from './keychain.ts'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lo-cfg-'))
@@ -162,4 +162,32 @@ test('settings: read as written, saved without losing variables, passwords or th
   } finally {
     delete process.env.LO_DB_HOST
   }
+})
+
+test('environment order: by order, then dev, test, prod, scratch last; new ones go after; drag and drop renumbers', () => {
+  const dir = tmp()
+  init(dir, 'shop', 'postgresql')
+  const env = (role: Environment['role']): Environment => ({ url: 'postgres://h/db', role, allow_clean: false, placeholders: {} })
+  // Written by hand without any order: the default, scratch last, not alphabetical.
+  fs.appendFileSync(path.join(dir, PROJECT_FILE), '\n[environments.prod]\nurl = "postgres://h/p"\nrole = "prod"\n\n[environments.test]\nurl = "postgres://h/t"\nrole = "test"\n')
+  fs.writeFileSync(path.join(dir, USER_FILE), '[environments.scratch]\nurl = "postgres://h/s"\nrole = "scratch"\n\n[environments.dev]\nurl = "postgres://h/d"\nrole = "dev"\n')
+  assert.deepEqual([...Config.load(dir).environments.keys()], ['dev', 'test', 'prod', 'scratch'])
+
+  // A new one: the others get their place first (nothing moves), the new one comes after them, scratch stays last.
+  saveEnvironment(dir, 'acceptance', env('test'), true, false)
+  assert.deepEqual([...Config.load(dir).environments.keys()], ['dev', 'test', 'prod', 'acceptance', 'scratch'])
+  assert.deepEqual(readSettings(dir).environments.map((e) => [e.name, e.order]), [['dev', 1], ['test', 2], ['prod', 3], ['acceptance', 4], ['scratch', null]])
+  assert.match(fs.readFileSync(path.join(dir, USER_FILE), 'utf8'), /\[environments\.dev\][^[]*order = 1/, 'dev is private: its order is in the user file')
+
+  // Editing keeps the place; a second scratch database gets none either.
+  saveEnvironment(dir, 'test', env('test'), true, false)
+  saveEnvironment(dir, 'scratch2', env('scratch'), false, false)
+  assert.deepEqual([...Config.load(dir).environments.keys()], ['dev', 'test', 'prod', 'acceptance', 'scratch', 'scratch2'])
+
+  // Drag and drop: the new order is written, in each one's own file.
+  orderEnvironments(dir, ['dev', 'acceptance', 'test', 'prod'])
+  assert.deepEqual([...Config.load(dir).environments.keys()], ['dev', 'acceptance', 'test', 'prod', 'scratch', 'scratch2'])
+  assert.throws(() => orderEnvironments(dir, ['nope']), /no environment 'nope'/)
+  fs.appendFileSync(path.join(dir, PROJECT_FILE), '\n[environments.bad]\nurl = "postgres://h/b"\norder = 1.5\n')
+  assert.throws(() => Config.load(dir), /environments\.bad\.order must be a whole number/)
 })

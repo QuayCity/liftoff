@@ -18,7 +18,8 @@ test('F18-H1 a project without scripts adopts the database that has the tables',
 
 test('F18-H2 a database that differs from the baseline: listed, nothing changed until recorded anyway', async ({ page }) => {
   await page.goto('/?open=1&ws=Environments&differs')
-  await column(page, 'staging').getByRole('button', { name: 'Run pending' }).click()
+  await column(page, 'staging').click()
+  await page.getByRole('region', { name: 'staging details' }).getByRole('button', { name: 'Run pending' }).click()
   const dialog = page.getByRole('dialog', { name: 'staging differs from the baseline' })
   await expect(dialog.getByText('table:public.orders')).toBeVisible()
   await expect(dialog.getByText(/Nothing was changed/)).toBeVisible()
