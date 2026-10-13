@@ -90,3 +90,26 @@ test("U-H5 after an update: What's new, until it is opened", async ({ page }) =>
   await expect(page.getByRole('button', { name: /What's new/ })).toBeHidden()
   checkConsole()
 })
+
+test('U-H7 About LiftOff, on the start page and in a project: this version, the newest, what is new in it', async ({ page }) => {
+  const checkConsole = watchConsole(page)
+  await page.goto('/?update=available')
+  await page.getByRole('button', { name: 'About LiftOff' }).click()
+  const about = page.getByRole('dialog', { name: 'About LiftOff' })
+  await expect(about.getByText('This version').locator('xpath=following-sibling::dd[1]')).toHaveText('0.1.0')
+  await expect(about.getByText('Newest version').locator('xpath=following-sibling::dd[1]')).toHaveText('0.2.0')
+  const notes = about.getByRole('region', { name: "What's new in 0.2.0" })
+  await expect(notes.getByRole('heading')).toHaveText("What's new in 0.2.0 (2026-11-02)")
+  await expect(notes.getByText('• The desktop app updates itself')).toBeVisible()
+  await expect(notes.getByText('Full Changelog: v0.1.0...v0.2.0')).toBeVisible()
+  await expect(about.getByRole('button', { name: 'Update to 0.2.0' })).toBeVisible()
+  await expectNoA11yViolations(page, 'About LiftOff')
+  await about.getByRole('button', { name: 'Close' }).click()
+
+  // In a project, with nothing known yet: opening it checks once.
+  await page.goto('/?open=1&ws=Environments')
+  await page.getByRole('button', { name: 'About LiftOff' }).click()
+  await expect(page.getByRole('dialog', { name: 'About LiftOff' }).getByText('0.1.0, the one you have')).toBeVisible()
+  await expect(page.getByRole('region', { name: "What's new in 0.1.0" }).getByText('• The first release')).toBeVisible()
+  checkConsole()
+})

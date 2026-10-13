@@ -19,6 +19,11 @@ The project's name is in the title bar, with a button to close it. Along the top
 workspaces: **Environments**, **Changes**, **Scripts**, **Compare**, **Commit** and **Pipelines**;
 the gear opens **Settings**.
 
+**About LiftOff.** The ⓘ button, top right on the start page and in the title bar, shows this
+version, the newest LiftOff release, and what is new in it (its release notes), with **Check
+now** and **Open on GitHub**. The notes come from the same look-up as the updates; with update
+checks off, nothing is fetched until you click **Check now**.
+
 **Light or dark.** The sun / moon / screen button, top right on the start page and in the title
 bar, switches between light, dark and the same as the system, one click at a time. The choice is
 remembered on this computer for every project.

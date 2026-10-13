@@ -115,14 +115,23 @@ export type UpdateState =
   | { state: 'downloading'; version: string; percent: number }
   | { state: 'ready'; version: string }
   | { state: 'failed'; message: string }
-export type UpdateInfo = { mode: UpdateMode; current: string; status: UpdateState; updated?: string }
+export type LatestRelease = { version: string; page: string; notes: string; published: string | null }
+export type UpdateInfo = { mode: UpdateMode; current: string; status: UpdateState; updated?: string; latest?: LatestRelease }
 type UpdateAction = 'info' | 'mode' | 'check' | 'download' | 'install' | 'page' | 'notes'
 
 /** The browser preview pretends: ?update=available, ready or updated shows that state. */
 const fakeUpdate = (() => {
   let info: UpdateInfo = { mode: 'auto', current: '0.1.0', status: { state: 'idle' } }
   const shown = new URLSearchParams(location.search).get('update')
-  if (shown === 'available') info.status = { state: 'available', version: '0.2.0', page: 'https://github.com/sanderstad/liftoff/releases/tag/v0.2.0' }
+  const latest: LatestRelease = {
+    version: '0.2.0', page: 'https://github.com/sanderstad/liftoff/releases/tag/v0.2.0', published: '2026-11-02T09:00:00Z',
+    notes: `## What's Changed
+* Schema model files are named <type>/<schema>.<name>.sql
+* The desktop app updates itself
+
+**Full Changelog**: v0.1.0...v0.2.0`,
+  }
+  if (shown === 'available') info = { ...info, latest, status: { state: 'available', version: '0.2.0', page: latest.page } }
   if (shown === 'ready') info.status = { state: 'ready', version: '0.2.0' }
   if (shown === 'updated') info = { ...info, current: '0.2.0', updated: '0.2.0' }
   const listeners = new Set<(i: UpdateInfo) => void>()
@@ -141,7 +150,14 @@ const fakeUpdate = (() => {
         info = { ...info, updated: undefined }
         return set(info.status)
       }
-      if (action === 'check') return set(info.status.state === 'available' ? info.status : { state: 'latest', version: info.current })
+      if (action === 'check') {
+        if (!info.latest) {
+          const page = `https://github.com/sanderstad/liftoff/releases/tag/v${info.current}`
+          info = { ...info, latest: { version: info.current, page, published: '2026-10-13T07:10:55Z', notes: `## What's Changed
+* The first release` } }
+        }
+        return set(info.status.state === 'available' ? info.status : { state: 'latest', version: info.current })
+      }
       if (action === 'download' && info.status.state === 'available') {
         const version = info.status.version
         for (const percent of [30, 70]) setTimeout(() => set({ state: 'downloading', version, percent }), percent * 5)

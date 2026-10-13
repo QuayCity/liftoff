@@ -46,7 +46,8 @@ async function github(digest: string, zip?: Buffer) {
     if (req.url === '/latest') {
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({
-        tag_name: 'v9.9.9', html_url: 'https://github.com/sanderstad/liftoff/releases/tag/v9.9.9',
+        tag_name: 'v9.9.9', html_url: 'https://github.com/sanderstad/liftoff/releases/tag/v9.9.9', published_at: '2027-01-05T10:00:00Z',
+        body: ['## What changed', '* Something new in 9.9.9'].join(String.fromCharCode(10)),
         assets: [
           { name: 'LiftOff-Setup-9.9.9.exe', browser_download_url: `${base}/file`, size: setup.length, digest: `sha256:${digest}` },
           ...(zip ? [{ name: 'LiftOff-9.9.9-win-x64.zip', browser_download_url: `${base}/zip`, size: zip.length, digest: `sha256:${sha(zip)}` }] : []),
@@ -165,6 +166,24 @@ test('U-E2 a swap that failed: the old version starts again and says why; no aut
     await expect(page.getByText(/could not be installed: a file in .* is in use/).first()).toBeVisible()
     await expect(page.getByRole('button', { name: /Update to|Restart to update/ })).toBeHidden()
     expect(fs.existsSync(result)).toBe(false)
+  } finally {
+    await app.close()
+    server.close()
+  }
+})
+
+test('U-H8 About LiftOff: this version, the newest release and its notes, from the same lookup', async () => {
+  settings({ updates: 'notify', last_version: '0.1.0' })
+  const { server, url } = await github(sha(setup))
+  const { app, page } = await launch(url)
+  try {
+    await expect(page.getByRole('button', { name: 'Update to 9.9.9' })).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'About LiftOff' }).click()
+    const about = page.getByRole('dialog', { name: 'About LiftOff' })
+    await expect(about.getByText('Newest version').locator('xpath=following-sibling::dd[1]')).toHaveText('9.9.9')
+    const notes = about.getByRole('region', { name: "What's new in 9.9.9" })
+    await expect(notes.getByRole('heading')).toHaveText("What's new in 9.9.9 (2027-01-05)")
+    await expect(notes.getByText('• Something new in 9.9.9')).toBeVisible()
   } finally {
     await app.close()
     server.close()

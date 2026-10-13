@@ -27,7 +27,9 @@ export type UpdateState =
   | { state: 'ready'; version: string }
   | { state: 'failed'; message: string }
 /** `updated`: the version this start updated to, until its notes are opened (What's new). */
-export type UpdateInfo = { mode: UpdateMode; current: string; status: UpdateState; updated?: string }
+/** The newest release GitHub knows, whether or not it is newer than this one (the About window). */
+export type LatestRelease = { version: string; page: string; notes: string; published: string | null }
+export type UpdateInfo = { mode: UpdateMode; current: string; status: UpdateState; updated?: string; latest?: LatestRelease }
 
 const LATEST = 'https://api.github.com/repos/sanderstad/liftoff/releases/latest'
 const EVERY = 6 * 60 * 60 * 1000
@@ -47,6 +49,7 @@ export class Updater {
   private readonly settingsFile: string
   private readonly url: string
   private updated?: string
+  private latest?: LatestRelease
   mode: UpdateMode
 
   constructor(configDir: string, private readonly onChange: (info: UpdateInfo) => void) {
@@ -69,7 +72,7 @@ export class Updater {
   }
 
   info(): UpdateInfo {
-    return { mode: this.mode, current: app.getVersion(), status: this.status, ...(this.updated ? { updated: this.updated } : {}) }
+    return { mode: this.mode, current: app.getVersion(), status: this.status, ...(this.updated ? { updated: this.updated } : {}), ...(this.latest ? { latest: this.latest } : {}) }
   }
 
   /** Checks shortly after the start and then every six hours, unless updates are off. */
@@ -101,6 +104,7 @@ export class Updater {
       // A private repository answers 404 to a request without a token.
       if (!r.ok) throw new Error(r.status === 404 ? 'no published release found' : `GitHub answered ${r.status}`)
       const release = (await r.json()) as Release
+      this.latest = { version: release.tag_name.replace(/^v/, ''), page: release.html_url, notes: (release.body ?? '').trim(), published: release.published_at ?? null }
       if (release.draft || release.prerelease || !newer(release.tag_name, app.getVersion())) {
         this.set({ state: 'latest', version: app.getVersion() })
         return this.info()
@@ -216,7 +220,8 @@ export class Updater {
   }
 
   openPage(): void {
-    if (this.release?.html_url.startsWith('https://github.com/')) void shell.openExternal(this.release.html_url)
+    const page = this.latest?.page ?? this.release?.html_url
+    if (page?.startsWith('https://github.com/')) void shell.openExternal(page)
   }
 
   private set(status: UpdateState): UpdateInfo {

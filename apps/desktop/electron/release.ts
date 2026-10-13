@@ -2,7 +2,7 @@
 // so the tests run in plain Node.
 
 export type Asset = { name: string; browser_download_url: string; size: number; digest?: string | null }
-export type Release = { tag_name: string; html_url: string; draft?: boolean; prerelease?: boolean; assets: Asset[] }
+export type Release = { tag_name: string; html_url: string; draft?: boolean; prerelease?: boolean; assets: Asset[]; body?: string | null; published_at?: string | null }
 
 /** a > b for x.y.z versions (a leading v is ignored). */
 export function newer(a: string, b: string): boolean {

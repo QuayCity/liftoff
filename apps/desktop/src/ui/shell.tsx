@@ -5,6 +5,7 @@ import { Kbd, Spinner } from './display'
 import { Menu } from './overlays'
 import { ThemeToggle } from './theme'
 import { UpdateButton } from './update'
+import { AboutButton } from './about'
 
 export const workspaces = ['Changes', 'Environments', 'Compare', 'Scripts', 'Commit', 'Pipelines'] as const
 export type Workspace = (typeof workspaces)[number]
@@ -43,6 +44,7 @@ export function TitleBar({ project, workspace, tabsActive = true, onWorkspace, o
         </button>
       )}
       <UpdateButton />
+      <AboutButton />
       <ThemeToggle />
       <IconButton label="Settings" icon={Settings} onClick={onSettings} />
     </header>
