@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url'
 const desktop = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../apps/desktop')
 const electron = path.join(desktop, 'node_modules/electron/dist', process.platform === 'win32' ? 'electron.exe' : 'electron')
 const built = path.join(desktop, 'dist-electron/main.mjs')
+/** The version the app reports: tests set it as the last one started, so no What's new shows. */
+const version = (JSON.parse(fs.readFileSync(path.join(desktop, 'package.json'), 'utf8')) as { version: string }).version
 
 test.skip(process.platform !== 'win32' || !fs.existsSync(built), 'needs Windows and a built desktop app')
 test.describe.configure({ mode: 'serial' })
@@ -71,7 +73,7 @@ async function launch(url: string) {
 const downloaded = path.join(os.tmpdir(), 'liftoff-update', 'LiftOff-Setup-9.9.9.exe')
 
 test('U-H1 a newer release: Update, the download checked against its checksum, then Restart to update', async () => {
-  settings({ updates: 'notify', last_version: '0.1.0' })
+  settings({ updates: 'notify', last_version: version })
   const { server, url } = await github(sha(setup))
   const { app, page } = await launch(url)
   try {
@@ -85,7 +87,7 @@ test('U-H1 a newer release: Update, the download checked against its checksum, t
 })
 
 test('U-E1 a download that does not match its checksum is refused and removed', async () => {
-  settings({ updates: 'notify', last_version: '0.1.0' })
+  settings({ updates: 'notify', last_version: version })
   const { server, url } = await github('0'.repeat(64))
   const { app, page } = await launch(url)
   try {
@@ -100,7 +102,7 @@ test('U-E1 a download that does not match its checksum is refused and removed', 
 })
 
 test('U-H3 automatic, the default: the update downloads by itself and only Restart to update shows', async () => {
-  settings({ last_version: '0.1.0' })
+  settings({ last_version: version })
   const { server, url } = await github(sha(setup))
   const { app, page } = await launch(url)
   try {
@@ -120,17 +122,17 @@ test("U-H4 the first start after an update offers What's new: the release notes,
     await app.evaluate(({ shell }) => {
       shell.openExternal = async (url: string) => void ((globalThis as { opened?: string }).opened = url)
     })
-    await page.getByRole('button', { name: /^What's new in 0\.1\.0$/ }).click()
-    expect(await app.evaluate(() => (globalThis as { opened?: string }).opened)).toBe('https://github.com/sanderstad/liftoff/releases/tag/v0.1.0')
+    await page.getByRole('button', { name: `What's new in ${version}`, exact: true }).click()
+    expect(await app.evaluate(() => (globalThis as { opened?: string }).opened)).toBe(`https://github.com/sanderstad/liftoff/releases/tag/v${version}`)
     await expect(page.getByRole('button', { name: /What's new/ })).toBeHidden()
-    expect(JSON.parse(fs.readFileSync(settingsFile, 'utf8')).last_version).toBe('0.1.0')
+    expect(JSON.parse(fs.readFileSync(settingsFile, 'utf8')).last_version).toBe(version)
   } finally {
     await app.close()
   }
 })
 
 test('U-H6 with the zip in the release: unpacked beside the app before Restart to update, as VS Code does', async () => {
-  settings({ last_version: '0.1.0' })
+  settings({ last_version: version })
   // A stand-in for the app folder: the app's exe (electron.exe when run from source) and one more file.
   const src = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-zip-'))
   // A real program, since it is started once to warm up; a small one that exits at once.
@@ -155,7 +157,7 @@ test('U-H6 with the zip in the release: unpacked beside the app before Restart t
 })
 
 test('U-E2 a swap that failed: the old version starts again and says why; no automatic retry that start', async () => {
-  settings({ last_version: '0.1.0' })
+  settings({ last_version: version })
   const result = path.join(path.dirname(settingsFile), 'update-result.json')
   // With a byte-order mark, as Windows PowerShell writes UTF-8.
   fs.writeFileSync(result, String.fromCharCode(0xfeff) + JSON.stringify({ ok: false, version: '9.9.9', message: 'LiftOff 9.9.9 is downloaded but could not be installed: a file in C:\LiftOff is in use' }))
@@ -173,7 +175,7 @@ test('U-E2 a swap that failed: the old version starts again and says why; no aut
 })
 
 test('U-H8 About LiftOff: this version, the newest release and its notes, from the same lookup', async () => {
-  settings({ updates: 'notify', last_version: '0.1.0' })
+  settings({ updates: 'notify', last_version: version })
   const { server, url } = await github(sha(setup))
   const { app, page } = await launch(url)
   try {
