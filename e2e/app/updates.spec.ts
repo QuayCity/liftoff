@@ -132,7 +132,8 @@ test('U-H6 with the zip in the release: unpacked beside the app before Restart t
   settings({ last_version: '0.1.0' })
   // A stand-in for the app folder: the app's exe (electron.exe when run from source) and one more file.
   const src = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-zip-'))
-  fs.writeFileSync(path.join(src, path.basename(electron)), 'the new exe\n')
+  // A real program, since it is started once to warm up; a small one that exits at once.
+  fs.copyFileSync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'whoami.exe'), path.join(src, path.basename(electron)))
   fs.mkdirSync(path.join(src, 'resources'))
   fs.writeFileSync(path.join(src, 'resources', 'app.asar'), 'the new app\n')
   const zipFile = path.join(src, 'app.zip')
@@ -161,7 +162,7 @@ test('U-E2 a swap that failed: the old version starts again and says why; no aut
   const { app, page } = await launch(url)
   try {
     await page.getByRole('button', { name: 'Update failed' }).click()
-    await expect(page.getByText(/could not be installed: a file in .* is in use/)).toBeVisible()
+    await expect(page.getByText(/could not be installed: a file in .* is in use/).first()).toBeVisible()
     await expect(page.getByRole('button', { name: /Update to|Restart to update/ })).toBeHidden()
     expect(fs.existsSync(result)).toBe(false)
   } finally {
