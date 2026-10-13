@@ -17,8 +17,8 @@ says how to get it.
 | **Overview of all projects** | the [Overview](#overview) of every recent project at once, each with an **Open** button. It connects to all their databases, so it only reads them when you ask |
 
 The project's name is in the title bar, with a button to close it. Along the top are the
-workspaces: **Overview**, **Changes**, **Environments**, **Compare**, **Scripts**, **Commit** and
-**Pipelines** (Ctrl+1 to Ctrl+7); the gear opens **Settings**.
+workspaces: **Overview**, **Changes**, **Environments**, **Compare**, **Scripts**, **Rules**,
+**Commit** and **Pipelines** (Ctrl+1 to Ctrl+8); the gear opens **Settings**.
 
 **About LiftOff.** The ⓘ button, top right on the start page and in the title bar, shows this
 version, the newest LiftOff release, and what is new in it (its release notes), with **Check
@@ -136,6 +136,15 @@ Every script in the migrations folder. **New script** writes the next one from a
 SQL. **Squash or rebaseline…** replaces scripts up to a version with a baseline script (see
 [Teams, branches and pipelines](teams-and-pipelines.md#too-many-scripts)). From `V9990` on, a note
 suggests a restart.
+
+## Rules
+
+The policies every migration script is checked against ([Rules on your scripts](rules.md)): each
+built-in rule with what it checks and its severity here (**Off**, **Info**, **Warning**, **Error
+(stops)**), marked **changed** when it is not the default, and the project's own rules (a name, a
+regular expression, a message and a severity). **Save rules** writes them to `liftoff.toml`;
+leaving with unsaved changes asks first. **Check every script** shows the findings, with the
+allowed ones and their reasons.
 
 ## Compare
 

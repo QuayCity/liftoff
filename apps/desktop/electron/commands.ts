@@ -10,7 +10,7 @@ import * as compare from '../../../packages/liftoff/src/core/compare.ts'
 import { DataSession } from '../../../packages/liftoff/src/core/datacompare.ts'
 import { rebaseline } from '../../../packages/liftoff/src/core/rebaseline.ts'
 import { adopt } from '../../../packages/liftoff/src/core/adopt.ts'
-import { Config, init, interpolate, orderEnvironments, PROJECT_FILE, readSettings, redactUrl, saveProject, saveSettings, type Environment, type Project, type Role } from '../../../packages/liftoff/src/core/config.ts'
+import { Config, init, interpolate, orderEnvironments, PROJECT_FILE, readSettings, redactUrl, saveProject, saveRules, saveSettings, type Environment, type Project, type Role } from '../../../packages/liftoff/src/core/config.ts'
 import { open } from '../../../packages/liftoff/src/core/db.ts'
 import * as diff from '../../../packages/liftoff/src/core/diff.ts'
 import { configError, LiftoffError } from '../../../packages/liftoff/src/core/errors.ts'
@@ -18,6 +18,7 @@ import * as flyway from '../../../packages/liftoff/src/core/flyway.ts'
 import * as git from '../../../packages/liftoff/src/core/git.ts'
 import { scan, versionNote } from '../../../packages/liftoff/src/core/migration.ts'
 import * as model from '../../../packages/liftoff/src/core/model.ts'
+import * as rules from '../../../packages/liftoff/src/core/rules.ts'
 import * as runner from '../../../packages/liftoff/src/core/runner.ts'
 import { createSample } from '../../../packages/liftoff/src/core/sample.ts'
 
@@ -130,6 +131,14 @@ async function serverInfo(name: string, env: Environment) {
     return await c.serverInfo()
   } finally {
     await c.close()
+  }
+}
+
+function rulesView(cfg: Config) {
+  const eff = rules.effective(cfg.rules)
+  return {
+    builtin: Object.entries(rules.RULES).map(([id, r]) => ({ id, help: r.help, engine: r.engine ?? null, default: r.severity, needs_pattern: !!r.needsPattern, severity: eff[id].severity, pattern: eff[id].pattern ?? null })),
+    custom: cfg.rules.custom,
   }
 }
 
@@ -305,6 +314,13 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
     saveProject(root, project)
     return view(load(root))
   },
+  /* Rules: every rule with its severity in this project, the custom ones, and checking the scripts */
+  rules_get: (a) => rulesView(load(a.path)),
+  rules_save: (a) => {
+    saveRules(s(a, 'path'), a.rules as rules.RulesConfig)
+    return rulesView(load(a.path))
+  },
+  lint: (a) => rules.lint(load(a.path)),
   ci_workflow: (a) => ci.githubActions(load(a.path), a.options as ci.CiOptions),
   ci_write: (a) => ci.write(load(a.path), s(a, 'yaml'), b(a, 'overwrite')),
 

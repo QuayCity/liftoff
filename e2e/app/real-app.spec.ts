@@ -329,6 +329,32 @@ test('F04-H7 the cards: dev, test, scratch last; moving one writes order into li
   for (const [name, n] of [['test', 1], ['dev', 2], ['scratch', 3]] as const) expect(toml).toMatch(new RegExp(`\\[environments\\.${name}\\][^[]*order = ${n}`))
 })
 
+test('F20-H5 the Overview reads each database: the runs of this suite are in the activity', async () => {
+  await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Overview' }).click()
+  await expect(page.getByRole('region', { name: 'test overview' })).toContainText(/Last run .* by postgres/)
+  await expect(page.getByRole('region', { name: 'scratch overview' })).toHaveCount(0)
+  const runs = page.getByRole('table', { name: 'Runs, newest first' })
+  await expect(runs.getByRole('row').filter({ hasText: 'migrate' }).first()).toBeVisible()
+  await expect(runs.getByRole('row').filter({ hasText: 'mark-applied' }).first()).toBeVisible()
+})
+
+test('F21-H3 rules in the real app: a severity and an own rule are written to liftoff.toml, and every script is checked', async () => {
+  await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Rules' }).click()
+  await page.getByRole('combobox', { name: 'Severity of drop-table' }).selectOption('error')
+  await page.getByRole('button', { name: 'Add a rule' }).click()
+  const own = page.getByRole('group', { name: 'Own rule 1' })
+  await own.getByLabel('Name').fill('no-cascade')
+  await own.getByLabel('Pattern').fill('\\bCASCADE\\b')
+  await own.getByLabel('Message').fill('No CASCADE in migrations')
+  await page.getByRole('button', { name: 'Save rules' }).click()
+  await expect(page.getByText('Rules saved to liftoff.toml').first()).toBeVisible()
+  const toml = fs.readFileSync(path.join(project, 'liftoff.toml'), 'utf8')
+  expect(toml).toMatch(/\[rules\][^[]*drop-table = "error"/)
+  expect(toml).toContain('id = "no-cascade"')
+  await page.getByRole('button', { name: 'Check every script' }).click()
+  await expect(page.getByRole('alert').or(page.getByRole('status')).filter({ hasText: /scripts?/ }).first()).toBeVisible()
+})
+
 test('X-CONSOLE no console errors in the real app', async () => {
   checkConsole()
 })

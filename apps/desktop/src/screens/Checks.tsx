@@ -95,14 +95,15 @@ export function Checks({ project, env, onDrift }: {
 }
 
 /** The rules on the pending scripts: a summary, then one row per finding. */
-export function RuleFindings({ env, report }: { env: string; report: LintReport }) {
+/** The findings of the rules: on what is pending for `env`, or (without) on every script. */
+export function RuleFindings({ env, report }: { env?: string; report: LintReport }) {
   const n = report.scripts.length
-  const of = `${n} pending script${n === 1 ? '' : 's'}`
+  const of = `${n}${env ? ' pending' : ''} script${n === 1 ? '' : 's'}`
   const summary = report.errors
-    ? <InlineAlert tone="danger" title={`${report.errors} rule error${report.errors === 1 ? '' : 's'}`}>Fix them, or allow them with a reason in the script (-- liftoff:allow rule: why). Deploying to {env} from a pipeline stops here.</InlineAlert>
+    ? <InlineAlert tone="danger" title={`${report.errors} rule error${report.errors === 1 ? '' : 's'}`}>Fix them, or allow them with a reason in the script (-- liftoff:allow rule: why). {env ? `Deploying to ${env} from a pipeline stops here.` : 'The pull-request check and deploys stop here.'}</InlineAlert>
     : report.warnings
       ? <InlineAlert tone="warning" title={`${report.warnings} warning${report.warnings === 1 ? '' : 's'} in ${of}`}>Worth a look before deploying.</InlineAlert>
-      : <InlineAlert tone="success" title={n ? `The rules pass on ${of}` : 'Nothing pending'}>{report.findings.length ? 'Only notes and allowed findings below.' : `Nothing to report for ${env}.`}</InlineAlert>
+      : <InlineAlert tone="success" title={n ? `The rules pass on ${of}` : env ? 'Nothing pending' : 'No scripts yet'}>{report.findings.length ? 'Only notes and allowed findings below.' : env ? `Nothing to report for ${env}.` : 'Nothing to report.'}</InlineAlert>
   if (!report.findings.length) return summary
   const tone = { error: 'text-danger font-semibold', warn: 'text-warning font-semibold', info: 'text-muted' }
   return (

@@ -6,7 +6,7 @@ import * as path from 'node:path'
 import { parse, stringify } from 'smol-toml'
 import { configError } from './errors.ts'
 import { keychainDelete, keychainEnabled, keychainGet, keychainSet } from './keychain.ts'
-import { NO_RULES, parseRules, type RulesConfig } from './rules.ts'
+import { effective, NO_RULES, parseRules, RULES, type RulesConfig } from './rules.ts'
 
 export const PROJECT_FILE = 'liftoff.toml'
 export const USER_FILE = 'liftoff.user.toml'
@@ -307,6 +307,26 @@ export function saveProject(root: string, project: Project): void {
   const file = path.join(root, PROJECT_FILE)
   const table = readTable(file)
   table.project = projectTable(project)
+  writeTable(file, table)
+}
+
+/**
+ * Writes the [rules] section: each built-in rule that differs from its default, and the custom
+ * rules. Checked first, the way `Config.load` reads it, so a bad pattern is never written.
+ */
+export function saveRules(root: string, rules: RulesConfig): void {
+  const t: Record<string, unknown> = {}
+  for (const [id, s] of Object.entries(rules.settings)) {
+    const builtin = RULES[id]
+    if (s.pattern) t[id] = { severity: s.severity, pattern: s.pattern }
+    else if (!builtin || s.severity !== builtin.severity) t[id] = s.severity
+  }
+  if (rules.custom.length) t.custom = rules.custom.map((c) => ({ id: c.id, pattern: c.pattern, message: c.message, severity: c.severity }))
+  effective(parseRules(t))
+  const file = path.join(root, PROJECT_FILE)
+  const table = readTable(file)
+  if (Object.keys(t).length) table.rules = t
+  else delete table.rules
   writeTable(file, table)
 }
 

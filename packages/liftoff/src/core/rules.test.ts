@@ -4,7 +4,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { test } from 'node:test'
-import { Config, init, type Engine } from './config.ts'
+import { Config, init, saveRules, type Engine } from './config.ts'
 import { LiftoffError } from './errors.ts'
 import { parseVersion } from './migration.ts'
 import { lint, lintScript, NO_RULES, parseRules, type RulesConfig } from './rules.ts'
@@ -132,4 +132,21 @@ test('lint reads [rules] from liftoff.toml, skips undo scripts, and --since pick
   assert.deepEqual(mine.scripts, ['V0002__new.sql'])
   assert.deepEqual([mine.errors, mine.warnings], [0, 1])
   assert.throws(() => lint(cfg, { scripts: ['V9__nope.sql'] }), /no script V9__nope.sql/)
+})
+
+test('saveRules writes only what differs from the defaults, keeps the rest of liftoff.toml, and refuses a bad pattern', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-rules-'))
+  init(dir, 'shop', 'postgresql')
+  saveRules(dir, {
+    settings: { 'drop-table': { severity: 'error' }, truncate: { severity: 'warn' }, 'table-names': { severity: 'warn', pattern: '^[a-z_]+$' } },
+    custom: [{ id: 'no-cascade', pattern: '\bCASCADE\b', message: 'No CASCADE', severity: 'error' }],
+  })
+  const cfg = Config.load(dir)
+  assert.equal(cfg.project.name, 'shop')
+  assert.deepEqual(cfg.rules.settings, { 'drop-table': { severity: 'error' }, 'table-names': { severity: 'warn', pattern: '^[a-z_]+$' } })
+  assert.equal(cfg.rules.custom[0].pattern, '\bCASCADE\b')
+  assert.throws(() => saveRules(dir, { settings: { 'column-names': { severity: 'warn' } }, custom: [] }), /needs a pattern/)
+  assert.throws(() => saveRules(dir, { settings: {}, custom: [{ id: 'x', pattern: '(', message: 'm', severity: 'warn' }] }), /not a valid regular expression/)
+  saveRules(dir, NO_RULES)
+  assert.doesNotMatch(fs.readFileSync(path.join(dir, 'liftoff.toml'), 'utf8'), /rules/)
 })

@@ -122,8 +122,12 @@ rule error cannot be merged. See [Teams, branches and pipelines](teams-and-pipel
 
 ## In the desktop app and VS Code
 
-- Desktop app: an environment's **Checks** tab has **Check the rules**: the findings for the
-  scripts still pending on that environment.
+- Desktop app: the **Rules** workspace lists every rule with what it checks and the severity it
+  runs at in this project, and the project's own rules. Change a severity, give a naming rule its
+  pattern, add, edit or remove an own rule, then **Save rules**: it writes `[rules]` in
+  liftoff.toml (only what differs from the defaults), after checking the patterns. **Check every
+  script** runs the rules on all of them. An environment's **Checks** tab has **Check the rules**
+  too: the findings for the scripts still pending on that environment.
 - VS Code: findings show in **Problems** and as squiggles in the script, and update when you save
   a script or liftoff.toml. **LiftOff: Check the Rules on the Scripts** (also the checklist button
   on the Environments view) checks every script.

@@ -9,6 +9,7 @@ import { Scripts } from './screens/Scripts'
 import { Commit } from './screens/Commit'
 import { Pipelines } from './screens/Pipelines'
 import { Overview } from './screens/Overview'
+import { Rules } from './screens/Rules'
 import { InlineAlert } from './ui/display'
 import { StatusBar, TitleBar, workspaces, type Workspace } from './ui/shell'
 
@@ -37,11 +38,15 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
     }
   })()
   const [view, setViewRaw] = useState<View>((params.get('ws') as View) || remembered || 'Environments')
+  const viewRef = useRef(view)
+  // Settings or Rules with unsaved edits: leaving asks first.
   const [settingsDirty, setSettingsDirty] = useState(false)
   const reloadRef = useRef(() => {})
   const setView = useCallback((v: View) => {
-    if (settingsDirty && v !== 'Settings' && !window.confirm('Leave Settings without saving your changes?')) return
+    if (settingsDirty && v !== viewRef.current && !window.confirm(`Leave ${viewRef.current} without saving your changes?`)) return
+    if (v !== viewRef.current) setSettingsDirty(false)
     setViewRaw(v)
+    viewRef.current = v
     reloadRef.current()
     try {
       localStorage.setItem(`liftoff:view:${project.root}`, v)
@@ -102,6 +107,7 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
         {view === 'Settings' && <Settings project={project} onProject={onProject} onDirty={setSettingsDirty} />}
         {view === 'Compare' && <Compare project={project} />}
         {view === 'Scripts' && <Scripts project={project} />}
+        {view === 'Rules' && <Rules project={project} onDirty={setSettingsDirty} />}
         {view === 'Commit' && <Commit project={project} />}
         {view === 'Pipelines' && <Pipelines project={project} />}
       </main>

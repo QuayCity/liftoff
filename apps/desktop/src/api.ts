@@ -78,6 +78,12 @@ export type SyncWhat = { insert: boolean; update: boolean; delete: boolean }
 export type Generated = { file_name: string; version: string; sql: string; undo: { file_name: string; sql: string } | null }
 export type Finding = { rule: string; severity: 'info' | 'warn' | 'error'; script: string; line: number; message: string; /** the reason in the script's allow comment */ allowed?: string }
 export type LintReport = { scripts: string[]; findings: Finding[]; errors: number; warnings: number }
+export type Severity = 'off' | 'info' | 'warn' | 'error'
+export type CustomRule = { id: string; pattern: string; message: string; severity: Severity }
+/** A built-in rule: what it checks, its default, and how this project runs it */
+export type BuiltinRule = { id: string; help: string; engine: Engine | null; default: Severity; needs_pattern: boolean; severity: Severity; pattern: string | null }
+export type RulesView = { builtin: BuiltinRule[]; custom: CustomRule[] }
+export type RulesConfig = { settings: Record<string, { severity: Severity; pattern?: string }>; custom: CustomRule[] }
 export type CheckReport = { environment: string; applied_up_to: string | null; drift: Change[] | null; changes: Change[] | null; dry_run_sql: string | null; rules: LintReport | null; not_compared: string[] }
 export type Comparison = { changes: Change[]; not_compared: string[] }
 export type LogEvent = { level: 'info' | 'warn'; message: string }
@@ -278,6 +284,11 @@ type Api = {
   dataApply(id: string, tables: string[], what: SyncWhat): Promise<{ statements: number }>
   dataClose(): Promise<void>
   onLog(cb: (e: LogEvent) => void): Promise<() => void>
+  rulesGet(path: string): Promise<RulesView>
+  /** Writes [rules] in liftoff.toml (refused when a pattern is missing or not a regular expression) */
+  rulesSave(path: string, rules: RulesConfig): Promise<RulesView>
+  /** The rules on every versioned and repeatable script */
+  lint(path: string): Promise<LintReport>
 }
 
 const real: Api = {
@@ -353,6 +364,9 @@ const real: Api = {
   dataApply: (id, tables, what) => invoke('data_apply', { id, tables, what }),
   dataClose: () => invoke('data_close', {}),
   onLog: async (cb) => bridge!.onLog(cb),
+  rulesGet: (path) => invoke('rules_get', { path }),
+  rulesSave: (path, rules) => invoke('rules_save', { path, rules }),
+  lint: (path) => invoke('lint', { path }),
 }
 
 /* ---------- fake: seeded, in memory, same behaviour shape ---------- */
@@ -422,7 +436,43 @@ fake.activity.push(
   fakeRun('local', 'mark-applied', ago(75), ['V20261003.1530__add_order_lines.sql'], { by: 'me', from: 'me@LAPTOP-7' }),
 )
 
+const fakeRules: RulesView = {
+  builtin: ([
+    ['drop-table', 'Drops a table', 'warn'], ['drop-column', 'Drops a column', 'warn'], ['truncate', 'Empties a table', 'warn'],
+    ['delete-without-where', 'DELETE without WHERE removes every row', 'error'], ['update-without-where', 'UPDATE without WHERE changes every row', 'error'],
+    ['table-without-primary-key', 'A new table without a primary key', 'warn'], ['grant-to-public', 'Grants to PUBLIC', 'warn'],
+  ] as const).map(([id, help, d]) => ({ id, help, engine: null, default: d, needs_pattern: false, severity: d, pattern: null }) as BuiltinRule)
+    .concat([{ id: 'table-names', help: 'New table names must match a pattern (set pattern = "regex")', engine: null, default: 'off', needs_pattern: true, severity: 'off', pattern: null },
+      { id: 'use-database', help: 'USE switches database inside a script', engine: 'sqlserver', default: 'warn', needs_pattern: false, severity: 'warn', pattern: null }]),
+  custom: [{ id: 'no-cascade', pattern: '\\bCASCADE\\b', message: 'Drop with CASCADE takes dependent objects along', severity: 'error' }],
+}
+
 const fakeApi: Api = {
+  rulesGet: async () => {
+    await wait(150)
+    return structuredClone(fakeRules)
+  },
+  rulesSave: async (_p, r) => {
+    await wait(200)
+    for (const b of fakeRules.builtin) {
+      b.severity = r.settings[b.id]?.severity ?? b.default
+      b.pattern = r.settings[b.id]?.pattern ?? null
+      if (b.needs_pattern && b.severity !== 'off' && !b.pattern) throw fail('LIFTOFF_CONFIG', `[rules.${b.id}]: needs a pattern, e.g. pattern = "^[a-z][a-z0-9_]*$"`, 2)
+    }
+    fakeRules.custom = r.custom
+    return structuredClone(fakeRules)
+  },
+  lint: async () => {
+    await wait(300)
+    return {
+      scripts: fakeInfo('local').filter((i) => i.kind === 'versioned').map((i) => i.script),
+      findings: [
+        { rule: 'table-without-primary-key', severity: 'warn', script: 'V20261007.1102__tax_function.sql', line: 3, message: 'table tax_rates has no primary key' },
+        { rule: 'drop-column', severity: 'warn', script: 'V20261007.1102__tax_function.sql', line: 9, message: 'drops column legacy_rate of orders', allowed: 'moved to tax_rates in the previous release' },
+      ],
+      errors: 0, warnings: 1,
+    }
+  },
   overview: async (path) => {
     await wait()
     if (path.includes('flyway')) throw fail('LIFTOFF_FLYWAY_PROJECT', 'This folder has a Flyway project. Convert its settings to open it in LiftOff.', 2)
