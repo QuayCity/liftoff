@@ -161,8 +161,14 @@ x.y.z**, which opens its release notes; it goes away once opened.
 
 **Check now** checks straight away and says what it found.
 
-- Windows: the update runs the new setup silently in the folder LiftOff is installed in, then
-  starts the app again. The `liftoff` program on your PATH is updated with it.
+- Windows, as VS Code does it: the new version is unpacked next to LiftOff's folder while you
+  work (`LiftOff-update`) and started once in the background, so Windows checks the new program
+  then and not at the restart. **Restart to update** then only swaps the two folders: the new
+  version is up a few seconds later. The `liftoff` program on your PATH is updated with it.
+  If a file in LiftOff's folder is in use (`liftoff` running in a terminal, or a window open on
+  that folder), nothing is replaced: the old version starts again and **Update failed** says
+  why; close it and restart to try again. Where LiftOff cannot write next to its own folder,
+  the new setup runs silently instead, which takes about a minute.
 - Linux: an AppImage replaces itself and restarts. Started some other way, the button says
   **Download x.y.z** and opens the release page.
 - What is contacted: `api.github.com` for the latest release, and GitHub's download servers for

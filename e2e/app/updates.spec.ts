@@ -2,6 +2,7 @@
 // newer release, downloads the file for this platform, checks its checksum, and offers a restart.
 // A file that does not match its checksum is refused. Installing is not run here.
 import { _electron, expect, test } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -35,17 +36,24 @@ const settings = (s: Record<string, unknown>) => {
 const setup = Buffer.from('not really a setup program\n'.repeat(20_000))
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex')
 
-/** Serves /latest (the release) and /file (the setup); `digest` is what the release claims. */
-async function github(digest: string) {
+/**
+ * Serves /latest (the release), /file (the setup) and, when given, /zip (the app unpacked);
+ * `digest` is what the release claims for the setup.
+ */
+async function github(digest: string, zip?: Buffer) {
   const server = http.createServer((req, res) => {
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
     if (req.url === '/latest') {
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({
         tag_name: 'v9.9.9', html_url: 'https://github.com/sanderstad/liftoff/releases/tag/v9.9.9',
-        assets: [{ name: 'LiftOff-Setup-9.9.9.exe', browser_download_url: `${base}/file`, size: setup.length, digest: `sha256:${digest}` }],
+        assets: [
+          { name: 'LiftOff-Setup-9.9.9.exe', browser_download_url: `${base}/file`, size: setup.length, digest: `sha256:${digest}` },
+          ...(zip ? [{ name: 'LiftOff-9.9.9-win-x64.zip', browser_download_url: `${base}/zip`, size: zip.length, digest: `sha256:${sha(zip)}` }] : []),
+        ],
       }))
     } else if (req.url === '/file') res.end(setup)
+    else if (req.url === '/zip' && zip) res.end(zip)
     else res.writeHead(404).end()
   })
   await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok))
@@ -117,5 +125,47 @@ test("U-H4 the first start after an update offers What's new: the release notes,
     expect(JSON.parse(fs.readFileSync(settingsFile, 'utf8')).last_version).toBe('0.1.0')
   } finally {
     await app.close()
+  }
+})
+
+test('U-H6 with the zip in the release: unpacked beside the app before Restart to update, as VS Code does', async () => {
+  settings({ last_version: '0.1.0' })
+  // A stand-in for the app folder: the app's exe (electron.exe when run from source) and one more file.
+  const src = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-zip-'))
+  fs.writeFileSync(path.join(src, path.basename(electron)), 'the new exe\n')
+  fs.mkdirSync(path.join(src, 'resources'))
+  fs.writeFileSync(path.join(src, 'resources', 'app.asar'), 'the new app\n')
+  const zipFile = path.join(src, 'app.zip')
+  execFileSync(path.join(process.env.SystemRoot ?? 'C:\Windows', 'System32', 'tar.exe'), ['-a', '-c', '-f', zipFile, '-C', src, path.basename(electron), 'resources'])
+  const staged = `${path.dirname(electron)}-update`
+  const { server, url } = await github(sha(setup), fs.readFileSync(zipFile))
+  const { app, page } = await launch(url)
+  try {
+    await expect(page.getByRole('button', { name: 'Restart to update' })).toBeVisible({ timeout: 30_000 })
+    expect(fs.readFileSync(path.join(staged, 'resources', 'app.asar'), 'utf8')).toBe('the new app\n')
+    expect(fs.existsSync(path.join(staged, path.basename(electron)))).toBe(true)
+  } finally {
+    await app.close()
+    server.close()
+    fs.rmSync(staged, { recursive: true, force: true })
+    fs.rmSync(src, { recursive: true, force: true })
+  }
+})
+
+test('U-E2 a swap that failed: the old version starts again and says why; no automatic retry that start', async () => {
+  settings({ last_version: '0.1.0' })
+  const result = path.join(path.dirname(settingsFile), 'update-result.json')
+  // With a byte-order mark, as Windows PowerShell writes UTF-8.
+  fs.writeFileSync(result, String.fromCharCode(0xfeff) + JSON.stringify({ ok: false, version: '9.9.9', message: 'LiftOff 9.9.9 is downloaded but could not be installed: a file in C:\LiftOff is in use' }))
+  const { server, url } = await github(sha(setup))
+  const { app, page } = await launch(url)
+  try {
+    await page.getByRole('button', { name: 'Update failed' }).click()
+    await expect(page.getByText(/could not be installed: a file in .* is in use/)).toBeVisible()
+    await expect(page.getByRole('button', { name: /Update to|Restart to update/ })).toBeHidden()
+    expect(fs.existsSync(result)).toBe(false)
+  } finally {
+    await app.close()
+    server.close()
   }
 })

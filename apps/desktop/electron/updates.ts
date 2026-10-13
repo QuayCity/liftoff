@@ -1,15 +1,19 @@
 // Updates for the desktop app (the maintainer's decision, 2026-10-13): the only network traffic
-// that is not a database. It reads the latest GitHub release of LiftOff and downloads the setup
-// (Windows) or the AppImage (Linux) from it; nothing is sent but the request itself. The person
-// picks the mode on the Settings screen; 'off' means no request at all. The CLI and the core never
-// do this.
+// that is not a database. It reads the latest GitHub release of LiftOff and downloads the new
+// version from it; nothing is sent but the request itself. The person picks the mode on the
+// Settings screen; 'off' means no request at all. The CLI and the core never do this.
+//
+// Windows, as VS Code: the zip is unpacked next to the app while it runs, and the restart only
+// swaps the two folders (swap.ts). Where that is not possible, the setup runs silently instead.
+// Linux: the AppImage replaces itself.
 
 import { app, shell } from 'electron'
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { assetFor, newer, type Release } from './release.ts'
+import { SWAP_SCRIPT } from './swap.ts'
 
 export type UpdateMode = 'notify' | 'auto' | 'off'
 export type UpdateState =
@@ -33,6 +37,12 @@ export class Updater {
   private status: UpdateState = { state: 'idle' }
   private release?: Release
   private file?: string
+  /** How the downloaded version goes in: swap the unpacked folder, run the setup, or replace the AppImage. */
+  private method?: 'swap' | 'setup' | 'appimage'
+  private staged?: string
+  /** A swap that failed last time: no automatic checks this start, so its message stays. */
+  private held = false
+  private readonly resultFile: string
   private timer?: NodeJS.Timeout
   private readonly settingsFile: string
   private readonly url: string
@@ -41,6 +51,13 @@ export class Updater {
 
   constructor(configDir: string, private readonly onChange: (info: UpdateInfo) => void) {
     this.settingsFile = path.join(configDir, 'settings.json')
+    this.resultFile = path.join(configDir, 'update-result.json')
+    const result = readSettings(this.resultFile)
+    removeQuietly(this.resultFile)
+    if (result.ok === false && typeof result.message === 'string') {
+      this.status = { state: 'failed', message: result.message }
+      this.held = true
+    }
     this.mode = readMode(this.settingsFile)
     // The first start of a newer version than last time offers its release notes, as VS Code does.
     const last = readSettings(this.settingsFile).last_version
@@ -60,7 +77,7 @@ export class Updater {
     clearInterval(this.timer)
     this.timer = undefined
     // Only an installed app updates itself (or one pointed at a test server).
-    if (this.mode === 'off' || (!app.isPackaged && !process.env.LIFTOFF_UPDATE_URL)) return
+    if (this.mode === 'off' || this.held || (!app.isPackaged && !process.env.LIFTOFF_UPDATE_URL)) return
     setTimeout(() => void this.check(true), process.env.LIFTOFF_UPDATE_URL ? 0 : 10_000)
     this.timer = setInterval(() => void this.check(true), EVERY)
   }
@@ -77,6 +94,7 @@ export class Updater {
   /** In the background (quiet: a failure is not shown) or because the person asked. */
   async check(quiet = false): Promise<UpdateInfo> {
     if (['downloading', 'ready', 'checking'].includes(this.status.state)) return this.info()
+    this.held = false
     this.set({ state: 'checking' })
     try {
       const r = await fetch(this.url, { headers: { accept: 'application/vnd.github+json', 'user-agent': `LiftOff/${app.getVersion()}` } })
@@ -89,7 +107,7 @@ export class Updater {
       }
       this.release = release
       const version = release.tag_name.replace(/^v/, '')
-      if (!assetFor(release, process.platform, !!process.env.APPIMAGE)) this.set({ state: 'manual', version, page: release.html_url })
+      if (!assetFor(release, process.platform, { appImage: !!process.env.APPIMAGE, staged: true })) this.set({ state: 'manual', version, page: release.html_url })
       else {
         this.set({ state: 'available', version, page: release.html_url })
         if (this.mode === 'auto') void this.download()
@@ -100,11 +118,20 @@ export class Updater {
     return this.info()
   }
 
-  /** Downloads the new setup or AppImage and checks it against the checksum GitHub publishes. */
+  /**
+   * Downloads the new version, checks it against the checksum GitHub publishes, and on Windows
+   * unpacks it next to the app, so the restart has little left to do.
+   */
   async download(): Promise<UpdateInfo> {
     const release = this.release
-    const asset = release && assetFor(release, process.platform, !!process.env.APPIMAGE)
-    if (!release || !asset || this.status.state === 'downloading' || this.status.state === 'ready') return this.info()
+    if (!release || this.status.state === 'downloading' || this.status.state === 'ready') return this.info()
+    this.staged = process.platform === 'win32' ? stagingFolder() : undefined
+    const asset = assetFor(release, process.platform, { appImage: !!process.env.APPIMAGE, staged: !!this.staged })
+    if (this.staged && !asset?.name.endsWith('.zip')) {
+      removeQuietly(this.staged)
+      this.staged = undefined
+    }
+    if (!asset) return this.info()
     const version = release.tag_name.replace(/^v/, '')
     const expected = /^sha256:([0-9a-f]{64})$/.exec(asset.digest ?? '')?.[1]
     if (!expected) return this.set({ state: 'failed', message: `${asset.name} has no checksum on GitHub; download it from ${release.html_url}` })
@@ -123,16 +150,26 @@ export class Updater {
       for await (const chunk of r.body as unknown as AsyncIterable<Uint8Array>) {
         hash.update(chunk)
         got += chunk.length
-        if (!out.write(chunk)) await new Promise((ok) => out.once('drain', ok))
+        if (!out.write(chunk)) await new Promise<void>((ok) => out.once('drain', () => ok()))
         const percent = Math.floor((got / (asset.size || got)) * 100)
         if (percent >= shown + 2) this.set({ state: 'downloading', version, percent: (shown = percent) })
       }
       await new Promise<void>((ok, fail) => out.end((e?: Error | null) => (e ? fail(e) : ok())))
       if (hash.digest('hex') !== expected) throw new Error(`${asset.name} does not match its checksum on GitHub`)
       this.file = file
+      if (asset.name.endsWith('.zip') && this.staged) {
+        // Unpacked now, while the app runs; Windows' own tar reads zip files.
+        this.set({ state: 'downloading', version, percent: 100 })
+        await unzip(file, this.staged)
+        const exe = path.join(this.staged, path.basename(process.execPath))
+        if (!fs.existsSync(exe)) throw new Error(`${asset.name} does not hold ${path.basename(process.execPath)}`)
+        await warmUp(exe)
+        this.method = 'swap'
+      } else this.method = asset.name.endsWith('.AppImage') ? 'appimage' : 'setup'
       return this.set({ state: 'ready', version })
     } catch (e) {
       removeQuietly(dir)
+      if (this.staged) removeQuietly(this.staged)
       return this.set({ state: 'failed', message: `The update did not download: ${e instanceof Error ? e.message : String(e)}` })
     }
   }
@@ -141,12 +178,22 @@ export class Updater {
   install(): void {
     const file = this.file
     if (this.status.state !== 'ready' || !file) return
-    if (process.platform === 'win32') {
+    if (this.method === 'swap' && this.staged) {
+      const script = path.join(app.getPath('temp'), 'liftoff-swap.ps1')
+      fs.writeFileSync(script, SWAP_SCRIPT)
+      const args = ['-AppPid', String(process.pid), '-App', path.dirname(process.execPath), '-Staged', this.staged, '-Version', this.status.version, '-Exe', path.basename(process.execPath), '-Result', this.resultFile]
+      const ps = ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script, ...args]
+      // Through `start`: PowerShell started detached straight from Node exits without running,
+      // and one started attached is ended with the app. Quoted here for cmd (paths may have spaces).
+      const q = (a: string) => (/[\s&()^|<>]/.test(a) ? `"${a}"` : a)
+      spawn('cmd.exe', ['/d', '/c', 'start', '""', '/b', ...ps.map(q)], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true }).unref()
+      app.quit()
+    } else if (this.method === 'setup') {
       // The setup made by electron-builder: silent, keeps the folder it was installed in, and
       // starts the app again when it is done.
       spawn(file, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore' }).unref()
       app.quit()
-    } else if (process.env.APPIMAGE) {
+    } else if (this.method === 'appimage' && process.env.APPIMAGE) {
       const target = process.env.APPIMAGE
       fs.copyFileSync(file, `${target}.new`)
       fs.chmodSync(`${target}.new`, 0o755)
@@ -180,6 +227,28 @@ export class Updater {
   }
 }
 
+/** <app folder>-update beside the app, if it can be written there (it can in the usual per-user install). */
+function stagingFolder(): string | undefined {
+  const dir = `${path.dirname(process.execPath)}-update`
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    fs.mkdirSync(dir)
+    return dir
+  } catch {
+    return undefined
+  }
+}
+
+/** Runs the new version once with --warm-up (it exits at once); a failure here is not one. */
+function warmUp(exe: string): Promise<void> {
+  return new Promise((ok) => execFile(exe, ['--warm-up'], { windowsHide: true, timeout: 60_000 }, () => ok()))
+}
+
+function unzip(zip: string, into: string): Promise<void> {
+  const tar = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+  return new Promise((ok, fail) => execFile(tar, ['-xf', zip, '-C', into], { windowsHide: true }, (e, _out, err) => (e ? fail(new Error(err.trim() || e.message)) : ok())))
+}
+
 /** Windows can hold a file that was just closed for a moment (a virus scanner): retry, never throw. */
 function removeQuietly(dir: string): void {
   try {
@@ -191,7 +260,8 @@ function removeQuietly(dir: string): void {
 
 function readSettings(file: string): Record<string, unknown> {
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>
+    // Without a byte-order mark, which JSON.parse does not accept.
+    return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) as Record<string, unknown>
   } catch {
     return {}
   }

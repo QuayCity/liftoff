@@ -9,6 +9,10 @@ import { Updater, type UpdateMode } from './updates.ts'
 // Kept from the earlier desktop build, so recent projects carry over.
 const configDir = path.join(app.getPath('appData'), 'app.liftoff.desktop')
 
+// Started by the updater on a freshly unpacked version: Windows checks a new program the first
+// time it runs (seconds, for an unsigned one), so that happens now and not at the restart.
+if (process.argv.includes('--warm-up')) app.exit(0)
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     title: 'LiftOff',

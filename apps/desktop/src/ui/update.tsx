@@ -1,10 +1,11 @@
 // Updates of the app itself: the Update button in the title bar and the start page, and the
 // choice on the Settings screen. The main process (electron/updates.ts) does the work.
 
-import { Download, ExternalLink, RotateCw, Sparkles } from 'lucide-react'
+import { AlertTriangle, Download, ExternalLink, RotateCw, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { updates, type UpdateInfo, type UpdateMode } from '../api'
 import { Button, Field, Select } from './controls'
+import { useToast } from './overlays'
 
 /** The update state, kept current by the main process. */
 export function useUpdate(): UpdateInfo | null {
@@ -25,12 +26,15 @@ export function useUpdate(): UpdateInfo | null {
  * (on the first start after an update) What's new. */
 export function UpdateButton() {
   const info = useUpdate()
+  const toast = useToast()
   const s = info?.status
   if (!s) return null
   if (s.state === 'available') return <Button size="sm" variant="primary" icon={Download} onClick={() => void updates.download()}>Update to {s.version}</Button>
-  if (s.state === 'downloading') return <Button size="sm" variant="primary" loading disabled>Downloading {s.percent}%</Button>
+  if (s.state === 'downloading') return <Button size="sm" variant="primary" loading disabled>{s.percent < 100 ? `Downloading ${s.percent}%` : 'Preparing the update'}</Button>
   if (s.state === 'ready') return <Button size="sm" variant="primary" icon={RotateCw} onClick={() => void updates.install()}>Restart to update</Button>
   if (s.state === 'manual') return <Button size="sm" icon={ExternalLink} onClick={() => void updates.openPage()}>Download {s.version}</Button>
+  // A failed swap: the old version runs again, and says why when asked.
+  if (s.state === 'failed') return <Button size="sm" icon={AlertTriangle} onClick={() => toast({ tone: 'danger', title: s.message })}>Update failed</Button>
   if (info.updated) return <Button size="sm" icon={Sparkles} onClick={() => void updates.openNotes()}>What's new in {info.updated}</Button>
   return null
 }
@@ -50,7 +54,7 @@ export function UpdateSettings() {
   const line =
     s.state === 'latest' ? `LiftOff ${info.current} is the latest version.`
     : s.state === 'available' || s.state === 'manual' ? `LiftOff ${s.version} is available; you have ${info.current}.`
-    : s.state === 'downloading' ? `Downloading LiftOff ${s.version}: ${s.percent}%`
+    : s.state === 'downloading' ? (s.percent < 100 ? `Downloading LiftOff ${s.version}: ${s.percent}%` : `Preparing LiftOff ${s.version}`)
     : s.state === 'ready' ? `LiftOff ${s.version} is downloaded. Restart to use it.`
     : s.state === 'failed' ? s.message
     : `This is LiftOff ${info.current}.`

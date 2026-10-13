@@ -2,6 +2,7 @@
 #   liftoff-linux-x64, liftoff-win-x64.exe, liftoff-macos-arm64     the single-file CLI
 #   liftoff-vscode-<platform>.vsix                                  the VS Code extension, CLI included
 #   LiftOff-Setup-<version>.exe, LiftOff-<version>-x86_64.AppImage  the desktop app (Windows, Linux)
+#   LiftOff-<version>-win-x64.zip                                   the desktop app unpacked: what an installed app updates from
 # No desktop app for macOS: unsigned, Gatekeeper blocks it, and signing needs a paid Apple account.
 # The tag has to match the version in the code (see the first job), so a release says what it is.
 # Run it by hand (Actions > Release > Run workflow) for a dry run: everything is built, nothing published.
@@ -83,6 +84,7 @@ jobs:
             liftoff-${{ matrix.name }}${{ matrix.ext }}
             liftoff-vscode-${{ matrix.vsce }}.vsix
             apps/desktop/release/LiftOff-Setup-*.exe
+            apps/desktop/release/LiftOff-*-win-x64.zip
             apps/desktop/release/LiftOff-*.AppImage
           if-no-files-found: error
 

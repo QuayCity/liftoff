@@ -65,7 +65,11 @@
       }
     ],
     "win": {
-      "target": "nsis",
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "artifactName": "LiftOff-${version}-win-${arch}.${ext}",
       "icon": "electron/icon.png"
     },
     "nsis": {
