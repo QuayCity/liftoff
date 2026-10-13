@@ -304,6 +304,20 @@ async function adoptDatabase(lo: Liftoff, env?: Environment): Promise<{ baseline
 }
 
 /** Runs one script and nothing else on an environment (`migrate --only`), after saying what that means. */
+/** Records a pending script without running it: for a database that already has its changes. */
+async function markApplied(lo: Liftoff, item: MigrationItem, confirmed = false): Promise<boolean> {
+  const { info, env } = item
+  if (!confirmed) {
+    const detail = `Only for a database that already has this script's changes: the one it was written from, or one changed by hand the same way. If it does not, the scripts after it may fail there, and Check for Drift shows what is missing.${env.role === 'prod' ? `\n\n${env.name} is a production database.` : ''}`
+    const go = await vscode.window.showWarningMessage(`Record ${info.script} as applied on ${env.name}, without running it?`, { modal: true, detail }, 'Record as Applied')
+    if (go !== 'Record as Applied') return false
+  }
+  const done = await withProgress(lo, `Recording ${info.script} on ${env.name}`, () => lo.run<{ recorded: string }>(['mark-applied', info.script], env.name))
+  if (done) vscode.window.showInformationMessage(`Recorded ${info.script} as applied on ${env.name}.`)
+  await lo.reloadOpened()
+  return !!done
+}
+
 async function runOnly(lo: Liftoff, item: MigrationItem, confirmed = false): Promise<MigrateResult | undefined> {
   const { info, env } = item
   if (!confirmed) {
@@ -446,6 +460,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
     vscode.commands.registerCommand('liftoff.dryRun', (item?: EnvironmentItem) => dryRun(lo, item)),
     // `confirmed` is for the tests, which cannot press the dialog's button.
     vscode.commands.registerCommand('liftoff.runOnly', (item: MigrationItem, confirmed?: boolean) => runOnly(lo, item, confirmed === true)),
+    vscode.commands.registerCommand('liftoff.markApplied', (item: MigrationItem, confirmed?: boolean) => markApplied(lo, item, confirmed === true)),
     vscode.commands.registerCommand('liftoff.validate', (item?: EnvironmentItem) => validate(lo, item)),
     vscode.commands.registerCommand('liftoff.checkDrift', (item?: EnvironmentItem) => checkDrift(lo, item)),
     vscode.commands.registerCommand('liftoff.testConnection', (item?: EnvironmentItem) => testConnection(lo, item)),

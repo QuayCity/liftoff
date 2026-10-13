@@ -271,6 +271,26 @@ test('F16-H3 compare dev with test in the real app and apply: Postgres gets the 
   psql('shop_test', 'drop table compare_only')
 })
 
+test('F16-H4 a migration written in Compare from dev: recorded on dev, which already has it', async () => {
+  psql('shop_dev', 'create table from_compare (id int primary key)')
+  await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Compare' }).click()
+  await page.getByLabel('Source', { exact: true }).selectOption('env:dev')
+  await page.getByLabel('Target', { exact: true }).selectOption('env:test')
+  await page.getByRole('main').getByRole('button', { name: /^Compare( again)?$/ }).click()
+  await expect(page.getByRole('treeitem', { name: 'Added public.from_compare' })).toHaveAttribute('aria-checked', 'true', { timeout: 60_000 })
+  await page.getByRole('button', { name: 'Write migration…' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Description').fill('from compare')
+  await dialog.getByRole('button', { name: 'Write' }).click()
+  await dialog.getByRole('button', { name: 'Save to migrations' }).click()
+  await expect(page.getByText(/^Wrote .*__from_compare\.sql; recorded on dev, which already has it$/)).toBeVisible({ timeout: 90_000 })
+  const script = fs.readdirSync(path.join(project, 'migrations')).find((f) => f.endsWith('__from_compare.sql'))!
+  expect(psql('shop_dev', `select count(*) from liftoff_schema_history where success and script = '${script}'`)).toBe('1')
+  // Tidy up for the tests after this one.
+  fs.rmSync(path.join(project, 'migrations', script))
+  psql('shop_dev', `delete from liftoff_schema_history where script = '${script}'; drop table from_compare`)
+})
+
 test('F17-H3 compare the data of dev and test in the real app, then apply: Postgres gets the rows', async () => {
   psql('shop_dev', "create table prices (id int primary key, amount numeric(10, 2), note text); insert into prices select i, i * 1.5, 'p' || i from generate_series(1, 2000) i")
   psql('shop_test', "create table prices (id int primary key, amount numeric(10, 2), note text); insert into prices select i, i * 1.5, 'p' || i from generate_series(1, 2000) i")

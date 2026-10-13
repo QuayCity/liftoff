@@ -555,6 +555,9 @@ const COMMANDS: Record<string, Command> = {
         out.migration = diff.save(cfg, g.file_name, g.sql)
         if (g.undo) out.undo = diff.save(cfg, g.undo.file_name, g.undo.sql)
         lines.push(`Wrote ${out.migration as string}${g.undo ? ` and ${out.undo as string}` : ''}`)
+        // Dev may well have these changes already (it was the source): then it is recorded there.
+        const recorded = await diff.recordWhereAlreadyThere(cfg, g.file_name, chosen.map((c) => c.id), {}, log)
+        if (recorded.length) out.recorded_on_dev = recorded
       }
       if (chosen.length && flag(v, 'apply')) {
         const a = await compare.apply(cfg, target, compare.syncScript(r, chosen), log)
@@ -715,7 +718,7 @@ const COMMANDS: Record<string, Command> = {
       scratch: { type: 'string', help: 'Scratch environment (default: the first with role "scratch")' },
       'skip-destructive': { type: 'boolean', help: 'Leave out changes that may lose data (dropped tables or columns, type changes)' },
       'dry-run': { type: 'boolean', help: 'Print the script instead of writing it' },
-      'record-on-dev': { type: 'boolean', help: 'Also record the new script as applied on the dev database (it already has the change)' },
+      'record-on-dev': { type: 'boolean', help: 'Also record the new script as applied on the dev database, which has the change (from model: when dev has it, checked)' },
       undo: { type: 'boolean', help: 'Also write the matching undo script (U…)' },
     },
     async run(ctx, v) {
@@ -730,8 +733,10 @@ const COMMANDS: Record<string, Command> = {
       if (flag(v, 'dry-run')) return [g, g.sql]
       const written = diff.save(cfg, g.file_name, g.sql)
       if (g.undo) diff.save(cfg, g.undo.file_name, g.undo.sql)
-      if (flag(v, 'record-on-dev') && str(v, 'from') === 'model') throw configError('--record-on-dev is for --from dev')
-      if (flag(v, 'record-on-dev')) {
+      if (flag(v, 'record-on-dev') && str(v, 'from') === 'model') {
+        // Written from the model: dev has the change only if the model was pulled from it. Checked.
+        await diff.recordWhereAlreadyThere(cfg, g.file_name, changes.map((c) => c.id), { dev: str(v, 'source'), scratch: str(v, 'scratch') }, log)
+      } else if (flag(v, 'record-on-dev')) {
         const [dev] = cfg.pickRole(str(v, 'source'), 'dev')
         await runner.markApplied(cfg, dev, g.file_name, log)
       }

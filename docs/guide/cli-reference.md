@@ -116,7 +116,7 @@ Options:
       --scratch <SCRATCH>            Scratch environment (default: the first with role "scratch")
       --skip-destructive             Leave out changes that may lose data (dropped tables or columns, type changes)
       --dry-run                      Print the script instead of writing it
-      --record-on-dev                Also record the new script as applied on the dev database (it already has the change)
+      --record-on-dev                Also record the new script as applied on the dev database, which has the change (from model: when dev has it, checked)
       --undo                         Also write the matching undo script (U…)
 ```
 

@@ -231,6 +231,8 @@ type Api = {
   repair(path: string, env: string): Promise<RepairReport>
   clean(path: string, env: string): Promise<string[]>
   markApplied(path: string, env: string, script: string): Promise<void>
+  /** Records a new script on dev when dev already has these changes; returns the scripts recorded. */
+  recordWhereThere(path: string, script: string, changed: string[]): Promise<string[]>
   scriptsList(path: string): Promise<ScriptView[]>
   scriptAdd(path: string, repeatable: boolean, description: string, sql: string): Promise<string>
   capture(path: string, env: string, description: string, asBaseline: boolean): Promise<Generated>
@@ -304,6 +306,7 @@ const real: Api = {
   repair: (path, env) => invoke('repair', { path, env }),
   clean: (path, env) => invoke('clean', { path, env }),
   markApplied: (path, env, script) => invoke('mark_applied', { path, env, script }),
+  recordWhereThere: (path, script, changed) => invoke('migration_record_where_there', { path, script, changed }),
   scriptsList: (path) => invoke('scripts_list', { path }),
   scriptAdd: (path, repeatable, description, sql) => invoke('script_add', { path, repeatable, description, sql }),
   capture: (path, env, description, asBaseline) => invoke('capture', { path, env, description, asBaseline }),
@@ -588,7 +591,10 @@ const fakeApi: Api = {
     emit('info', `Cleaned ${env}: public`)
     return ['public']
   },
+  recordWhereThere: async (_p, script) => [script],
   markApplied: async (_p, env, script) => {
+    // The preview applies scripts in order: recording the next pending one moves the count on.
+    if (fakeInfo(env).findIndex((i) => i.script === script) === (fake.applied[env] ?? 0)) fake.applied[env] = (fake.applied[env] ?? 0) + 1
     emit('info', `Recorded ${script} as applied on ${env} without running it`)
   },
   scriptsList: async () => {

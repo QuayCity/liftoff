@@ -79,6 +79,45 @@ async function using<T>(c: Conn | Promise<Conn>, work: (c: Conn) => Promise<T>):
   }
 }
 
+/**
+ * After a migration is written: when the dev database already has every change in it (written
+ * from dev, or from a schema model pulled from dev), records it as applied there, so dev does not
+ * list a script that can never run. Builds the scripts, the new one included, on the scratch
+ * database and compares dev with that:
+ * - nothing differs at all: every pending script on dev is already there, and all are recorded
+ *   (this also mends scripts written before, which dev still lists);
+ * - dev has other work in progress: only the new script, and only when the objects it changes
+ *   are as it makes them. A script dev does not fully have stays pending.
+ * `changed`: the ids of the objects the script changes (Change.id). Returns the scripts it recorded.
+ */
+export async function recordWhereAlreadyThere(
+  cfg: Config, script: string, changed: string[], o: { dev?: string; scratch?: string }, log: runner.Log = runner.quiet,
+): Promise<string[]> {
+  const dev = [...cfg.environments].find(([n, e]) => (o.dev ? n === o.dev : e.role === 'dev'))
+  if (!dev || !changed.length) return []
+  const [devName, devEnv] = dev
+  const ids = new Set(changed)
+  try {
+    const [scratchName, scratch] = scratchEnv(cfg, o.scratch)
+    const built = await using(rebuildScratch(cfg, scratchName, scratch, undefined, runner.quiet), (c) => modelOf(cfg, c))
+    const onDev = await using(open(devName, devEnv), (c) => modelOf(cfg, c))
+    const differs = diffSchemas(built, onDev)
+    const missing = differs.filter((c) => ids.has(c.id))
+    if (missing.length) {
+      log('info', `${devName} does not have all of ${script} yet (${missing.map((c) => c.name).join(', ')}); it stays pending there`)
+      return []
+    }
+    const pending = (await runner.info(cfg, devName)).filter((i) => i.state === 'pending' && i.kind === 'versioned').map((i) => i.script)
+    const record = differs.length ? pending.filter((s) => s === script) : pending
+    for (const s of record) await runner.markApplied(cfg, devName, s, log)
+    return record
+  } catch (e) {
+    // The script is written either way; only the bookkeeping on dev is skipped.
+    log('warn', `${script} was not recorded on ${devName}: ${e instanceof Error ? e.message : String(e)}`)
+    return []
+  }
+}
+
 export type ScratchCreated = { environment: string; database: string }
 
 /**

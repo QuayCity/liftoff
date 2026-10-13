@@ -115,8 +115,11 @@ export function Compare({ project }: { project: Project }) {
       }
       const file = await api.migrationSave(project.root, migration.draft.file_name, migration.draft.sql)
       if (migration.draft.undo) await api.migrationSave(project.root, migration.draft.undo.file_name, migration.draft.undo.sql)
+      // Dev may already have these changes (it was the source): then it is recorded there, so it
+      // does not list a script that can never run.
+      const recorded = await api.recordWhereThere(project.root, migration.draft.file_name, chosen.map((c) => c.id))
       setMigration(null)
-      toast({ tone: 'success', title: `Wrote ${file}` })
+      toast({ tone: 'success', title: recorded.length ? `Wrote ${file}; recorded on dev, which already has it` : `Wrote ${file}` })
     } catch (e) {
       toast({ tone: 'danger', title: errorText(e) })
     }

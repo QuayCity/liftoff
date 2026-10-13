@@ -48,7 +48,7 @@ views and procedures that use them.
 | --- | --- |
 | `--dry-run` | print the script; write nothing |
 | `--undo` | also write `U0005__phone_and_notes.sql`, which reverses it |
-| `--record-on-dev` | also record the script as applied on dev, which already has the change |
+| `--record-on-dev` | also record the script as applied on dev, which already has the change. With `--from model`, only when dev does have it (checked; see below) |
 | `--skip-destructive` | leave out changes that may lose data |
 | `--from model` | from the schema-model folder instead of the dev database |
 | `--source`, `--scratch` | other dev and scratch environments |
@@ -61,7 +61,19 @@ already). So either:
 - generate with `--record-on-dev`, or
 - run `liftoff -e dev mark-applied V0005__phone_and_notes.sql` afterwards.
 
-The apps tick **Record it as applied on dev** for you.
+The apps do it for you: **Record it as applied on dev** is ticked in the desktop app's Changes.
+
+**Written from the schema model, or from Compare**, the script may or may not be in dev already:
+dev has it when the model was pulled from dev, not when you edited the model file. So LiftOff
+checks. It builds the scripts, the new one included, on the scratch database and compares dev
+with that:
+- dev has every object the script changes, as the script makes it: the script is recorded on dev;
+- dev is exactly what all the scripts build: every script still pending on dev is recorded (this
+  also mends scripts written before, which dev still listed as pending);
+- otherwise nothing is recorded, and the log says which objects dev does not have yet.
+
+`generate --from model --record-on-dev` does this check, and so do VS Code's **Generate Migration
+from Schema Model**, `compare --migration` and the desktop app's Compare.
 
 ## Changes that may lose data
 

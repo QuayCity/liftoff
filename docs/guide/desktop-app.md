@@ -68,7 +68,9 @@ file; `${env.NAME}` is kept as written.
 
 The selected environment shows its scripts and their state on that database. Two tabs:
 
-**Migrations**: the scripts, with **Run only this** on each pending one, and the commands:
+**Migrations**: the scripts, with **Run only this** and **Mark as applied…** (record it without
+running it, for a database that already has its changes; it asks first) on each pending one, and
+the commands:
 
 | command | does |
 | --- | --- |

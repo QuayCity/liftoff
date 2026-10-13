@@ -144,8 +144,11 @@ count as out of order: the next plain `migrate` refuses them until you run
 liftoff -e dev mark-applied V0005__phone.sql
 ```
 
-records the script as run without running it. For the dev database a script was written from,
-which already has the change.
+records the script as run without running it. For a database that already has the script's
+changes: the dev database it was written from, or one changed by hand the same way. The desktop app
+has **Mark as applied…** next to each pending script, VS Code **Mark as Applied…** on its menu;
+both ask first. If the database does not have the changes, the scripts after it may fail there,
+and `check` shows what is missing as drift.
 
 ## Mark a database as being at a version: `baseline`
 

@@ -215,6 +215,11 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
     return checks.check(cfg, s(a, 'env'), undefined, { drift: b(a, 'drift'), changes: b(a, 'changes'), dryRun: b(a, 'dryRun') }, h.log)
   },
   migration_save: (a) => diff.save(load(a.path), s(a, 'fileName'), s(a, 'sql')),
+  /** After a migration from Compare: recorded on dev when dev already has it (diff.recordWhereAlreadyThere). */
+  migration_record_where_there: (a, h) => {
+    if (!Array.isArray(a.changed) || !a.changed.every((x) => typeof x === 'string')) throw configError('changed must be a list of object ids')
+    return diff.recordWhereAlreadyThere(load(a.path), s(a, 'script'), a.changed as string[], {}, h.log)
+  },
 
   /* Compare: any two sides (an environment, a URL, model, migrations, snapshot:<file>) */
   compare_run: (a, h) => compare.compare(load(a.path), compare.parseSide(s(a, 'source')), compare.parseSide(s(a, 'target')), undefined, h.log),

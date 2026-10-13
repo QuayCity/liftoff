@@ -154,10 +154,13 @@ test('schema model as the source: pull, check, gate and generate from the comman
     assert.equal(gate.error.code, 'LIFTOFF_MODEL_AHEAD')
     assert.deepEqual(gate.result.changes.map((c: { id: string }) => c.id).sort(), ['table:public.customers', 'table:public.orders'])
 
-    // Generate from the model (no dev database involved), then the gate passes.
-    r = run(['generate', '--from', 'model', '--description', 'from model'])
+    // Generate from the model, then the gate passes. The model was pulled from dev, so with
+    // --record-on-dev the script is recorded there (checked), not left pending for ever.
+    r = run(['generate', '--from', 'model', '--record-on-dev', '--description', 'from model'])
     assert.equal(r.code, 0, r.stderr)
     assert.match(json(r).result.written, /__from_model\.sql$/)
+    assert.match(r.stderr, /Recorded V\S*__from_model\.sql as applied on dev without running it/)
+    assert.deepEqual(json(run(['-e', 'dev', 'info'])).result.map((i: { state: string }) => i.state), ['applied'])
     assert.equal(run(['check', '--model']).code, 0)
 
     // A broken file: exit 12, the file named in the JSON.

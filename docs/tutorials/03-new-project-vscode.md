@@ -107,9 +107,10 @@ orders`.
 
 ## Step 6: deploy to test
 
-In the **Environments** view, expand an environment: V0001 is listed, **pending**. Under dev too: the
-script was generated from the model, so dev's history does not know dev has the tables. You never
-deploy to dev here, so that is fine.
+In the **Environments** view, expand an environment: V0001 is listed, **pending** on test and
+prod. On dev it is **applied**: the model was pulled from dev, so dev already has the tables, and
+LiftOff recorded the script there when it wrote it (it checks first: a change made only in the
+model stays pending on dev).
 
 Right-click **test**:
 

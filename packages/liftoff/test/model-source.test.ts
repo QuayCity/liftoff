@@ -65,6 +65,8 @@ test('PostgreSQL: dev -> schema model -> migration, then a hand edit of the mode
     assert.ok(cmp.changes.some((c) => c.id === 'table:public.orders') && cmp.changes.some((c) => c.id === 'view:public.big_orders'), JSON.stringify(cmp.changes.map((c) => c.id)))
     const first = diff.generate(cfg, cmp.changes, 'from the model', false)
     diff.save(cfg, first.file_name, first.sql)
+    // The model was pulled from dev, so dev has all of it: recorded there, not left pending forever.
+    assert.deepEqual(await diff.recordWhereAlreadyThere(cfg, first.file_name, cmp.changes.map((c) => c.id), { scratch: 'ci_scratch' }), [first.file_name])
     cmp = await model.versusMigrations(cfg, 'ci_scratch')
     assert.deepEqual(cmp.changes.map((c) => c.id), [], `nothing left after the first migration\n${first.sql}`)
     // And the scripts build what dev has.
@@ -78,8 +80,22 @@ test('PostgreSQL: dev -> schema model -> migration, then a hand edit of the mode
     assert.match(cmp.changes[0].sql, /ADD COLUMN paid_at timestamp with time zone/)
     const second = diff.generate(cfg, cmp.changes, 'paid at', false)
     diff.save(cfg, second.file_name, second.sql)
+    // Made in the model, not in dev: dev does not have it, so it stays pending there.
+    assert.deepEqual(await diff.recordWhereAlreadyThere(cfg, second.file_name, ['table:public.orders'], { scratch: 'ci_scratch' }), [])
+    const onDev = async () => Object.fromEntries((await runner.info(cfg, 'dev')).map((i) => [i.script, i.state]))
+    assert.deepEqual(await onDev(), { [first.file_name]: 'applied', [second.file_name]: 'pending' })
     await runner.migrate(cfg, 'test')
     assert.deepEqual((await model.versusMigrations(cfg, 'ci_scratch')).changes, [])
+
+    // 3b. Someone adds the column to dev by hand too, and makes the next change in dev, pulled into
+    // the model: dev now is exactly what the scripts build, so the stuck one is recorded as well.
+    await sql(cfg, 'dev', `alter table orders add column paid_at timestamptz; alter table customers add column phone text;`)
+    model.save(cfg, await model.status(cfg, 'dev'))
+    cmp = await model.versusMigrations(cfg, 'ci_scratch')
+    const third = diff.generate(cfg, cmp.changes, 'phone', false)
+    diff.save(cfg, third.file_name, third.sql)
+    assert.deepEqual(await diff.recordWhereAlreadyThere(cfg, third.file_name, cmp.changes.map((c) => c.id), { scratch: 'ci_scratch' }), [second.file_name, third.file_name])
+    assert.deepEqual(await onDev(), { [first.file_name]: 'applied', [second.file_name]: 'applied', [third.file_name]: 'applied' })
 
     // 4. A broken edit: the build names the file and the database's error.
     fs.writeFileSync(path.join(p.dir, 'schema-model/views/public.broken.sql'), 'CREATE VIEW public.broken AS\nSELECT no_such_column FROM public.orders;\n')

@@ -52,6 +52,19 @@ test.describe('F04 Environments', () => {
     await expect.poll(order).toEqual(['scratch', 'local', 'staging', 'production'])
   })
 
+  test('F04-H8 a pending script on a database that already has it: Mark as applied, after a warning', async ({ page }) => {
+    await page.getByRole('region', { name: 'staging environment' }).click()
+    const table = page.getByRole('table', { name: 'Migrations on staging' })
+    await expect(table.getByText('Pending')).toHaveCount(2)
+    await table.getByRole('button', { name: /^Mark V\S+__tax_function\.sql as applied$/ }).click()
+    const dialog = page.getByRole('dialog', { name: /^Record V\S+__tax_function\.sql as applied on staging\?$/ })
+    await expect(dialog.getByText(/already has this script's changes/)).toBeVisible()
+    await expectNoA11yViolations(page, 'Mark as applied')
+    await dialog.getByRole('button', { name: 'Record as applied' }).click()
+    await expect(page.getByText(/^Recorded V\S+__tax_function\.sql as applied on staging$/)).toBeVisible()
+    await expect(table.getByText('Pending')).toHaveCount(1)
+  })
+
   test('F09-E1/H1 clean needs the exact environment name', async ({ page }) => {
     await page.getByRole('region', { name: 'scratch environment' }).getByRole('button', { name: 'scratch' }).click()
     const details = page.getByRole('region', { name: 'scratch details' })

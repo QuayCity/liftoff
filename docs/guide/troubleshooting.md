@@ -127,8 +127,10 @@ The databases have objects LiftOff does not compare yet. Handle those with hand-
 See [What is compared](generating.md#what-is-compared).
 
 **`liftoff -e dev migrate` fails because dev already has the table**
-The script was written from dev, so dev has the change but its history does not. Record it:
-`liftoff -e dev mark-applied V0005__….sql`, or generate with `--record-on-dev` next time.
+The script was written from dev (or from a model pulled from dev), so dev has the change but its
+history does not. Record it: `liftoff -e dev mark-applied V0005__….sql`, or **Mark as applied…**
+in the apps; generate with `--record-on-dev` next time. Since 0.2.0 the apps check and record a
+script on dev when they write it, and then also older ones dev still lists, if dev has them.
 
 ## Command line
 

@@ -188,6 +188,11 @@
         "category": "LiftOff"
       },
       {
+        "command": "liftoff.markApplied",
+        "title": "Mark as Applied…",
+        "category": "LiftOff"
+      },
+      {
         "command": "liftoff.runOnly",
         "title": "Run This Script Only",
         "category": "LiftOff",
@@ -391,6 +396,11 @@
           "group": "1_run@1"
         },
         {
+          "command": "liftoff.markApplied",
+          "when": "view == liftoff.environments && viewItem == migration.pickable",
+          "group": "1_run@2"
+        },
+        {
           "command": "liftoff.adopt",
           "when": "view == liftoff.environments && viewItem == environment && liftoff.noScripts",
           "group": "3_edit@2"
@@ -411,6 +421,10 @@
         },
         {
           "command": "liftoff.runOnly",
+          "when": "false"
+        },
+        {
+          "command": "liftoff.markApplied",
           "when": "false"
         },
         {

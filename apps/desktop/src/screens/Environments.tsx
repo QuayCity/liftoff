@@ -83,6 +83,17 @@ export function Environments({ project, onProject }: { project: Project; onProje
   const [differs, setDiffers] = useState<{ env: string; differences: { id: string; kind: string }[] } | null>(null)
   // A script picked to run on its own, waiting for confirmation.
   const [pick, setPick] = useState<{ env: EnvView; info: MigrationInfo } | null>(null)
+  // Record a pending script without running it: for a database that already has its changes.
+  const [markFor, setMarkFor] = useState<{ env: EnvView; info: MigrationInfo } | null>(null)
+  const markApplied = async (env: string, script: string) => {
+    try {
+      await api.markApplied(project.root, env, script)
+      toast({ tone: 'success', title: `Recorded ${script} as applied on ${env}` })
+    } catch (e) {
+      toast({ tone: 'danger', title: errorText(e) })
+    }
+    void load(env)
+  }
 
   const load = useCallback(async (name: string) => {
     setStatus((s) => ({ ...s, [name]: { ...s[name], loading: true } }))
@@ -285,7 +296,10 @@ export function Environments({ project, onProject }: { project: Project; onProje
                   {
                     header: 'Run',
                     cell: (r) => pickable(r) && (
-                      <Button size="sm" variant="ghost" aria-label={`Run only ${r.script}`} disabled={!!running} onClick={() => setPick({ env: sel, info: r })}>Run only this</Button>
+                      <span className="inline-flex gap-1">
+                        <Button size="sm" variant="ghost" aria-label={`Run only ${r.script}`} disabled={!!running} onClick={() => setPick({ env: sel, info: r })}>Run only this</Button>
+                        <Button size="sm" variant="ghost" aria-label={`Mark ${r.script} as applied`} disabled={!!running} onClick={() => setMarkFor({ env: sel, info: r })}>Mark as applied…</Button>
+                      </span>
                     ),
                     className: 'text-right',
                   },
@@ -328,6 +342,15 @@ export function Environments({ project, onProject }: { project: Project; onProje
       <ConnectionDialog key={dialog ? dialog.editing?.name ?? 'new' : 'closed'} open={!!dialog} onOpenChange={(o) => !o && setDialog(null)} project={project} editing={dialog?.editing} onSaved={onProject} />
       <CaptureDialog key={`capture:${captured?.g.file_name ?? ''}`} captured={captured} project={project} onClose={() => setCaptured(null)}
         onDone={(msg, tone) => { setCaptured(null); toast({ tone, title: msg }); if (captured) load(captured.env) }} />
+      <Dialog open={!!markFor} onOpenChange={(o) => !o && setMarkFor(null)} size="sm" title={`Record ${markFor?.info.script ?? ''} as applied on ${markFor?.env.name ?? ''}?`}
+        description="Without running it. Only for a database that already has this script's changes: the one it was written from, or one changed by hand the same way."
+        footer={<>
+          <Button onClick={() => setMarkFor(null)}>Cancel</Button>
+          <Button variant={markFor?.env.role === 'prod' ? 'danger' : 'primary'} onClick={() => { const m = markFor!; setMarkFor(null); void markApplied(m.env.name, m.info.script) }}>Record as applied</Button>
+        </>}>
+        <p className="text-sm text-muted">If it does not have them, the scripts after this one may fail there, and Check for drift will show what is missing.</p>
+      </Dialog>
+
       <Dialog open={!!pick} onOpenChange={(o) => !o && setPick(null)} size="sm" title={`Run only ${pick?.info.script ?? ''} on ${pick?.env.name ?? ''}?`}
         description="Nothing else runs. Other pending scripts stay pending."
         footer={<>

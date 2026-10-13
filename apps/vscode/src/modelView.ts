@@ -165,7 +165,7 @@ export class SchemaModelView implements vscode.TreeDataProvider<Item>, vscode.Te
     const undo = vscode.workspace.getConfiguration('liftoff').get<boolean>('generateUndo', false)
     try {
       const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Writing the migration from the schema model' }, () =>
-        this.lo.run<{ written: string | null }>(['generate', '--from', 'model', '--description', description.trim(), ...(undo ? ['--undo'] : [])]),
+        this.lo.run<{ written: string | null }>(['generate', '--from', 'model', '--record-on-dev', '--description', description.trim(), ...(undo ? ['--undo'] : [])]),
       )
       if (!r.written) {
         void vscode.window.showInformationMessage('The migration scripts already build the schema model; nothing to write.')
