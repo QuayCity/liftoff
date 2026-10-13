@@ -230,6 +230,6 @@ commit, deploy."
 - "Coming from **Flyway**? **Import Flyway Project** converts the settings and keeps the scripts."
 - "**Compare Data…** compares rows too, fast on tables with millions of rows."
 - "**Show Log** shows every `liftoff` command the extension ran."
-- "It is open source (MIT) and talks to nothing but your databases: no telemetry."
+- "It is open source (MIT) and talks to nothing but your databases: no telemetry, no update checks."
 
 **Show:** [the documentation](../README.md) and its tutorials, for those who want to try it.

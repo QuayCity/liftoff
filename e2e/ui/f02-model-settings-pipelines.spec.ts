@@ -63,3 +63,22 @@ test('the last workspace comes back on the next open', async ({ page }) => {
   await page.goto('/?open=1')
   await expect(page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Scripts' })).toHaveAttribute('aria-current', 'page')
 })
+
+test('U-H2 an update: the button on the start page and in a project, and the choice under Settings > This app', async ({ page }) => {
+  const checkConsole = watchConsole(page)
+  await page.goto('/?update=available')
+  await page.getByRole('button', { name: 'Update to 0.2.0' }).click()
+  await expect(page.getByRole('button', { name: 'Restart to update' })).toBeVisible()
+
+  await page.goto('/?open=1&ws=Settings')
+  const app = page.getByRole('region', { name: 'This app' })
+  await expect(app.getByRole('status')).toHaveText('This is LiftOff 0.1.0.')
+  await app.getByRole('button', { name: 'Check now' }).click()
+  await expect(app.getByRole('status')).toHaveText('LiftOff 0.1.0 is the latest version.')
+  const mode = app.getByLabel('Updates')
+  await expect(mode).toHaveValue('notify')
+  await mode.selectOption('off')
+  await expect(app.getByText('LiftOff contacts nothing but your databases.')).toBeVisible()
+  await expectNoA11yViolations(page, 'Settings, This app')
+  checkConsole()
+})

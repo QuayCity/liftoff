@@ -142,9 +142,10 @@ Flyway-style `-key=value` options are accepted, and `import-flyway-history` copi
 you have, which LiftOff rebuilds from your scripts to compare against. `liftoff create-scratch`
 makes one next to your dev database.
 
-**Does it send anything anywhere?** No. No telemetry, no LiftOff account, no update checks. The one
-exception is signing in to Azure SQL with Microsoft Entra ID, which talks to Microsoft's sign-in
-service, as any SQL Server tool does. Passwords go to
+**Does it send anything anywhere?** No. No telemetry, no LiftOff account. Two exceptions: signing
+in to Azure SQL with Microsoft Entra ID talks to Microsoft's sign-in service, as any SQL Server
+tool does; and the desktop app asks GitHub whether there is a newer LiftOff (switch it off under
+Settings > This app). The command line never checks for updates. Passwords go to
 your operating system's keychain or come from environment variables, never into `liftoff.toml`.
 
 **Is it ready for production?** It is new (version 0.1). The tests run against real PostgreSQL,

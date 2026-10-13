@@ -92,6 +92,8 @@ type Bridge = {
   saveFile(defaultPath: string, filterName: string, extensions: string[]): Promise<string | null>
   onLog(cb: (e: LogEvent) => void): () => void
   setTheme(theme: 'system' | 'light' | 'dark'): Promise<void>
+  update(action: UpdateAction, mode?: UpdateMode): Promise<UpdateInfo | undefined>
+  onUpdate(cb: (info: UpdateInfo) => void): () => void
 }
 const bridge = (window as unknown as { liftoff?: Bridge }).liftoff
 
@@ -100,6 +102,64 @@ export const inDesktop = bridge !== undefined
 
 /** The window frame follows the app's theme; a browser has none to change. */
 export const setNativeTheme = (theme: 'system' | 'light' | 'dark') => void bridge?.setTheme(theme)
+
+/* ---------- updates of the app itself (electron/updates.ts) ---------- */
+
+export type UpdateMode = 'notify' | 'auto' | 'off'
+export type UpdateState =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'latest'; version: string }
+  | { state: 'available'; version: string; page: string }
+  | { state: 'manual'; version: string; page: string }
+  | { state: 'downloading'; version: string; percent: number }
+  | { state: 'ready'; version: string }
+  | { state: 'failed'; message: string }
+export type UpdateInfo = { mode: UpdateMode; current: string; status: UpdateState }
+type UpdateAction = 'info' | 'mode' | 'check' | 'download' | 'install' | 'page'
+
+/** The browser preview pretends: ?update=available, downloading or ready shows that state. */
+const fakeUpdate = (() => {
+  let info: UpdateInfo = { mode: 'notify', current: '0.1.0', status: { state: 'idle' } }
+  const shown = new URLSearchParams(location.search).get('update')
+  if (shown === 'available') info.status = { state: 'available', version: '0.2.0', page: 'https://github.com/sanderstad/liftoff/releases/tag/v0.2.0' }
+  if (shown === 'ready') info.status = { state: 'ready', version: '0.2.0' }
+  const listeners = new Set<(i: UpdateInfo) => void>()
+  const set = (status: UpdateState) => {
+    info = { ...info, status }
+    for (const l of listeners) l(info)
+    return info
+  }
+  return {
+    async update(action: UpdateAction, mode?: UpdateMode): Promise<UpdateInfo | undefined> {
+      if (action === 'mode' && mode) {
+        info = { ...info, mode }
+        return set(info.status)
+      }
+      if (action === 'check') return set(info.status.state === 'available' ? info.status : { state: 'latest', version: info.current })
+      if (action === 'download' && info.status.state === 'available') {
+        const version = info.status.version
+        for (const percent of [30, 70]) setTimeout(() => set({ state: 'downloading', version, percent }), percent * 5)
+        setTimeout(() => set({ state: 'ready', version }), 500)
+      }
+      return info
+    },
+    onUpdate(cb: (i: UpdateInfo) => void) {
+      listeners.add(cb)
+      return () => void listeners.delete(cb)
+    },
+  }
+})()
+
+export const updates = {
+  info: () => (bridge ?? fakeUpdate).update('info') as Promise<UpdateInfo>,
+  setMode: (mode: UpdateMode) => (bridge ?? fakeUpdate).update('mode', mode) as Promise<UpdateInfo>,
+  check: () => (bridge ?? fakeUpdate).update('check') as Promise<UpdateInfo>,
+  download: () => (bridge ?? fakeUpdate).update('download') as Promise<UpdateInfo>,
+  install: () => (bridge ?? fakeUpdate).update('install'),
+  openPage: () => (bridge ?? fakeUpdate).update('page'),
+  onChange: (cb: (info: UpdateInfo) => void) => (bridge ?? fakeUpdate).onUpdate(cb),
+}
 
 /** Calls a command; a failure rejects with its ErrorReport (code, exit_code, message). */
 async function invoke<T>(name: string, args?: Record<string, unknown>): Promise<T> {

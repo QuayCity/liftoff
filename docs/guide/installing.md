@@ -139,6 +139,12 @@ Or run it straight from the source: `node packages/liftoff/src/cli/main.ts --hel
 
 ## What it connects to
 
-The program only connects to your databases, plus Microsoft's sign-in service when a SQL Server
-environment signs in with Microsoft Entra ID. There is no telemetry, no update check and no
-account. A CI runner only needs to reach the databases.
+The `liftoff` program and the VS Code extension only connect to your databases, plus Microsoft's
+sign-in service when a SQL Server environment signs in with Microsoft Entra ID. There is no
+telemetry and no account. A CI runner only needs to reach the databases.
+
+The desktop app also looks for updates of itself: it asks GitHub for the latest LiftOff release
+(`api.github.com`), and downloads the new setup or AppImage from GitHub when you update. Nothing
+about you or your projects is sent. **Settings > This app > Updates** chooses: tell me (the
+default), install automatically, or never check, which leaves the databases as its only
+connections. See [The desktop app](desktop-app.md#updates).

@@ -334,6 +334,6 @@ Undid V0002__phone.sql in 60 ms; it is pending again
   environment is checked against it."
 - "Coming from **Flyway**? LiftOff converts the settings and keeps the scripts."
 - "Compare also does **data**, fast on tables with millions of rows."
-- "It is open source (MIT) and talks to nothing but your databases: no telemetry."
+- "It is open source (MIT) and talks to nothing but your databases: no telemetry, no update checks."
 
 **Show:** [the documentation](../README.md) and its tutorials, for those who want to try it.

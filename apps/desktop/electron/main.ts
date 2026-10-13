@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron'
 import * as path from 'node:path'
 import { asLiftoffError } from '../../../packages/liftoff/src/core/errors.ts'
 import { commands, type Host } from './commands.ts'
+import { Updater, type UpdateMode } from './updates.ts'
 
 // Kept from the earlier desktop build, so recent projects carry over.
 const configDir = path.join(app.getPath('appData'), 'app.liftoff.desktop')
@@ -48,6 +49,19 @@ app.whenReady().then(() => {
     } catch (e) {
       return { ok: false, error: asLiftoffError(e).report() }
     }
+  })
+
+  const updater = new Updater(configDir, (info) => {
+    if (!win.isDestroyed()) win.webContents.send('liftoff:update', info)
+  })
+  updater.start()
+  ipcMain.handle('liftoff:update', (_e, action: unknown, mode: unknown) => {
+    if (action === 'mode' && (mode === 'notify' || mode === 'auto' || mode === 'off')) return updater.setMode(mode as UpdateMode)
+    if (action === 'check') return updater.check()
+    if (action === 'download') return updater.download()
+    if (action === 'install') return updater.install()
+    if (action === 'page') return updater.openPage()
+    return updater.info()
   })
 
   ipcMain.handle('liftoff:set-theme', (_e, theme: unknown) => {

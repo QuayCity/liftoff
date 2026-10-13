@@ -140,7 +140,33 @@ that deploys. It shows the **Workflow preview** and the **Repository secrets to 
 The gear. **Project**: name, migrations folder, schemas, the history table (fixed once databases
 have history) and the run lock. **Comparison filters**: **Add filter**, with Leave out or Include,
 the object type and a pattern. **Save settings** writes `liftoff.toml`; leaving with unsaved
-changes asks first.
+changes asks first. **This app**: settings for LiftOff on this computer, in every project; see
+[Updates](#updates).
+
+## Updates
+
+When there is a newer LiftOff, an **Update to x.y.z** button appears at the top, on the start page
+and in the title bar. Click it: the new version downloads (the button shows how far), its
+SHA-256 checksum is checked against the one GitHub publishes, and the button becomes **Restart to
+update**. Click that to install and start the new version; your projects and settings stay.
+
+**Settings > This app > Updates** chooses how:
+
+| choice | what happens |
+| --- | --- |
+| **Tell me when there is an update** (the default) | checks at start and every six hours, and shows the button |
+| **Download and install updates automatically** | downloads on its own; only **Restart to update** appears, so the restart is still your choice |
+| **Never check for updates** | no checks: the app connects to nothing but your databases |
+
+**Check now** checks straight away and says what it found.
+
+- Windows: the update runs the new setup silently in the folder LiftOff is installed in, then
+  starts the app again. The `liftoff` program on your PATH is updated with it.
+- Linux: an AppImage replaces itself and restarts. Started some other way, the button says
+  **Download x.y.z** and opens the release page.
+- What is contacted: `api.github.com` for the latest release, and GitHub's download servers for
+  the file. Nothing about you or your projects is sent. While the LiftOff repository is private,
+  GitHub does not answer, and the app simply finds no update.
 
 ## Without databases
 

@@ -5,6 +5,7 @@ import { api, errorText, type Filter, type LockMode, type Project } from '../api
 import { Button, Field, IconButton, Input, Select } from '../ui/controls'
 import { Card, InlineAlert } from '../ui/display'
 import { useToast } from '../ui/overlays'
+import { UpdateSettings } from '../ui/update'
 
 const objectTypes = ['any', 'table', 'view', 'function', 'type', 'sequence', 'trigger', 'extension'] as const
 
@@ -109,6 +110,12 @@ export function Settings({ project, onProject, onDirty }: { project: Project; on
         <Button disabled={!dirty || saving} onClick={() => setForm(formOf(project))}>Discard changes</Button>
         {dirty && <span className="text-sm text-warning">Unsaved changes</span>}
       </div>
+
+      <section aria-labelledby="app-h" className="flex flex-col gap-2">
+        <h3 id="app-h" className="text-lg">This app</h3>
+        <p className="text-sm text-muted">For LiftOff on this computer, in every project. Saved as soon as you change it.</p>
+        <Card className="p-4"><UpdateSettings /></Card>
+      </section>
 
     </div>
   )

@@ -7,6 +7,7 @@ import { Card, EmptyState, InlineAlert, Spinner } from '../ui/display'
 import logo from '../assets/logo.svg'
 import { Dialog } from '../ui/overlays'
 import { ThemeToggle } from '../ui/theme'
+import { UpdateButton } from '../ui/update'
 
 function ConvertSummary({ r }: { r: ConvertReport }) {
   return (
@@ -83,7 +84,7 @@ export function Home({ onOpen }: { onOpen: (p: Project) => void }) {
           <h1 className="text-display">LiftOff</h1>
           <p className="mt-1 text-muted">Turn database changes into reviewed migration scripts, then run them everywhere.</p>
         </div>
-        <div className="ml-auto self-start"><ThemeToggle /></div>
+        <div className="ml-auto flex items-center gap-2 self-start"><UpdateButton /><ThemeToggle /></div>
       </header>
 
       <div className="grid grid-cols-3 gap-4">

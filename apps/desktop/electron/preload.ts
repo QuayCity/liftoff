@@ -1,4 +1,4 @@
-// The only bridge between the window and the main process: six narrow calls, nothing else.
+// The only bridge between the window and the main process: seven narrow calls, nothing else.
 
 import { contextBridge, ipcRenderer } from 'electron'
 
@@ -10,6 +10,12 @@ contextBridge.exposeInMainWorld('liftoff', {
   openFile: (filterName: string, extensions: string[]) => ipcRenderer.invoke('liftoff:open-file', filterName, extensions),
   saveFile: (defaultPath: string, filterName: string, extensions: string[]) => ipcRenderer.invoke('liftoff:save-file', defaultPath, filterName, extensions),
   setTheme: (theme: string) => ipcRenderer.invoke('liftoff:set-theme', theme),
+  update: (action: string, mode?: string) => ipcRenderer.invoke('liftoff:update', action, mode),
+  onUpdate: (cb: (info: unknown) => void) => {
+    const listener = (_e: unknown, info: unknown) => cb(info)
+    ipcRenderer.on('liftoff:update', listener)
+    return () => ipcRenderer.removeListener('liftoff:update', listener)
+  },
   onLog: (cb: (e: LogEvent) => void) => {
     const listener = (_e: unknown, payload: LogEvent) => cb(payload)
     ipcRenderer.on('liftoff:log', listener)
