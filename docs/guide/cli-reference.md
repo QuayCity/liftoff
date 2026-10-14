@@ -412,11 +412,12 @@ Usage: liftoff ci [OPTIONS]
 
 Options:
       --stage <STAGE>                Environments to deploy to, in order (repeat the flag; required)
+      --platform <PLATFORM>          Where it runs: github (GitHub Actions) or azure (Azure Pipelines) [default: github]
       --branch <BRANCH>              The branch whose pushes deploy [default: main]
       --no-checks                    Leave out validate and the drift check
       --model <MODEL>                Pull requests and the schema model: off, check (fail when a model change has no migration script) or generate (write it and commit it to the pull request) [default: off]
       --install <INSTALL>            Command that installs liftoff on the runner [default: curl -fsSL -o liftoff https://github.com/sanderstad/liftoff/releases/latest/download/liftoff-linux-x64 && sudo install -m 755 liftoff /usr/local/bin/liftoff]
-      --write                        Write .github/workflows/liftoff.yml (otherwise print it)
+      --write                        Write .github/workflows/liftoff.yml or azure-pipelines.yml (otherwise print it)
       --force                        Replace an existing workflow file
 ```
 

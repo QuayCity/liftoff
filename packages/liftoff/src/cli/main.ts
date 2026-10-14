@@ -548,11 +548,12 @@ const COMMANDS: Record<string, Command> = {
     help: 'Write a CI workflow that runs the migrations',
     options: {
       stage: { type: 'string', multiple: true, help: 'Environments to deploy to, in order (repeat the flag; required)' },
+      platform: { type: 'string', default: 'github', help: 'Where it runs: github (GitHub Actions) or azure (Azure Pipelines)' },
       branch: { type: 'string', default: 'main', help: 'The branch whose pushes deploy' },
       'no-checks': { type: 'boolean', help: 'Leave out validate and the drift check' },
       model: { type: 'string', default: 'off', help: 'Pull requests and the schema model: off, check (fail when a model change has no migration script) or generate (write it and commit it to the pull request)' },
       install: { type: 'string', default: ci.DEFAULT_INSTALL, help: 'Command that installs liftoff on the runner' },
-      write: { type: 'boolean', help: 'Write .github/workflows/liftoff.yml (otherwise print it)' },
+      write: { type: 'boolean', help: 'Write .github/workflows/liftoff.yml or azure-pipelines.yml (otherwise print it)' },
       force: { type: 'boolean', help: 'Replace an existing workflow file' },
     },
     async run(ctx, v) {
@@ -561,9 +562,11 @@ const COMMANDS: Record<string, Command> = {
       if (!stages.length) throw configError('--stage is required: name the environments to deploy to, in order')
       const m = str(v, 'model')
       if (m !== 'off' && m !== 'check' && m !== 'generate') throw new UsageError(`--model must be off, check or generate, not '${m}'`)
-      const yaml = ci.githubActions(cfg, { stages, branch: str(v, 'branch')!, checks: !flag(v, 'no-checks'), install: str(v, 'install')!, model: m })
+      const platform = str(v, 'platform')
+      if (platform !== 'github' && platform !== 'azure') throw new UsageError(`--platform must be github or azure, not '${platform}'`)
+      const yaml = ci.workflow(cfg, { stages, branch: str(v, 'branch')!, checks: !flag(v, 'no-checks'), install: str(v, 'install')!, model: m, platform })
       if (flag(v, 'write')) {
-        const written = ci.write(cfg, yaml, flag(v, 'force'))
+        const written = ci.write(cfg, yaml, flag(v, 'force'), platform)
         return [{ written }, `Wrote ${written}`]
       }
       return [{ yaml }, yaml]

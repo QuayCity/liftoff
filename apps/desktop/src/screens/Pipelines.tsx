@@ -1,7 +1,7 @@
-// S17 Pipelines: a GitHub Actions workflow that runs the migrations, stage by stage.
+// S17 Pipelines: a GitHub Actions workflow or an Azure Pipelines file that runs the migrations, stage by stage.
 import { Rocket } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { api, errorText, type Project } from '../api'
+import { api, errorText, type CiPlatform, type Project } from '../api'
 import { Button, Checkbox, Field, Input, RadioGroup, Switch } from '../ui/controls'
 import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
 import { useToast } from '../ui/overlays'
@@ -13,6 +13,7 @@ export function Pipelines({ project }: { project: Project }) {
   const toast = useToast()
   const targets = project.environments.filter((e) => e.role === 'test' || e.role === 'prod')
   const [stages, setStages] = useState<string[]>(targets.map((e) => e.name))
+  const [platform, setPlatform] = useState<CiPlatform>('github')
   const [branch, setBranch] = useState('main')
   const [checks, setChecks] = useState(true)
   const [model, setModel] = useState<'off' | 'check' | 'generate'>('off')
@@ -23,11 +24,11 @@ export function Pipelines({ project }: { project: Project }) {
 
   useEffect(() => {
     if (!stages.length) return
-    api.ciWorkflow(project.root, { stages, branch, checks, install, model }).then(
+    api.ciWorkflow(project.root, { stages, branch, checks, install, model, platform }).then(
       (y) => { setYaml(y); setError(null) },
       (e) => { setYaml(null); setError(errorText(e)) },
     )
-  }, [project.root, stages, branch, checks, install, model])
+  }, [project.root, stages, branch, checks, install, model, platform])
 
   if (targets.length === 0) {
     return (
@@ -37,11 +38,12 @@ export function Pipelines({ project }: { project: Project }) {
     )
   }
 
+  const azure = platform === 'azure'
   const write = async (overwrite: boolean) => {
     if (!yaml) return
     setWriting(true)
     try {
-      const path = await api.ciWrite(project.root, yaml, overwrite)
+      const path = await api.ciWrite(project.root, yaml, overwrite, platform)
       toast({ tone: 'success', title: `Wrote ${path}` })
     } catch (e) {
       const msg = errorText(e)
@@ -55,7 +57,11 @@ export function Pipelines({ project }: { project: Project }) {
   return (
     <div className="grid h-full grid-cols-[minmax(300px,1fr)_2fr] gap-6 p-6">
       <section aria-labelledby="ci-h" className="flex flex-col gap-4">
-        <h2 id="ci-h" className="text-xl">GitHub Actions</h2>
+        <h2 id="ci-h" className="text-xl">{azure ? 'Azure Pipelines' : 'GitHub Actions'}</h2>
+        <RadioGroup legend="Runs on" name="platform" value={platform} onChange={setPlatform} options={[
+          { value: 'github', label: 'GitHub Actions' },
+          { value: 'azure', label: 'Azure DevOps', help: 'Azure Pipelines, with the repository in Azure Repos or on GitHub.' },
+        ]} />
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-1 text-sm font-medium">Deploy to, in this order</legend>
           {targets.map((e) => (
@@ -74,13 +80,15 @@ export function Pipelines({ project }: { project: Project }) {
           {(a) => <Input {...a} mono value={install} onChange={(e) => setInstall(e.target.value)} />}
         </Field>
         <div>
-          <h3 className="text-sm font-medium">Repository secrets to add</h3>
+          <h3 className="text-sm font-medium">{azure ? 'Secret pipeline variables to add' : 'Repository secrets to add'}</h3>
           <ul className="mt-1 list-disc pl-5 font-mono text-xs">
             {stages.map((s) => <li key={s}>{secret(s, 'PASSWORD')}</li>)}
           </ul>
-          <p className="mt-1 text-xs font-normal text-muted">A GitHub environment with the same name as each stage can require approval before it runs.</p>
+          <p className="mt-1 text-xs font-normal text-muted">{azure
+            ? 'An Azure DevOps environment with the same name as each stage can require approval before it runs. On Azure Repos, add this pipeline as a build validation policy so pull requests run the checks.'
+            : 'A GitHub environment with the same name as each stage can require approval before it runs.'}</p>
         </div>
-        <div><Button variant="primary" disabled={!yaml} loading={writing} onClick={() => write(false)}>Write .github/workflows/liftoff.yml</Button></div>
+        <div><Button variant="primary" disabled={!yaml} loading={writing} onClick={() => write(false)}>Write {azure ? 'azure-pipelines.yml' : '.github/workflows/liftoff.yml'}</Button></div>
       </section>
       <section aria-label="Workflow preview" className="min-h-0 overflow-auto">
         {stages.length === 0 && <InlineAlert tone="info" title="Choose at least one environment">The workflow needs somewhere to deploy.</InlineAlert>}

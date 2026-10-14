@@ -92,7 +92,8 @@ export type ConvertReport = { source: string; written: string; environments: str
 export type HistoryImport = { environment: string; imported: number; skipped: string[]; edited: string[]; attention: string[] }
 export type GitStatus = { branch: string | null; upstream: string | null; ahead: number; behind: number; files: { path: string; change: string }[] }
 export type ModelChange = { path: string; object_type: string; kind: 'added' | 'changed' | 'removed'; before: string | null; after: string | null }
-export type CiOptions = { stages: string[]; branch: string; checks: boolean; install: string; model?: 'off' | 'check' | 'generate' }
+export type CiPlatform = 'github' | 'azure'
+export type CiOptions = { stages: string[]; branch: string; checks: boolean; install: string; model?: 'off' | 'check' | 'generate'; platform?: CiPlatform }
 export type ObjectCommit = { sha: string; short: string; author: string; date: string; message: string; path: string; deleted: boolean }
 export type RepairReport = { removed_failed: string[]; realigned: string[]; forgotten: string[] }
 /** One run against a database, from its activity table. `id` is the deployment id. */
@@ -240,7 +241,7 @@ type Api = {
   sampleCreate(folder: string): Promise<Project>
   projectSave(path: string, project: ProjectSettings): Promise<Project>
   ciWorkflow(path: string, options: CiOptions): Promise<string>
-  ciWrite(path: string, yaml: string, overwrite: boolean): Promise<string>
+  ciWrite(path: string, yaml: string, overwrite: boolean, platform: CiPlatform): Promise<string>
   gitStatus(path: string): Promise<GitStatus>
   gitDiff(path: string, file: string): Promise<string>
   gitCommit(path: string, files: string[], message: string): Promise<string>
@@ -315,7 +316,7 @@ const real: Api = {
   sampleCreate: (folder) => invoke('sample_create', { folder }),
   projectSave: (path, project) => invoke('project_save', { path, project }),
   ciWorkflow: (path, options) => invoke('ci_workflow', { path, options }),
-  ciWrite: (path, yaml, overwrite) => invoke('ci_write', { path, yaml, overwrite }),
+  ciWrite: (path, yaml, overwrite, platform) => invoke('ci_write', { path, yaml, overwrite, platform }),
   gitStatus: (path) => invoke('git_status', { path }),
   gitDiff: (path, file) => invoke('git_diff', { path, file }),
   gitCommit: (path, files, message) => invoke('git_commit', { path, files, message }),
@@ -617,8 +618,10 @@ const fakeApi: Api = {
     fake.project = { ...fake.project, ...s }
     return fakeProject()
   },
-  ciWorkflow: async (_p, o) => `# Written by LiftOff.\nname: Database migrations\non:\n  push:\n    branches: ['${o.branch}']\njobs:\n` + o.stages.map((s, i) => `  ${s}:\n    runs-on: ubuntu-latest\n${i ? `    needs: ${o.stages[i - 1]}\n` : ''}    steps:\n      - run: liftoff --environment '${s}' migrate\n`).join(''),
-  ciWrite: async (path) => `${path}/.github/workflows/liftoff.yml`,
+  ciWorkflow: async (_p, o) => o.platform === 'azure'
+    ? `# Written by LiftOff.\ntrigger:\n  branches:\n    include: ['${o.branch}']\nstages:\n` + o.stages.map((s, i) => `- stage: migrate_${s}\n  dependsOn: ${i ? `migrate_${o.stages[i - 1]}` : '[]'}\n  jobs:\n  - deployment: migrate\n    environment: '${s}'\n`).join('')
+    : `# Written by LiftOff.\nname: Database migrations\non:\n  push:\n    branches: ['${o.branch}']\njobs:\n` + o.stages.map((s, i) => `  ${s}:\n    runs-on: ubuntu-latest\n${i ? `    needs: ${o.stages[i - 1]}\n` : ''}    steps:\n      - run: liftoff --environment '${s}' migrate\n`).join(''),
+  ciWrite: async (path, _yaml, _overwrite, platform) => `${path}/${platform === 'azure' ? 'azure-pipelines.yml' : '.github/workflows/liftoff.yml'}`,
   gitStatus: async () => {
     await wait()
     return { branch: 'main', upstream: 'origin/main', ahead: fake.gitAhead, behind: 0, files: fake.gitFiles }

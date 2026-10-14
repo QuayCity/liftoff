@@ -58,6 +58,7 @@ The workflow:
 | option | what |
 | --- | --- |
 | `--stage <env>` | an environment to deploy to, in order; repeat it. Not dev or scratch |
+| `--platform azure` | write an Azure Pipelines file instead (see [Azure DevOps](#azure-devops)) |
 | `--branch <name>` | the branch whose pushes deploy (default `main`) |
 | `--no-checks` | leave out `validate` and the drift check |
 | `--model check` | pull requests that change `schema-model/` must include the migration script (`check --model`) |
@@ -77,6 +78,31 @@ self-hosted runner inside it.
 With `--model generate`, the workflow needs a scratch database to generate in; it uses a database
 service container on the runner. The optional secret `LIFTOFF_PUSH_TOKEN` (a fine-grained token
 with contents: write) lets the checks run again on the commit that adds the script.
+
+### Azure DevOps
+
+```sh
+liftoff ci --platform azure --stage test --stage prod           # print an Azure Pipelines file
+liftoff ci --platform azure --stage test --stage prod --write   # write azure-pipelines.yml
+```
+
+The same jobs, as Azure Pipelines stages. Create a pipeline from `azure-pipelines.yml` in the
+repository, then:
+
+- **Secrets**: add `LIFTOFF_ENV_<NAME>_PASSWORD` per stage as a secret pipeline variable (or in a
+  variable group linked to the pipeline). The file maps each into the steps that need it.
+- **Approvals**: each stage deploys to the Azure DevOps environment of the same name
+  (**Pipelines > Environments**). Add an approval there for production, and an **Exclusive lock**
+  check so deployments queue up instead of running side by side.
+- **Pull requests**: on Azure Repos, add the pipeline as a **Build validation** branch policy on
+  the deploying branch and make it required (the `pr` trigger in the file covers GitHub
+  repositories). The checks stage runs only for pull requests; the deploy stages never do.
+- **`--model generate`** commits the script to the pull request's branch, so the project's
+  **Build Service** needs **Contribute** on the repository (**Project settings > Repositories >
+  Security**).
+
+The scratch database for `--model` is a `docker run` on the Microsoft-hosted Ubuntu agent; a
+self-hosted agent needs Docker.
 
 ### Other CI systems
 

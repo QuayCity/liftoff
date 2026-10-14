@@ -321,7 +321,7 @@ export const commands: Record<string, (a: Args, h: Host) => unknown> = {
     return rulesView(load(a.path))
   },
   lint: (a) => rules.lint(load(a.path)),
-  ci_workflow: (a) => ci.githubActions(load(a.path), a.options as ci.CiOptions),
-  ci_write: (a) => ci.write(load(a.path), s(a, 'yaml'), b(a, 'overwrite')),
+  ci_workflow: (a) => ci.workflow(load(a.path), a.options as ci.CiOptions),
+  ci_write: (a) => ci.write(load(a.path), s(a, 'yaml'), b(a, 'overwrite'), a.platform as ci.Platform),
 
 }

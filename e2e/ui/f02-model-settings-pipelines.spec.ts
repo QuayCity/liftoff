@@ -54,6 +54,13 @@ test('S17 the workflow follows the chosen stages and installs LiftOff from its r
   await expectNoA11yViolations(page, 'Pipelines')
   await page.getByRole('button', { name: 'Write .github/workflows/liftoff.yml' }).click()
   await expect(page.getByText('Wrote C:/repos/shop-db/.github/workflows/liftoff.yml', { exact: true })).toBeVisible()
+  // Azure DevOps: its own file, stages and the name of its secret store.
+  await page.getByRole('radio', { name: 'Azure DevOps' }).check()
+  await expect(page.getByRole('heading', { name: 'Azure Pipelines' })).toBeVisible()
+  await expect(preview).toContainText('- stage: migrate_staging')
+  await expect(page.getByRole('heading', { name: 'Secret pipeline variables to add' })).toBeVisible()
+  await page.getByRole('button', { name: 'Write azure-pipelines.yml' }).click()
+  await expect(page.getByText('Wrote C:/repos/shop-db/azure-pipelines.yml', { exact: true })).toBeVisible()
   checkConsole()
 })
 

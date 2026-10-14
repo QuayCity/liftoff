@@ -1,5 +1,5 @@
-// The CI workflow generator (S17): a GitHub Actions workflow that runs the project's migrations,
-// stage by stage. Secrets come from the repository's settings; nothing secret is written into the file.
+// The CI workflow generator (S17): a GitHub Actions workflow or an Azure Pipelines file that runs the
+// project's migrations, stage by stage. Secrets come from the repository's settings; nothing secret is written into the file.
 
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -22,6 +22,8 @@ export type CiOptions = {
    *   generate write that migration script and commit it to the pull request
    */
   model?: 'off' | 'check' | 'generate'
+  /** where it runs (default github) */
+  platform?: Platform
 }
 
 /** A throwaway database for the pull-request job, per engine: the service, and the scratch URL into it. */
@@ -107,14 +109,19 @@ export const envVar = (env: string, field: string) => `LIFTOFF_ENV_${env.toUpper
 
 const yamlStr = (s: string) => `'${s.replaceAll("'", "''")}'`
 
-export function githubActions(cfg: Config, o: CiOptions): string {
+/** Checks the options for any platform; returns the migrations folder without a trailing slash. */
+function checked(cfg: Config, o: CiOptions): string {
   if (!o.stages.length) throw configError('choose at least one environment to deploy to')
   if (!o.branch.trim() || !o.install.trim()) throw configError('a branch and an install command are needed')
   for (const s of o.stages) {
     const env = cfg.env(s)
     if (env.role === 'dev' || env.role === 'scratch') throw configError(`'${s}' is a ${env.role} database; CI deploys to test and production environments`)
   }
-  const migrations = cfg.project.migrations.replace(/\/+$/, '')
+  return cfg.project.migrations.replace(/\/+$/, '')
+}
+
+export function githubActions(cfg: Config, o: CiOptions): string {
+  const migrations = checked(cfg, o)
   const withModel = o.model === 'check' || o.model === 'generate'
   let y =
     `# Written by LiftOff. Add these repository secrets: ${o.stages.map((s) => envVar(s, 'PASSWORD')).join(', ')}\n` +
@@ -159,9 +166,104 @@ export function githubActions(cfg: Config, o: CiOptions): string {
   return y
 }
 
-/** Writes .github/workflows/liftoff.yml in the project folder. */
-export function write(cfg: Config, yaml: string, overwrite: boolean): string {
-  const file = path.join(cfg.root, '.github', 'workflows', 'liftoff.yml')
+/**
+ * Azure Pipelines: the same jobs as stages. Pull requests run the checks (a build validation policy on
+ * Azure Repos, the `pr` trigger on GitHub); pushes to the branch deploy, one Azure DevOps environment per stage.
+ * The scratch database is a plain `docker run`, so its name is known and both engines wait the same way.
+ */
+export function azurePipelines(cfg: Config, o: CiOptions): string {
+  const migrations = checked(cfg, o)
+  const withModel = o.model === 'check' || o.model === 'generate'
+  const generate = o.model === 'generate'
+  const install = `    - script: ${yamlStr(o.install)}\n      displayName: Install LiftOff\n`
+  const base = '      env:\n        BASE: $(System.PullRequest.TargetBranch)\n'
+  const paths = `${withModel ? "'schema-model', " : ''}${yamlStr(migrations)}, 'liftoff.toml'`
+  let y =
+    `# Written by LiftOff. Add these as secret pipeline variables (or in a linked variable group): ${o.stages.map((s) => envVar(s, 'PASSWORD')).join(', ')}\n` +
+    `# (and ${o.stages.map((s) => envVar(s, 'URL')).join(', ')} if the connection URL is not in liftoff.toml).\n` +
+    '# Each stage deploys to the Azure DevOps environment of the same name: give it approvals there, and an\n' +
+    '# "Exclusive lock" check so deployments queue up. On Azure Repos, pull requests run this pipeline through a\n' +
+    `# build validation policy on ${o.branch}; make it required, so every script is numbered after what merged first.\n` +
+    (generate ? '# Writing the script commits to the pull request: give the project\'s Build Service "Contribute" on the repository.\n' : '') +
+    `trigger:\n  branches:\n    include: [${yamlStr(o.branch)}]\n  paths:\n    include: [${yamlStr(migrations)}, 'liftoff.toml']\n` +
+    `pr:\n  paths:\n    include: [${paths}]\n` +
+    'stages:\n' +
+    "- stage: pull_request\n  displayName: 'Pull request checks'\n  condition: eq(variables['Build.Reason'], 'PullRequest')\n  dependsOn: []\n  jobs:\n" +
+    "  - job: migration_order\n    displayName: 'New migration scripts: order and rules'\n    pool:\n      vmImage: ubuntu-latest\n" +
+    '    steps:\n    - checkout: self\n      fetchDepth: 0\n' + install +
+    `    - script: liftoff renumber --check --after "origin/\${BASE#refs/heads/}"\n      displayName: Check the numbering\n${base}` +
+    `    - script: liftoff lint --since "origin/\${BASE#refs/heads/}"\n      displayName: The rules on the new scripts\n${base}`
+  if (withModel) {
+    const ms = cfg.project.engine === 'sqlserver'
+    const url = ms
+      ? `sqlserver://localhost:1433;databaseName=scratch;encrypt=true;trustServerCertificate=true;user=sa;password=${SCRATCH_PASSWORD}`
+      : `postgres://postgres:${SCRATCH_PASSWORD}@localhost:5432/scratch`
+    y +=
+      "  - job: schema_model\n    displayName: 'Schema model'\n    pool:\n      vmImage: ubuntu-latest\n" +
+      `    variables:\n      LIFTOFF_ENV_CI_SCRATCH_URL: ${yamlStr(url)}\n      LIFTOFF_ENV_CI_SCRATCH_ROLE: scratch\n` +
+      `    steps:\n    - checkout: self\n${generate ? '      fetchDepth: 0\n      persistCredentials: true\n' : ''}` + install +
+      '    - script: |\n' +
+      (ms
+        ? `        docker run -d --name scratch -e ACCEPT_EULA=Y -e 'MSSQL_SA_PASSWORD=${SCRATCH_PASSWORD}' -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest\n` +
+          '        for _ in $(seq 1 30); do\n' +
+          `          docker exec scratch /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P '${SCRATCH_PASSWORD}' -Q 'CREATE DATABASE scratch' && exit 0\n`
+        : `        docker run -d --name scratch -e 'POSTGRES_PASSWORD=${SCRATCH_PASSWORD}' -e POSTGRES_DB=scratch -p 5432:5432 postgres:16\n` +
+          '        for _ in $(seq 1 30); do\n' +
+          // Over TCP: while the image initialises, its server listens on the socket only.
+          '          docker exec scratch pg_isready -h 127.0.0.1 -U postgres -d scratch && exit 0\n') +
+      '          sleep 2\n        done\n        exit 1\n      displayName: Start the scratch database\n' +
+      '    - script: liftoff model --check --scratch ci_scratch\n      displayName: The schema model builds\n'
+    if (!generate) {
+      y += '    - script: liftoff check --model --scratch ci_scratch\n      displayName: Every schema model change has a migration script\n'
+    } else {
+      // The checkout is the merge commit; write on the pull request's own branch instead.
+      y +=
+        '    - script: git checkout -B "${SOURCE#refs/heads/}" "origin/${SOURCE#refs/heads/}"\n      displayName: Check out the pull request branch\n' +
+        '      env:\n        SOURCE: $(System.PullRequest.SourceBranch)\n' +
+        "    - script: liftoff generate --from model --scratch ci_scratch --description 'pull request $(System.PullRequest.PullRequestId)'\n" +
+        '      displayName: Write the migration script for the schema model changes\n' +
+        `    - script: liftoff renumber --after "origin/\${BASE#refs/heads/}"\n      displayName: Number the new scripts after the base branch\n${base}` +
+        '    - script: |\n' +
+        `        if [ -n "$(git status --porcelain -- ${migrations})" ]; then\n` +
+        "          git config user.name 'liftoff[bot]'\n" +
+        "          git config user.email 'liftoff-bot@users.noreply.dev.azure.com'\n" +
+        `          git add ${migrations}\n` +
+        "          git commit -m 'Migration script for the schema model changes'\n" +
+        '          git push origin "HEAD:${SOURCE#refs/heads/}"\n' +
+        '        fi\n      displayName: Commit it to the pull request\n' +
+        '      env:\n        SOURCE: $(System.PullRequest.SourceBranch)\n'
+    }
+  }
+  let previous: string | undefined
+  for (const s of o.stages) {
+    const stage = `migrate_${s.replace(/[^A-Za-z0-9_]/g, '_')}`
+    const job = s.toLowerCase().replace(/[^a-z0-9]/g, '-')
+    const pw = envVar(s, 'PASSWORD')
+    // Secret variables reach a script only when mapped in by name.
+    const step = (run: string, name: string) => `          - script: ${run}\n            displayName: ${name}\n            env:\n              ${pw}: $(${pw})\n`
+    const e = yamlStr(s)
+    y +=
+      `- stage: ${stage}\n  displayName: ${yamlStr(`Migrate ${s}`)}\n  dependsOn: ${previous ?? '[]'}\n` +
+      "  condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))\n  jobs:\n" +
+      `  - deployment: migrate\n    displayName: ${yamlStr(`Migrate ${s}`)}\n    pool:\n      vmImage: ubuntu-latest\n    environment: ${e}\n` +
+      '    strategy:\n      runOnce:\n        deploy:\n          steps:\n          - checkout: self\n' +
+      `          - script: ${yamlStr(o.install)}\n            displayName: Install LiftOff\n`
+    if (o.checks) y += step(`liftoff --environment ${e} validate`, 'Validate') + step(`liftoff --environment ${e} check --drift --report checks-${job}.html`, 'Check for drift')
+    y += step(`liftoff --environment ${e} migrate`, 'Migrate')
+    if (o.checks) y += `          - publish: checks-${job}.html\n            artifact: checks-${job}\n            displayName: Keep the check report\n            condition: always()\n            continueOnError: true\n`
+    previous = stage
+  }
+  return y
+}
+
+export type Platform = 'github' | 'azure'
+export const workflow = (cfg: Config, o: CiOptions) => (o.platform === 'azure' ? azurePipelines : githubActions)(cfg, o)
+/** Where each platform looks for the file, relative to the project folder. */
+export const fileFor = (platform: Platform = 'github') => (platform === 'azure' ? 'azure-pipelines.yml' : '.github/workflows/liftoff.yml')
+
+/** Writes the workflow file (see fileFor) in the project folder. */
+export function write(cfg: Config, yaml: string, overwrite: boolean, platform: Platform = 'github'): string {
+  const file = path.join(cfg.root, fileFor(platform))
   if (fs.existsSync(file) && !overwrite) throw configError(`${file} already exists`)
   fs.mkdirSync(path.dirname(file), { recursive: true })
   fs.writeFileSync(file, yaml)

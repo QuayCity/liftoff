@@ -179,10 +179,10 @@ Renames are followed. Objects not committed yet say so.
 
 ## Pipelines
 
-Writes a GitHub Actions workflow: pick the environments to deploy to, in order, and the branch
-that deploys. It shows the **Workflow preview** and the **Repository secrets to add**, then
-**Write .github/workflows/liftoff.yml**. See
-[Teams, branches and pipelines](teams-and-pipelines.md#pipelines).
+Writes a GitHub Actions workflow or, with **Runs on: Azure DevOps**, an Azure Pipelines file: pick
+the environments to deploy to, in order, and the branch that deploys. It shows the **Workflow
+preview** and the secrets to add, then writes `.github/workflows/liftoff.yml` or
+`azure-pipelines.yml`. See [Teams, branches and pipelines](teams-and-pipelines.md#pipelines).
 
 ## Settings
 

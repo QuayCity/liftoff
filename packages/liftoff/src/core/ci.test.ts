@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import * as os from 'node:os'
 import { test } from 'node:test'
-import { DEFAULT_INSTALL, githubActions } from './ci.ts'
+import { DEFAULT_INSTALL, azurePipelines, fileFor, githubActions, workflow } from './ci.ts'
 import { Config, type Environment, type Role } from './config.ts'
 
 const env = (role: Role): Environment => ({ url: 'postgres://h/db', role, allow_clean: false, placeholders: {} })
@@ -53,4 +53,38 @@ test('pull requests: the schema model job (generate and check), deployments only
   assert.ok(gen.indexOf('liftoff renumber --after "origin/$BASE"') > gen.indexOf('liftoff generate --from model'), gen)
   assert.ok(gen.indexOf('liftoff renumber --after "origin/$BASE"') < gen.indexOf('git commit'), gen)
   assert.ok(gen.includes('token: ${{ secrets.LIFTOFF_PUSH_TOKEN || github.token }}') && gen.includes('LIFTOFF_PUSH_TOKEN (a fine-grained token'), gen)
+})
+
+test('Azure Pipelines: checks on pull requests, stages in order with mapped secrets, the scratch database by docker run', () => {
+  const cfg = new Config(
+    os.tmpdir(),
+    { name: 'shop', engine: 'postgresql', migrations: 'db/migrations/', schemas: ['public'], history_table: 'h', filters: [], lock: 'advisory', placeholders: {} },
+    new Map([
+      ['staging', env('test')],
+      ['prod-eu', env('prod')],
+    ]),
+  )
+  const o = { stages: ['staging', 'prod-eu'], branch: 'main', checks: true, install: DEFAULT_INSTALL, platform: 'azure' as const }
+  const y = workflow(cfg, o)
+  assert.equal(y, azurePipelines(cfg, o))
+  assert.equal(fileFor('azure'), 'azure-pipelines.yml')
+  assert.ok(y.includes("trigger:\n  branches:\n    include: ['main']\n  paths:\n    include: ['db/migrations', 'liftoff.toml']"), y)
+  assert.ok(y.includes("- stage: pull_request\n  displayName: 'Pull request checks'\n  condition: eq(variables['Build.Reason'], 'PullRequest')"), y)
+  assert.ok(y.includes('liftoff renumber --check --after "origin/${BASE#refs/heads/}"') && y.includes('BASE: $(System.PullRequest.TargetBranch)'), y)
+  // Deploy stages: the first does not wait for the skipped pull-request stage; the next waits for the first.
+  assert.ok(y.includes('- stage: migrate_staging\n  displayName: \'Migrate staging\'\n  dependsOn: []\n'), y)
+  assert.ok(y.includes('- stage: migrate_prod_eu\n  displayName: \'Migrate prod-eu\'\n  dependsOn: migrate_staging\n'), y)
+  assert.ok(y.includes("    environment: 'prod-eu'\n"), y)
+  assert.ok(y.includes('              LIFTOFF_ENV_PROD_EU_PASSWORD: $(LIFTOFF_ENV_PROD_EU_PASSWORD)\n'), 'secrets mapped into each step')
+  assert.ok(y.includes('          - publish: checks-prod-eu.html\n'), y)
+  assert.ok(!y.includes('postgres://h') && !y.includes('\t') && !y.includes('${{'), y)
+
+  const gen = azurePipelines(cfg, { ...o, model: 'generate' })
+  assert.ok(gen.includes("pr:\n  paths:\n    include: ['schema-model', 'db/migrations', 'liftoff.toml']"), gen)
+  assert.ok(gen.includes('persistCredentials: true') && gen.includes('git push origin "HEAD:${SOURCE#refs/heads/}"'), gen)
+  assert.ok(gen.includes('docker run -d --name scratch') && gen.includes('pg_isready -h 127.0.0.1'), gen)
+  assert.ok(gen.indexOf('git checkout -B') < gen.indexOf('liftoff generate --from model') && gen.indexOf('liftoff renumber --after') < gen.indexOf('git commit'), gen)
+  const ms = azurePipelines(new Config(os.tmpdir(), { ...cfg.project, engine: 'sqlserver' }, cfg.environments), { ...o, model: 'check' })
+  assert.ok(ms.includes('mcr.microsoft.com/mssql/server') && ms.includes('docker exec scratch /opt/mssql-tools18/bin/sqlcmd') && ms.includes('liftoff check --model --scratch ci_scratch'), ms)
+  assert.ok(!ms.includes('persistCredentials'), 'check mode writes nothing back')
 })
