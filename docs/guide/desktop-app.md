@@ -16,7 +16,9 @@ says how to get it.
 | **Recent** | projects opened before; **Remove** takes one off the list (the folder stays) |
 | **Overview of all projects** | the [Overview](#overview) of every recent project at once, each with an **Open** button. It connects to all their databases, so it only reads them when you ask |
 
-The project's name is in the title bar, with a button to close it. The sidebar on the left has the
+Several projects can be open at once, one tab each in the title bar: **+** goes back to the start
+page to open another, and × closes one (it asks first when Settings or Rules has unsaved changes).
+Each project keeps its own screen while you look at another. The sidebar on the left has the
 workspaces: **Overview**, **Changes**, **Environments**, **Compare**, **Scripts**, **Rules**,
 **Commit**, **History** and **Pipelines** (Ctrl+1 to Ctrl+9). It shows only icons (hover one for
 its name); the button at its foot widens it to show the names too, and the app remembers your

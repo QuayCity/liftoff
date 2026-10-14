@@ -4,13 +4,14 @@
 
 import { Check, Monitor, Moon, Sun } from 'lucide-react'
 import { DropdownMenu } from 'radix-ui'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { setNativeTheme } from '../api'
 import { IconButton } from './controls'
 
 export type Theme = 'system' | 'light' | 'dark'
 
 const KEY = 'liftoff:theme'
+const CHANGED = 'liftoff:theme-changed'
 const NAME: Record<Theme, string> = { system: 'Same as the system', light: 'Light', dark: 'Dark' }
 const ICON = { system: Monitor, light: Sun, dark: Moon }
 
@@ -34,14 +35,20 @@ export function applyTheme(t: Theme): void {
 /** A menu with the three choices; the button shows the current one. */
 export function ThemeToggle() {
   const [theme, setTheme] = useState(savedTheme)
+  // Each open project has its own title bar: a choice in one shows in all.
+  useEffect(() => {
+    const sync = (e: Event) => setTheme((e as CustomEvent<Theme>).detail)
+    window.addEventListener(CHANGED, sync)
+    return () => window.removeEventListener(CHANGED, sync)
+  }, [])
   const choose = (t: Theme) => {
-    setTheme(t)
     applyTheme(t)
     try {
       localStorage.setItem(KEY, t)
     } catch {
       /* not remembered, but still applied */
     }
+    window.dispatchEvent(new CustomEvent(CHANGED, { detail: t }))
   }
   return (
     <DropdownMenu.Root>

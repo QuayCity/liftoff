@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, engineName, errorText, inDesktop, type Project } from './api'
 import { Compare } from './screens/Compare'
 import { Changes } from './screens/Changes'
@@ -12,24 +12,66 @@ import { Overview } from './screens/Overview'
 import { Rules } from './screens/Rules'
 import { ObjectHistory } from './screens/ObjectHistory'
 import { InlineAlert } from './ui/display'
-import { Sidebar, StatusBar, TitleBar, workspaces, type Workspace } from './ui/shell'
+import { ProjectTabs, Sidebar, StatusBar, TitleBar, workspaces, type Workspace } from './ui/shell'
 
 const params = new URLSearchParams(location.search)
 
+/**
+ * Several projects open at once, one tab each in the title bar. A project in a tab you are not
+ * looking at stays mounted (hidden), so its screen, comparisons and unsaved edits are still there.
+ */
 export function App() {
-  const [project, setProject] = useState<Project | null>(null)
+  const [open, setOpen] = useState<Project[]>([])
+  /** The project shown, by folder; null shows the start page. */
+  const [active, setActive] = useState<string | null>(null)
+  const dirty = useRef(new Set<string>())
+
+  const show = useCallback((p: Project) => {
+    setOpen((o) => (o.some((x) => x.root === p.root) ? o : [...o, p]))
+    setActive(p.root)
+  }, [])
+  const update = useCallback((p: Project) => setOpen((o) => o.map((x) => (x.root === p.root ? p : x))), [])
+  const onDirty = useCallback((root: string, d: boolean) => {
+    if (d) dirty.current.add(root)
+    else dirty.current.delete(root)
+  }, [])
+  const close = (root: string) => {
+    const p = open.find((x) => x.root === root)
+    if (dirty.current.has(root) && !window.confirm(`Close ${p?.name} without saving your changes?`)) return
+    dirty.current.delete(root)
+    const rest = open.filter((x) => x.root !== root)
+    setOpen(rest)
+    if (active === root) setActive(rest.at(-1)?.root ?? null)
+  }
 
   // Browser preview only: ?open=1 jumps straight into the seeded demo project (screenshots, UI tests).
   useEffect(() => {
-    if (!inDesktop && params.get('open')) api.projectOpen('C:/repos/shop-db').then(setProject)
-  }, [])
+    if (!inDesktop && params.get('open')) api.projectOpen('C:/repos/shop-db').then(show)
+  }, [show])
 
-  return project ? <ProjectShell project={project} onProject={setProject} onClose={() => setProject(null)} /> : <Home onOpen={setProject} />
+  const tabs = <ProjectTabs projects={open} active={active} onSwitch={setActive} onClose={close} onAdd={() => setActive(null)} />
+  return (
+    <>
+      {active === null && (open.length === 0 ? <Home onOpen={show} /> : (
+        <div className="flex h-full flex-col">
+          <TitleBar tabs={tabs} />
+          <div className="min-h-0 flex-1 overflow-auto"><Home onOpen={show} /></div>
+        </div>
+      ))}
+      {open.map((p) => (
+        <div key={p.root} hidden={p.root !== active} className="h-full">
+          <ProjectShell project={p} active={p.root === active} tabs={tabs} onProject={update} onDirty={onDirty} />
+        </div>
+      ))}
+    </>
+  )
 }
 
 type View = Workspace | 'Settings'
 
-function ProjectShell({ project, onProject, onClose }: { project: Project; onProject: (p: Project) => void; onClose: () => void }) {
+function ProjectShell({ project, active, tabs, onProject, onDirty }: {
+  project: Project; active: boolean; tabs: ReactNode; onProject: (p: Project) => void; onDirty: (root: string, dirty: boolean) => void
+}) {
   // The last workspace per project comes back on the next open (per computer, best effort).
   const remembered = (() => {
     try {
@@ -42,6 +84,9 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
   const viewRef = useRef(view)
   // Settings or Rules with unsaved edits: leaving asks first.
   const [settingsDirty, setSettingsDirty] = useState(false)
+  useEffect(() => {
+    onDirty(project.root, settingsDirty)
+  }, [onDirty, project.root, settingsDirty])
   const reloadRef = useRef(() => {})
   const setView = useCallback((v: View) => {
     if (settingsDirty && v !== viewRef.current && !window.confirm(`Leave ${viewRef.current} without saving your changes?`)) return
@@ -57,10 +102,12 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
   }, [settingsDirty, project.root])
 
   // liftoff.toml edited elsewhere (an editor, git pull): read the project again when the window
-  // gets focus back, and on every workspace switch (a script saved in Changes ends "no scripts yet").
-  // Not while Settings has unsaved edits, which would be overwritten.
+  // gets focus back, on every workspace switch (a script saved in Changes ends "no scripts yet"),
+  // and when its tab is chosen again. Not while Settings has unsaved edits, which would be overwritten.
+  // Only the project in view listens: hidden ones catch up when their tab is chosen.
   const [reloadError, setReloadError] = useState<string | null>(null)
   useEffect(() => {
+    if (!active) return
     const reload = () => {
       if (settingsDirty) return
       api.projectOpen(project.root).then(
@@ -74,10 +121,16 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
     reloadRef.current = reload
     window.addEventListener('focus', reload)
     return () => window.removeEventListener('focus', reload)
-  }, [project, onProject, settingsDirty])
-
-  // Ctrl/Cmd + 1..5 switches workspace.
+  }, [active, project, onProject, settingsDirty])
+  const wasActive = useRef(active)
   useEffect(() => {
+    if (active && !wasActive.current) reloadRef.current()
+    wasActive.current = active
+  }, [active])
+
+  // Ctrl/Cmd + 1..9 switches workspace, in the project in view.
+  useEffect(() => {
+    if (!active) return
     const onKey = (e: KeyboardEvent) => {
       const n = Number(e.key)
       if ((e.ctrlKey || e.metaKey) && n >= 1 && n <= workspaces.length) {
@@ -87,11 +140,11 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [setView])
+  }, [active, setView])
 
   return (
     <div className="flex h-full flex-col">
-      <TitleBar project={project.name} onSettings={() => setView('Settings')} onClose={onClose} />
+      <TitleBar tabs={tabs} onSettings={() => setView('Settings')} />
       <div className="flex min-h-0 flex-1">
       <Sidebar workspace={view === 'Settings' ? 'Environments' : view} active={view !== 'Settings'} onWorkspace={setView} />
       <main className="min-h-0 flex-1 overflow-auto">

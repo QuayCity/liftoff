@@ -1,11 +1,11 @@
 import {
-  ChevronDown, FileClock, FileCode, FileDiff, GitBranch, GitCommitHorizontal, GitCompare, LayoutDashboard, ListChecks,
-  PanelLeftClose, PanelLeftOpen, Search, Server, Settings, Workflow, type LucideIcon,
+  FileClock, FileCode, FileDiff, GitBranch, GitCommitHorizontal, GitCompare, LayoutDashboard, ListChecks,
+  PanelLeftClose, PanelLeftOpen, Plus, Search, Server, Settings, Workflow, X, type LucideIcon,
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { IconButton, cx } from './controls'
 import { Kbd, Spinner } from './display'
-import { Menu, Tooltip } from './overlays'
+import { Tooltip } from './overlays'
 import { ThemeToggle } from './theme'
 import { UpdateButton } from './update'
 import { AboutButton } from './about'
@@ -18,17 +18,17 @@ const icons: Record<Workspace, LucideIcon> = {
   Scripts: FileCode, Rules: ListChecks, Commit: GitCommitHorizontal, History: FileClock, Pipelines: Workflow,
 }
 
-/** Title bar. Empty areas are the window drag region once Tauri's custom title bar is on. */
-export function TitleBar({ project, onPalette, onSettings, onClose }: {
-  project: string; onPalette?: () => void; onSettings: () => void; onClose?: () => void
-}) {
+/**
+ * Title bar: the open projects on the left. Without onSettings (over the start page) it holds only
+ * those, as the start page has its own buttons. Empty areas are the window drag region once Tauri's
+ * custom title bar is on.
+ */
+export function TitleBar({ tabs, onPalette, onSettings }: { tabs: ReactNode; onPalette?: () => void; onSettings?: () => void }) {
   return (
     <header className="flex h-10 shrink-0 items-center gap-3 border-b border-border bg-surface px-2">
-      <Menu
-        trigger={<button className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm font-semibold hover:bg-surface-sunken">{project}<ChevronDown aria-hidden className="size-3.5 text-muted" /></button>}
-        items={[{ label: 'Close project', onSelect: () => onClose?.() }]}
-      />
+      {tabs}
       <div className="flex-1 self-stretch" />
+      {onSettings && <>
       {onPalette && (
         <button onClick={onPalette} className="inline-flex h-7 items-center gap-2 rounded-md border border-border px-2 text-sm text-muted hover:bg-surface-sunken">
           <Search aria-hidden className="size-3.5" />Commands<Kbd>Ctrl K</Kbd>
@@ -38,7 +38,32 @@ export function TitleBar({ project, onPalette, onSettings, onClose }: {
       <AboutButton />
       <ThemeToggle />
       <IconButton label="Settings" icon={Settings} onClick={onSettings} />
+      </>}
     </header>
+  )
+}
+
+/** One tab per open project, each with its close button, and + for the start page to open another. */
+export function ProjectTabs({ projects, active, onSwitch, onClose, onAdd }: {
+  projects: { name: string; root: string }[]; active: string | null
+  onSwitch: (root: string) => void; onClose: (root: string) => void; onAdd: () => void
+}) {
+  return (
+    <nav aria-label="Open projects" className="flex min-w-0 items-center gap-1 overflow-x-auto">
+      {projects.map((p) => {
+        const current = p.root === active
+        return (
+          <div key={p.root} className={cx('flex h-7 min-w-0 shrink-0 items-center rounded-md', current ? 'bg-accent-subtle' : 'hover:bg-surface-sunken')}>
+            <button aria-current={current ? 'page' : undefined} title={p.root} onClick={() => onSwitch(p.root)}
+              className={cx('max-w-48 truncate pr-1 pl-2.5 text-sm', current ? 'font-semibold text-fg' : 'text-muted hover:text-fg')}>
+              {p.name}
+            </button>
+            <IconButton size="sm" label={`Close ${p.name}`} icon={X} onClick={() => onClose(p.root)} className="size-6 text-muted" />
+          </div>
+        )
+      })}
+      <IconButton size="sm" label="Open another project" icon={Plus} onClick={onAdd} className={cx(active === null && 'bg-accent-subtle')} />
+    </nav>
   )
 }
 

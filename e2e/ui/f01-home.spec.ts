@@ -16,6 +16,37 @@ test.describe('F01 Home and projects', () => {
     await expect(page.getByRole('region', { name: 'staging environment' })).toBeVisible()
   })
 
+  test('F01-H7 several projects open at once, one tab each, each keeping its own screen', async ({ page }) => {
+    await page.getByRole('button', { name: 'shop-db', exact: true }).click()
+    const tabs = page.getByRole('navigation', { name: 'Open projects' })
+    const nav = page.getByRole('navigation', { name: 'Workspaces' })
+    await nav.getByRole('button', { name: 'Scripts' }).click()
+
+    // + goes back to the start page; the sample opens in a second tab.
+    await tabs.getByRole('button', { name: 'Open another project' }).click()
+    await page.getByRole('button', { name: 'Create sample…' }).click()
+    await expect(tabs.getByRole('button', { name: 'shop-sample', exact: true })).toHaveAttribute('aria-current', 'page')
+    await expect(nav.getByRole('button', { name: 'Environments' })).toHaveAttribute('aria-current', 'page')
+
+    // Back to the first: it is still on Scripts.
+    await tabs.getByRole('button', { name: 'shop-db', exact: true }).click()
+    await expect(nav.getByRole('button', { name: 'Scripts' })).toHaveAttribute('aria-current', 'page')
+    await expectNoA11yViolations(page, 'Two projects open')
+
+    // Opening an open project again switches to its tab instead of adding one.
+    await tabs.getByRole('button', { name: 'Open another project' }).click()
+    await page.getByRole('button', { name: 'shop-db', exact: true }).last().click()
+    await expect(tabs.getByRole('button', { name: 'shop-db', exact: true })).toHaveAttribute('aria-current', 'page')
+    await expect(tabs.getByRole('button', { name: /^Close / })).toHaveCount(2)
+
+    // Closing the tab in view shows the one left; closing the last goes back to the start page.
+    await tabs.getByRole('button', { name: 'Close shop-db' }).click()
+    await expect(tabs.getByRole('button', { name: 'shop-sample', exact: true })).toHaveAttribute('aria-current', 'page')
+    await tabs.getByRole('button', { name: 'Close shop-sample' }).click()
+    await expect(tabs).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'LiftOff' })).toBeVisible()
+  })
+
   test('F01-H6 the sidebar: icons with tooltips, expands to show names, remembered', async ({ page }) => {
     await page.getByRole('button', { name: 'shop-db', exact: true }).click()
     const nav = page.getByRole('navigation', { name: 'Workspaces' })
@@ -146,7 +177,7 @@ test.describe('F01 Home and projects', () => {
     await expect(dialog.getByText(/placeholders are not supported/)).toBeVisible()
     await expectNoA11yViolations(page, 'Flyway conversion summary')
     await dialog.getByRole('button', { name: 'Open project' }).click()
-    await expect(page.getByRole('button', { name: 'legacy-flyway' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'legacy-flyway', exact: true })).toBeVisible()
   })
 
   test('X-A11Y Home', async ({ page }) => {

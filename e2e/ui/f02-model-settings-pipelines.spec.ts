@@ -120,3 +120,16 @@ test('U-H7 About LiftOff, on the start page and in a project: this version, the 
   await expect(page.getByRole('region', { name: "What's new in 0.1.0" }).getByText('• The first release')).toBeVisible()
   checkConsole()
 })
+
+test('S15-E2 closing the project tab with unsaved settings asks first', async ({ page }) => {
+  await page.goto('/?open=1&ws=Settings')
+  await page.getByRole('button', { name: 'Add filter' }).click()
+  await expect(page.getByText('Unsaved changes')).toBeVisible()
+  const tabs = page.getByRole('navigation', { name: 'Open projects' })
+  page.once('dialog', (d) => d.dismiss())
+  await tabs.getByRole('button', { name: 'Close shop-db' }).click()
+  await expect(page.getByRole('group', { name: 'Filter 1' })).toBeVisible()
+  page.once('dialog', (d) => d.accept())
+  await tabs.getByRole('button', { name: 'Close shop-db' }).click()
+  await expect(page.getByRole('heading', { name: 'LiftOff' })).toBeVisible()
+})
