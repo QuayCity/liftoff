@@ -47,6 +47,7 @@ export function TitleBar({ tabs, onPalette, buttons = true }: { tabs: ReactNode;
 const ENGINE_BADGES: Record<string, { text: string; name: string; className: string }> = {
   postgresql: { text: 'PG', name: 'PostgreSQL', className: 'bg-accent-subtle text-accent' },
   sqlserver: { text: 'MS', name: 'SQL Server', className: 'bg-warning-subtle text-warning' },
+  oracle: { text: 'OR', name: 'Oracle', className: 'bg-danger-subtle text-danger' },
 }
 
 /**

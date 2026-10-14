@@ -37,6 +37,7 @@ Point the tests at the databases from `docker compose`:
 export LIFTOFF_TEST_PG=postgres://postgres:liftoff@localhost:55432
 export LIFTOFF_TEST_PGBOUNCER=postgres://postgres:liftoff@localhost:56432
 export LIFTOFF_TEST_MSSQL='sqlserver://localhost:51433;encrypt=true;trustServerCertificate=true;user=sa;password=Liftoff!2026'
+export LIFTOFF_TEST_ORACLE=oracle://system:liftoff@localhost:51621/FREEPDB1
 ```
 
 | what | where | command |

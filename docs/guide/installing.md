@@ -12,7 +12,7 @@ the one you want: the desktop app's Windows installer gives you the app and the 
 
 ## What you need
 
-- **A database server you can create databases on**: PostgreSQL or SQL Server, including Azure
+- **A database server you can create databases on**: PostgreSQL, SQL Server or Oracle, including Azure
   SQL. The automated tests run against PostgreSQL 16 and SQL Server 2022.
 - **One extra empty database for the scratch environment** (see [Concepts](concepts.md#the-scratch-database)).
   LiftOff can create it for you if your login is allowed to create databases.

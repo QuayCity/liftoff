@@ -29,6 +29,7 @@ import { typeName } from './msdiff.ts'
 import { PgConn, quoteIdent } from './postgres.ts'
 import { quiet, type Log } from './runner.ts'
 import { quote as msQuote, SqlServerConn } from './sqlserver.ts'
+import { clob, lit as oraLit, quote as oraQuote, type OracleConn } from './oracle.ts'
 import type { Side } from './compare.ts'
 import { sideLabel } from './compare.ts'
 
@@ -404,7 +405,154 @@ function msFromText(c: DataColumn, text: string): string {
 
 const toPairs = (t: DataTable, rows: unknown[][]): [Key, string][] => rows.map((r) => [r.slice(0, t.key.length).map(String), String(r[t.key.length])])
 
-const dialects: Partial<Record<EngineName, Dialect>> = { PostgreSQL: pg, 'SQL Server': ms }
+/** Oracle: values as text, by type. LOBs, LONG, XML and object columns are not compared (see oraTables). */
+const ORA_NUMBER = /^(NUMBER|FLOAT|INTEGER)/
+const ORA_FLOAT = /^BINARY_(FLOAT|DOUBLE)/
+
+const ora: Dialect = {
+  q: oraQuote,
+  async tables(c) {
+    const oc = c as OracleConn
+    const cols = await oc.query(
+      `SELECT c.table_name, c.column_name, c.data_type, c.data_length, c.char_length, c.char_used, c.data_precision, c.data_scale, c.virtual_column
+         FROM user_tab_cols c JOIN user_tables t ON t.table_name = c.table_name
+        WHERE c.hidden_column = 'NO' AND t.temporary = 'N' AND t.nested = 'NO' AND t.table_name NOT LIKE 'BIN$%'
+        ORDER BY c.table_name, c.column_id`,
+    )
+    // The primary key, else a unique constraint on NOT NULL columns.
+    const keys = await oc.query(
+      `SELECT k.table_name, k.constraint_name, cc.column_name FROM user_constraints k JOIN user_cons_columns cc ON cc.constraint_name = k.constraint_name
+        WHERE k.constraint_type IN ('P', 'U')
+          AND NOT EXISTS (SELECT 1 FROM user_cons_columns x JOIN user_tab_cols tc ON tc.table_name = x.table_name AND tc.column_name = x.column_name
+                           WHERE x.constraint_name = k.constraint_name AND tc.nullable = 'Y')
+        ORDER BY k.table_name, DECODE(k.constraint_type, 'P', 0, 1), k.constraint_name, cc.position`,
+    )
+    const out = new Map<string, DataTable & { allColumns: Map<string, DataColumn> }>()
+    for (const [name, col, type, len, charLen, charUsed, precision, scale, virtual] of cols as [string, string, string, number, number, string | null, number | null, number | null, string][]) {
+      if (!out.has(name)) out.set(name, { schema: '', name, key: [], columns: [], identity: false, allColumns: new Map() })
+      if (virtual === 'YES' || /LOB$|^LONG|XMLTYPE|^JSON$|^BFILE$/.test(type)) continue
+      const text: DataColumn['text'] = type === 'RAW' ? 'binary' : ORA_NUMBER.test(type) ? 'number' : ORA_FLOAT.test(type) ? 'float' : type === 'DATE' || type.startsWith('TIMESTAMP') ? 'datetime' : 'plain'
+      const full = ['VARCHAR2', 'CHAR'].includes(type) ? `${type}(${charUsed === 'C' ? `${charLen} CHAR` : len})` : type === 'RAW' ? `RAW(${len})` : precision !== null && type === 'NUMBER' ? `NUMBER(${precision},${scale ?? 0})` : type
+      out.get(name)!.allColumns.set(col, { name: col, type: full, text })
+    }
+    const chosen = new Map<string, string>()
+    for (const [name, constraint, col] of keys as [string, string, string][]) {
+      if (!chosen.has(name)) chosen.set(name, constraint)
+      if (chosen.get(name) === constraint) out.get(name)?.key.push(col)
+    }
+    return out
+  },
+  async foreignKeys(c) {
+    return (await (c as OracleConn).query(
+      `SELECT k.table_name, r.table_name FROM user_constraints k JOIN user_constraints r ON r.constraint_name = k.r_constraint_name WHERE k.constraint_type = 'R'`,
+    )) as [string, string][]
+  },
+  async estimate(c, t) {
+    const [row] = await (c as OracleConn).query('SELECT num_rows FROM user_tables WHERE table_name = :1', [t.name])
+    return row?.[0] == null ? -1 : Number(row[0])
+  },
+  async fingerprint(c, t) {
+    const [[n, sum]] = await (c as OracleConn).query(`SELECT COUNT(*), TO_CHAR(NVL(SUM(h), 0), 'TM9') FROM (SELECT ${oraRowHash(t)} h FROM ${oraFrom(t)})`)
+    return [Number(n), String(sum)]
+  },
+  async buckets(c, t, mask) {
+    const rows = await (c as OracleConn).query(`SELECT b, COUNT(*), TO_CHAR(SUM(h), 'TM9') FROM (SELECT BITAND(${oraKeyHash(t)}, :1) b, ${oraRowHash(t)} h FROM ${oraFrom(t)}) GROUP BY b`, [mask])
+    return rows.map(([b, n, s]) => [Number(b), Number(n), String(s)])
+  },
+  async pairs(c, t, mask, buckets) {
+    const select = `SELECT ${[...t.key.map((k) => oraText(t.columns.find((c) => c.name === k)!)), `TO_CHAR(${oraRowHash(t)}, 'TM9')`].join(', ')} FROM ${oraFrom(t)}`
+    if (!buckets) return toPairs(t, await (c as OracleConn).query(select))
+    return toPairs(t, await (c as OracleConn).query(`${select} WHERE BITAND(${oraKeyHash(t)}, :1) IN (SELECT n FROM JSON_TABLE(:2, '$[*]' COLUMNS (n NUMBER PATH '$')))`, [mask, clob(JSON.stringify(buckets))]))
+  },
+  async rows(c, t, keys) {
+    const out = new Map<string, (string | null)[]>()
+    if (!t.key.length) {
+      for (let i = 0; i < keys.length; i += HEAP_READ) {
+        const hashes = [...new Set(keys.slice(i, i + HEAP_READ).map((k) => k[0]))]
+        const rows = await (c as OracleConn).query(
+          `SELECT TO_CHAR(x.liftoff_h, 'TM9'), ${t.columns.map((col) => oraText(col, 'x')).join(', ')} FROM (SELECT ${oraRowHash(t)} liftoff_h, t.* FROM ${oraFrom(t)}) x
+            WHERE x.liftoff_h IN (SELECT TO_NUMBER(n) FROM JSON_TABLE(:1, '$[*]' COLUMNS (n VARCHAR2(40) PATH '$')))`,
+          // As text: 60-bit hashes do not fit a JavaScript number.
+          [clob(JSON.stringify(hashes))],
+        )
+        for (const r of rows) out.set(keyId([String(r[0])]), r.slice(1).map((v) => (v === null ? null : String(v))))
+      }
+      return out
+    }
+    const keyCols = t.key.map((k) => t.columns.find((c) => c.name === k)!)
+    for (let i = 0; i < keys.length; i += 5000) {
+      // The keys go in as one JSON text, joined on their own types (an IN list holds 1,000 at most).
+      const on = keyCols.map((col, j) => `t.${oraQuote(col.name)} = ${oraFromText(col, `v.k${j}`)}`).join(' AND ')
+      const withCols = keyCols.map((_, j) => `k${j} VARCHAR2(4000) PATH '$[${j}]'`).join(', ')
+      const rows = await (c as OracleConn).query(
+        `SELECT ${keyCols.map((col) => oraText(col)).join(', ')}, ${t.columns.map((col) => oraText(col)).join(', ')} FROM ${oraFrom(t)} JOIN JSON_TABLE(:1, '$[*]' COLUMNS (${withCols})) v ON ${on}`,
+        [clob(JSON.stringify(keys.slice(i, i + 5000)))],
+      )
+      for (const r of rows) out.set(keyId(r.slice(0, t.key.length).map(String)), r.slice(t.key.length).map((v) => (v === null ? null : String(v))))
+    }
+    return out
+  },
+  literal(col, v) {
+    return v === null ? 'NULL' : oraFromText(col, oraLit(v))
+  },
+  deleteCopies(t, copies) {
+    // A statement per 100 rows: a string literal in Oracle SQL holds 4,000 characters at most.
+    const out: string[] = []
+    for (let i = 0; i < copies.length; i += 100) {
+      const part = copies.slice(i, i + 100)
+      const json = `JSON_TABLE('[${part.map(([h, n]) => `[${h},${n}]`).join(',')}]', '$[*]' COLUMNS (h NUMBER PATH '$[0]', n NUMBER PATH '$[1]'))`
+      out.push(
+        `DELETE FROM ${oraQuote(t.name)} WHERE ROWID IN (SELECT x.rid FROM (SELECT t.ROWID rid, ${oraRowHash(t)} h, ROW_NUMBER() OVER (PARTITION BY ${oraRowHash(t)} ORDER BY t.ROWID) rn FROM ${oraFrom(t)}) x JOIN ${json} v ON v.h = x.h AND x.rn <= v.n);`,
+      )
+    }
+    return out.join('\n')
+  },
+}
+
+const oraFrom = (t: DataTable) => `${oraQuote(t.name)} t`
+/** A value as text that converts back exactly (numbers as written, dates and times in full, RAW as hex). */
+function oraText(c: DataColumn, alias = 't'): string {
+  const col = `${alias}.${oraQuote(c.name)}`
+  if (c.text === 'binary') return `RAWTOHEX(${col})`
+  if (c.text === 'number' || c.text === 'float') return `TO_CHAR(${col}, 'TM9')`
+  if (c.type === 'DATE') return `TO_CHAR(${col}, 'YYYY-MM-DD HH24:MI:SS')`
+  if (/WITH (LOCAL )?TIME ZONE/.test(c.type)) return `TO_CHAR(${col}, 'YYYY-MM-DD HH24:MI:SS.FF9 TZH:TZM')`
+  if (c.text === 'datetime') return `TO_CHAR(${col}, 'YYYY-MM-DD HH24:MI:SS.FF9')`
+  if (/^(N?VARCHAR2|N?CHAR)/.test(c.type)) return col
+  return `TO_CHAR(${col})`
+}
+/** Text from oraText back to the column's type. */
+function oraFromText(c: DataColumn, text: string): string {
+  if (c.text === 'binary') return `HEXTORAW(${text})`
+  if (c.text === 'number') return `TO_NUMBER(${text})`
+  if (c.text === 'float') return `TO_BINARY_DOUBLE(${text})`
+  if (c.type === 'DATE') return `TO_DATE(${text}, 'YYYY-MM-DD HH24:MI:SS')`
+  if (/WITH (LOCAL )?TIME ZONE/.test(c.type)) return `TO_TIMESTAMP_TZ(${text}, 'YYYY-MM-DD HH24:MI:SS.FF9 TZH:TZM')`
+  if (c.text === 'datetime') return `TO_TIMESTAMP(${text}, 'YYYY-MM-DD HH24:MI:SS.FF9')`
+  if (/^N(VAR)?CHAR/.test(c.type)) return `TO_NCHAR(${text})`
+  return text
+}
+/**
+ * Each value's md5 (a NULL as a zero byte), the hex of those in a row, and 60 bits of the md5 of
+ * that: text in Oracle SQL stops at 4,000 bytes, so whole rows are never put together as text.
+ * Wide tables hash 100 columns at a time first.
+ */
+function oraRowText(cols: DataColumn[], alias = 't'): string {
+  const parts = cols.map((c) => `RAWTOHEX(NVL(STANDARD_HASH(${oraText(c, alias)}, 'MD5'), HEXTORAW('00')))`)
+  const groups: string[] = []
+  for (let i = 0; i < parts.length; i += 100) groups.push(parts.slice(i, i + 100).join(' || '))
+  return groups.length === 1 ? groups[0] : groups.map((g) => `RAWTOHEX(STANDARD_HASH(${g}, 'MD5'))`).join(' || ')
+}
+const oraRowHash = (t: DataTable, alias = 't') => `TO_NUMBER(SUBSTR(RAWTOHEX(STANDARD_HASH(${oraRowText(t.columns, alias)}, 'MD5')), 1, 15), 'XXXXXXXXXXXXXXX')`
+/** The bucket source: a single whole-number key as it is, else 32 bits of the md5 of the key (no key: the row hash). */
+const oraKeyHash = (t: DataTable) => {
+  const k = t.key.length === 1 ? t.columns.find((c) => c.name === t.key[0]) : undefined
+  if (!t.key.length) return oraRowHash(t)
+  if (k && (/^NUMBER\(\d+,0\)$/.test(k.type) || k.type === 'INTEGER')) return `t.${oraQuote(k.name)}`
+  return `TO_NUMBER(SUBSTR(RAWTOHEX(STANDARD_HASH(${oraRowText(t.key.map((n) => t.columns.find((c) => c.name === n)!))}, 'MD5')), 1, 8), 'XXXXXXXX')`
+}
+
+const dialects: Partial<Record<EngineName, Dialect>> = { PostgreSQL: pg, 'SQL Server': ms, Oracle: ora }
 
 function dialectOf(c: Conn): Dialect {
   const d = dialects[c.engine]

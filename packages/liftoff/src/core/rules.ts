@@ -151,6 +151,13 @@ export function mask(sql: string, engine: Engine): { text: string; quoted: Map<n
       } while (depth > 0 && j < sql.length)
       blank(i, j)
       i = j
+    } else if ((c === 'q' || c === 'Q') && next === "'" && engine === 'oracle' && !/[\p{L}\p{N}_$#]/u.test(sql[i - 1] ?? '')) {
+      // Oracle's q'[ … ]': up to the closing delimiter and a quote.
+      const close = ({ '[': ']', '{': '}', '(': ')', '<': '>' } as Record<string, string>)[sql[i + 2]] ?? sql[i + 2]
+      const end = sql.indexOf(`${close}'`, i + 3)
+      const stop = end < 0 ? sql.length : end + 2
+      blank(i + 3, stop - 2)
+      i = stop
     } else if (c === "'") {
       const backslash = engine === 'postgresql' && /[eE]/.test(sql[i - 1] ?? '') && !/[\p{L}\p{N}_]/u.test(sql[i - 2] ?? '')
       let j = i + 1
@@ -198,8 +205,8 @@ function tokenize(sql: string, engine: Engine): Token[] {
   const tokens: Token[] = []
   let depth = 0
   const re = /[\p{L}\p{N}_@#$]+|\S/gu
-  // SQL Server batches end at a GO line; treat it as a statement end.
-  const go = engine === 'sqlserver' ? /^[ \t]*go(?:[ \t]+\d+)?[ \t]*\r?$/gim : undefined
+  // SQL Server batches end at a GO line, Oracle's PL/SQL blocks at a / line; treat them as a statement end.
+  const go = engine === 'sqlserver' ? /^[ \t]*go(?:[ \t]+\d+)?[ \t]*\r?$/gim : engine === 'oracle' ? /^[ \t]*\/[ \t]*\r?$/gm : undefined
   const goAt = new Set<number>()
   if (go) for (const m of text.matchAll(go)) goAt.add(m.index + m[0].search(/\S/))
   for (const m of text.matchAll(re)) {

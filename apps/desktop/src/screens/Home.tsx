@@ -250,11 +250,12 @@ function NewProjectDialog({ open, onOpenChange, onCreated }: { open: boolean; on
           )}
         </Field>
         <Field label="Project name" error={nameError}>{(a) => <Input {...a} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />}</Field>
-        <Field label="Database engine" help={engine === 'sqlserver' ? 'Uses the dbo schema. Importing Flyway history is not available for SQL Server yet; baseline instead.' : undefined}>
+        <Field label="Database engine" help={engine === 'sqlserver' ? 'Uses the dbo schema. Importing Flyway history is not available for SQL Server yet; baseline instead.' : engine === 'oracle' ? 'Manages the schema of the user each environment signs in as. Oracle commits DDL at once, so a script that fails part-way is not rolled back.' : undefined}>
           {(a) => (
             <Select {...a} value={engine} onChange={(e) => setEngine(e.target.value as Engine)}>
               <option value="postgresql">PostgreSQL</option>
               <option value="sqlserver">SQL Server</option>
+              <option value="oracle">Oracle</option>
             </Select>
           )}
         </Field>

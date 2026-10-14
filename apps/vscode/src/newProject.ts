@@ -9,7 +9,7 @@ import type { Liftoff } from './extension'
 
 export type NewProjectAnswers = {
   folder?: string
-  engine?: 'postgresql' | 'sqlserver'
+  engine?: 'postgresql' | 'sqlserver' | 'oracle'
   sample?: boolean
   name?: string
 }
@@ -31,6 +31,7 @@ export async function newProject(lo: Liftoff, answers: NewProjectAnswers = {}): 
         [
           { label: 'PostgreSQL', engine: 'postgresql' as const },
           { label: 'SQL Server', engine: 'sqlserver' as const },
+          { label: 'Oracle', engine: 'oracle' as const },
         ],
         { title: title(1), placeHolder: 'Which database engine?', ignoreFocusOut: true },
       )

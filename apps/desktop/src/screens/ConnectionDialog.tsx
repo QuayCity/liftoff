@@ -153,7 +153,7 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
               <Field label="Server" error={serverError || undefined} help={sqlserver ? 'Host name or address, e.g. localhost or db01.corp.local' : 'Host name or address'}>
                 {(a) => <Input {...a} value={fields.server} onChange={(e) => set({ server: e.target.value })} placeholder="localhost" spellCheck={false} />}
               </Field>
-              <Field label="Port" error={portError} help={sqlserver ? 'Empty: 1433, or the named instance\'s own port' : 'Empty: 5432'}>
+              <Field label="Port" error={portError} help={sqlserver ? 'Empty: 1433, or the named instance\'s own port' : `Empty: ${defaultPort(engine)}`}>
                 {(a) => <Input {...a} inputMode="numeric" value={fields.port} onChange={(e) => set({ port: e.target.value })} placeholder={defaultPort(engine)} />}
               </Field>
             </div>
@@ -162,7 +162,7 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
                 {(a) => <Input {...a} value={fields.instance} onChange={(e) => set({ instance: e.target.value })} spellCheck={false} />}
               </Field>
             )}
-            <Field label="Database" error={databaseError || undefined}>
+            <Field label={engine === 'oracle' ? 'Service name' : 'Database'} help={engine === 'oracle' ? 'The database service, e.g. FREEPDB1 or ORCLPDB1. LiftOff manages the schema of the user below.' : undefined} error={databaseError || undefined}>
               {(a) => <Input {...a} value={fields.database} onChange={(e) => set({ database: e.target.value })} placeholder="shop" spellCheck={false} />}
             </Field>
             {sqlserver ? (
@@ -175,9 +175,18 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
               <Field label="SSL">
                 {(a) => (
                   <Select {...a} value={fields.sslmode} onChange={(e) => set({ sslmode: e.target.value })}>
-                    <option value="">When the server offers it (default)</option>
-                    <option value="require">Always, and verify the certificate</option>
-                    <option value="disable">Off</option>
+                    {engine === 'oracle' ? (
+                      <>
+                        <option value="">Off (default)</option>
+                        <option value="require">On (TLS), and verify the certificate</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="">When the server offers it (default)</option>
+                        <option value="require">Always, and verify the certificate</option>
+                        <option value="disable">Off</option>
+                      </>
+                    )}
                   </Select>
                 )}
               </Field>

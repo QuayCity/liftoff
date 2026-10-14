@@ -130,6 +130,8 @@ function parseToml(text: string): Parsed {
 export function jdbcToUrl(jdbc: string): string | undefined {
   const j = jdbc.trim()
   if (j.startsWith('jdbc:sqlserver:')) return `sqlserver:${j.slice('jdbc:sqlserver:'.length)}`
+  // Oracle's JDBC thin URLs are read as they are (oracle.ts parseUrl).
+  if (j.startsWith('jdbc:oracle:thin:')) return j
   if (!j.startsWith('jdbc:postgresql:')) return undefined
   const rest = j.slice('jdbc:postgresql:'.length)
   return `postgres://${rest.startsWith('//') ? rest.slice(2) : rest}`
@@ -192,7 +194,8 @@ export function convert(root: string, name: string, useKeychain = keychainEnable
   // Environment-level schemas apply when the global setting is absent.
   const envSchemas = p.envs.find(([, e]) => e.has('schemas'))
   if (!schemas.length && envSchemas) schemas = envSchemas[1].get('schemas')!.split(',').map((s) => s.trim())
-  const engine = p.envs.some(([, e]) => e.get('url')?.trim().startsWith('jdbc:sqlserver:')) ? 'sqlserver' : 'postgresql'
+  const urls = p.envs.map(([, e]) => e.get('url')?.trim() ?? '')
+  const engine = urls.some((u) => u.startsWith('jdbc:sqlserver:')) ? 'sqlserver' : urls.some((u) => u.startsWith('jdbc:oracle:')) ? 'oracle' : 'postgresql'
   if (defaultSchemaSetting) schemas = [defaultSchemaSetting, ...schemas.filter((s) => s !== defaultSchemaSetting)]
   if (!schemas.length) schemas.push(...defaultSchemas(engine))
   r.schemas = schemas
@@ -233,7 +236,7 @@ export function convert(root: string, name: string, useKeychain = keychainEnable
     }
     const url = jdbcToUrl(interpolateFlyway(jdbc))
     if (url === undefined) {
-      r.not_converted.push(`environment ${envName}: ${jdbc}: LiftOff supports PostgreSQL and SQL Server`)
+      r.not_converted.push(`environment ${envName}: ${jdbc}: LiftOff supports PostgreSQL, SQL Server and Oracle`)
       continue
     }
     const saveName = envName === 'default' ? 'default' : envName.replace(/[^A-Za-z0-9_-]/g, '_')

@@ -12,6 +12,7 @@ test('JDBC URLs', () => {
   assert.equal(jdbcToUrl('jdbc:postgresql://db:5432/shop?ssl=true'), 'postgres://db:5432/shop?ssl=true')
   assert.equal(jdbcToUrl('jdbc:sqlserver://db;databaseName=x'), 'sqlserver://db;databaseName=x')
   assert.equal(jdbcToUrl('jdbc:mysql://db/x'), undefined)
+  assert.equal(jdbcToUrl('jdbc:oracle:thin:@//db:1521/SHOP'), 'jdbc:oracle:thin:@//db:1521/SHOP')
 })
 
 test('environment variables in Flyway settings', () => {

@@ -70,11 +70,11 @@ allow_clean = true
 | key | default | what |
 | --- | --- | --- |
 | `name` | the folder's name | the project's name, shown in the apps |
-| `engine` | `postgresql` | `postgresql` or `sqlserver`. Set by `liftoff init --engine`; it cannot change later |
+| `engine` | `postgresql` | `postgresql`, `sqlserver` or `oracle`. Set by `liftoff init --engine`; it cannot change later |
 | `migrations` | `migrations` | the folder with the scripts, relative to the project folder. Sub-folders are read too |
-| `schemas` | `["public"]` or `["dbo"]` | the schemas LiftOff compares, captures and cleans. The history table goes in the first one |
+| `schemas` | `["public"]` or `["dbo"]` | the schemas LiftOff compares, captures and cleans. The history table goes in the first one. Oracle: `[]`, as LiftOff manages the schema of the user each environment signs in as |
 | `history_table` | `liftoff_schema_history` | the history table's name. Do not change it once databases have history |
-| `lock` | `advisory` | PostgreSQL: how two `migrate` runs at once keep out of each other's way. `advisory` uses a session advisory lock; `table` uses a lease row instead, for PgBouncer in transaction pooling, RDS Proxy and Aurora Limitless. SQL Server always uses an application lock |
+| `lock` | `advisory` | PostgreSQL: how two `migrate` runs at once keep out of each other's way. `advisory` uses a session advisory lock; `table` uses a lease row instead, for PgBouncer in transaction pooling, RDS Proxy and Aurora Limitless. SQL Server always uses an application lock, Oracle a row lock held by a second connection |
 | `placeholders` | none | `${name}` values for every environment (see [Placeholders](#placeholders)) |
 | `filters` | none | objects to leave out of comparisons (see [Filters](#filters)) |
 
@@ -154,6 +154,30 @@ sqlserver://myserver.database.windows.net;databaseName=shop;encrypt=true;authent
 
 The account must be a user in the database:
 `CREATE USER [you@example.com] FROM EXTERNAL PROVIDER;` and a role that may change the schema.
+
+### Oracle
+
+```
+oracle://db.example.com:1521/SHOPPDB
+oracle://db.example.com/SHOPPDB?ssl=true        (TLS; port 2484 when left out)
+jdbc:oracle:thin:@//db.example.com:1521/SHOPPDB  (the JDBC forms work too, also @host:1521:SID)
+```
+
+| setting | what |
+| --- | --- |
+| port | 1521 when left out |
+| the service | the database service to connect to, e.g. `FREEPDB1` or `ORCLPDB1` |
+| `ssl` | `true` connects with TLS and checks the server's certificate |
+| the user | LiftOff manages this user's schema: its tables, views, sequences, synonyms, PL/SQL and triggers. Dev, test and prod are usually different users (`SHOP_DEV`, `SHOP_TEST`, …) |
+
+The driver needs no Oracle client: nothing to install besides LiftOff. Scripts are read as SQL*Plus
+reads them: a SQL statement ends at `;`, and a PL/SQL block (`CREATE PROCEDURE`, `CREATE PACKAGE`,
+`BEGIN … END;`, …) at a line with only `/`. A PL/SQL unit that does not compile fails the script,
+with Oracle's errors, instead of being left invalid. Oracle commits DDL at once, so a script with
+DDL cannot be rolled back: if it fails part-way, what ran stays, the history records the failure,
+and `liftoff repair` clears it. Scripts with only data changes run in one transaction. LiftOff
+cannot create a scratch schema on Oracle (`create-scratch`): ask for a user of its own for it.
+Data compare leaves LOB columns (CLOB, BLOB) out, and an empty text is NULL in Oracle.
 
 `ActiveDirectoryPassword` (a user name and password for an Entra account) is not supported:
 Microsoft is retiring it, and it cannot do MFA. Entra ID sign-in is the only time LiftOff

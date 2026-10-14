@@ -36,3 +36,12 @@ services:
       MSSQL_PID: Developer
       MSSQL_SA_PASSWORD: Liftoff!2026
     ports: ['51433:1433']
+
+  oracle:
+    # Oracle Database Free, as gvenzl packages it; the tests create their users through SYSTEM.
+    image: gvenzl/oracle-free:23-slim
+    container_name: liftoff-oracle
+    restart: unless-stopped
+    environment:
+      ORACLE_PASSWORD: liftoff
+    ports: ['51621:1521']

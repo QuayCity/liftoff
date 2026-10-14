@@ -207,6 +207,28 @@ test.describe('F01 Home and projects', () => {
     await expect(env.getByText('postgres://pg.internal/shop?sslmode=require')).toBeVisible()
   })
 
+  test('F01-H10 an Oracle project: its tab, port 1521, a service name, oracle:// URLs with TLS', async ({ page }) => {
+    await page.getByRole('button', { name: 'New project…' }).click()
+    const dialog = page.getByRole('dialog', { name: 'New project' })
+    await dialog.getByRole('button', { name: 'Choose…' }).click()
+    await dialog.getByLabel('Project name').fill('oracle-shop')
+    await dialog.getByLabel('Database engine').selectOption('oracle')
+    await expect(dialog.getByText('Oracle commits DDL at once', { exact: false })).toBeVisible()
+    await dialog.getByRole('button', { name: 'Create project' }).click()
+    await expect(page.getByRole('navigation', { name: 'Open projects' }).locator('[data-engine="oracle"]')).toHaveText('OR')
+    await expectNoA11yViolations(page, 'Oracle tab, light')
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await expectNoA11yViolations(page, 'Oracle tab, dark')
+    await page.emulateMedia({ colorScheme: 'light' })
+    await page.getByRole('button', { name: 'Add environment' }).first().click()
+    const env = page.getByRole('dialog', { name: 'Add environment' })
+    await expect(env.getByLabel('Port', { exact: true })).toHaveAttribute('placeholder', '1521')
+    await env.getByLabel('Server').fill('db.internal')
+    await env.getByLabel('Service name').fill('SHOPPDB')
+    await env.getByLabel('SSL').selectOption('require')
+    await expect(env.getByText('oracle://db.internal/SHOPPDB?ssl=true')).toBeVisible()
+  })
+
   test('F01-E4 keyboard only: open New project, Esc closes and focus returns', async ({ page }) => {
     const trigger = page.getByRole('button', { name: 'New project…' })
     await trigger.focus()

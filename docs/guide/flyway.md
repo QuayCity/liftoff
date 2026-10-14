@@ -53,9 +53,9 @@ copies Flyway's rows once. It refuses if an applied script's file changed since 
 checksum no longer matches); `--accept-edited` imports anyway and stores the current files'
 checksums. `--table` names another Flyway history table. Run it once per environment.
 
-### SQL Server: mark each database
+### SQL Server and Oracle: mark each database
 
-Copying the history is PostgreSQL only for now. On SQL Server, tell LiftOff the version each
+Copying the history is PostgreSQL only for now. On SQL Server and Oracle, tell LiftOff the version each
 database is at:
 
 ```sh
