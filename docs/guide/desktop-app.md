@@ -16,9 +16,11 @@ says how to get it.
 | **Recent** | projects opened before; **Remove** takes one off the list (the folder stays) |
 | **Overview of all projects** | the [Overview](#overview) of every recent project at once, each with an **Open** button. It connects to all their databases, so it only reads them when you ask |
 
-The project's name is in the title bar, with a button to close it. Along the top are the
+The project's name is in the title bar, with a button to close it. The sidebar on the left has the
 workspaces: **Overview**, **Changes**, **Environments**, **Compare**, **Scripts**, **Rules**,
-**Commit** and **Pipelines** (Ctrl+1 to Ctrl+8); the gear opens **Settings**.
+**Commit**, **History** and **Pipelines** (Ctrl+1 to Ctrl+9). It shows only icons (hover one for
+its name); the button at its foot widens it to show the names too, and the app remembers your
+choice. The gear in the title bar opens **Settings**.
 
 **About LiftOff.** The ⓘ button, top right on the start page and in the title bar, shows this
 version, the newest LiftOff release, and what is new in it (its release notes), with **Check
@@ -126,7 +128,6 @@ lose data are marked.
   undo script**), then **Save to migrations**. **Record it as applied on dev** is ticked, since
   dev already has the change.
 - Against the schema model: **Save to model** writes the ticked objects into `schema-model/`.
-- **Object history…** shows the commits that changed an object's model file, each with its change.
 
 Unticked differences stay listed for next time.
 
@@ -169,6 +170,12 @@ only in the target**, then
 
 The changed files in the project, a message box, **Commit**, and **Pull** / **Push** for the
 project's git repository.
+
+## History
+
+The history of every object in the schema model, straight from git: pick an object (the filter
+narrows the list), then one of the commits that changed its file to see what that commit changed.
+Renames are followed. Objects not committed yet say so.
 
 ## Pipelines
 
