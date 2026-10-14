@@ -5,7 +5,11 @@
 import type { Change } from './changes.ts'
 import type { Project } from './config.ts'
 import type { Conn, EngineName } from './db.ts'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+import * as lite from './litediff.ts'
 import * as ms from './msdiff.ts'
+import { withDatabase as liteWithDatabase, type SqliteConn } from './sqlite.ts'
 import * as pgd from './pgdiff.ts'
 import { PgConn, quoteIdent, withDatabase as pgWithDatabase } from './postgres.ts'
 import { SqlServerConn, quote, withDatabase as msWithDatabase } from './sqlserver.ts'
@@ -67,8 +71,25 @@ const sqlserver: SchemaOps = {
   },
 }
 
+const sqlite: SchemaOps = {
+  name: 'SQLite',
+  introspect: (c, schemas, table) => lite.introspect(c as SqliteConn, schemas, table),
+  applyFilters: (m, p) => lite.applyFilters(m as lite.LiteModel, p),
+  diff: (a, b) => lite.diff(a as lite.LiteModel, b as lite.LiteModel),
+  createAll: (m) => lite.createAll(m as lite.LiteModel),
+  files: (m) => lite.files(m as lite.LiteModel),
+  withDatabase: liteWithDatabase,
+  // A database is a file: the new one goes next to the one `c` has open.
+  async createDatabase(c, database, taken) {
+    const from = (c as SqliteConn).file
+    const file = path.join(path.dirname(from), `${database}${path.extname(from)}`)
+    if (fs.existsSync(file)) throw taken()
+    fs.writeFileSync(file, '', { flag: 'wx' })
+  },
+}
+
 /** By the engine's tag (EngineInfo.tag in db.ts), as snapshot files store it. */
-export const ops: Record<string, SchemaOps> = { pg, ms: sqlserver }
+export const ops: Record<string, SchemaOps> = { pg, ms: sqlserver, lite: sqlite }
 
 /** The schema operations for a connection's engine. */
 export function opsFor(engine: EngineName): [tag: string, SchemaOps] {

@@ -27,6 +27,8 @@ export const emptyFields = (): ConnectionFields => ({ server: 'localhost', insta
 export const defaultPort = (engine: string) => (engine === 'sqlserver' ? '1433' : '5432')
 
 export function buildUrl(engine: string, f: ConnectionFields): string {
+  // SQLite: the database field is the file (relative to the project folder, or absolute).
+  if (engine === 'sqlite') return `sqlite:${f.database.trim()}`
   const server = f.server.trim() || 'localhost'
   const port = f.port.trim()
   if (engine === 'sqlserver') {
@@ -51,6 +53,10 @@ export function splitUrl(engine: string, url: string): (ConnectionFields & { use
   if (!u) return emptyFields()
   if (u.includes('${')) return undefined
   const f = emptyFields()
+  if (engine === 'sqlite') {
+    const m = /^(?:jdbc:)?sqlite:(.*)$/i.exec(u)
+    return m ? { ...f, server: '', database: m[1] } : undefined
+  }
   if (engine === 'sqlserver') {
     const m = /^(?:jdbc:)?sqlserver:\/\/([^;]*)(.*)$/i.exec(u)
     if (!m) return undefined

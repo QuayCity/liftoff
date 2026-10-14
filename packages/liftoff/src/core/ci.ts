@@ -43,6 +43,8 @@ function scratchService(engine: string): { service: string; url: string; prepare
         '            sleep 2\n          done\n          exit 1\n',
     }
   }
+  // SQLite: the scratch database is a file in the checkout; nothing to start.
+  if (engine === 'sqlite') return { service: '', url: 'sqlite:ci_scratch.db', prepare: '' }
   return {
     service:
       '    services:\n      scratch:\n        image: postgres:16\n' +
@@ -194,24 +196,27 @@ export function azurePipelines(cfg: Config, o: CiOptions): string {
     `    - script: liftoff renumber --check --after "origin/\${BASE#refs/heads/}"\n      displayName: Check the numbering\n${base}` +
     `    - script: liftoff lint --since "origin/\${BASE#refs/heads/}"\n      displayName: The rules on the new scripts\n${base}`
   if (withModel) {
-    const ms = cfg.project.engine === 'sqlserver'
-    const url = ms
-      ? `sqlserver://localhost:1433;databaseName=scratch;encrypt=true;trustServerCertificate=true;user=sa;password=${SCRATCH_PASSWORD}`
-      : `postgres://postgres:${SCRATCH_PASSWORD}@localhost:5432/scratch`
+    const engine = cfg.project.engine
+    const url = scratchService(engine).url
+    // SQLite: the scratch database is a file in the checkout; nothing to start.
+    const start =
+      engine === 'sqlite'
+        ? ''
+        : '    - script: |\n' +
+          (engine === 'sqlserver'
+            ? `        docker run -d --name scratch -e ACCEPT_EULA=Y -e 'MSSQL_SA_PASSWORD=${SCRATCH_PASSWORD}' -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest\n` +
+              '        for _ in $(seq 1 30); do\n' +
+              `          docker exec scratch /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P '${SCRATCH_PASSWORD}' -Q 'CREATE DATABASE scratch' && exit 0\n`
+            : `        docker run -d --name scratch -e 'POSTGRES_PASSWORD=${SCRATCH_PASSWORD}' -e POSTGRES_DB=scratch -p 5432:5432 postgres:16\n` +
+              '        for _ in $(seq 1 30); do\n' +
+              // Over TCP: while the image initialises, its server listens on the socket only.
+              '          docker exec scratch pg_isready -h 127.0.0.1 -U postgres -d scratch && exit 0\n') +
+          '          sleep 2\n        done\n        exit 1\n      displayName: Start the scratch database\n'
     y +=
       "  - job: schema_model\n    displayName: 'Schema model'\n    pool:\n      vmImage: ubuntu-latest\n" +
       `    variables:\n      LIFTOFF_ENV_CI_SCRATCH_URL: ${yamlStr(url)}\n      LIFTOFF_ENV_CI_SCRATCH_ROLE: scratch\n` +
       `    steps:\n    - checkout: self\n${generate ? '      fetchDepth: 0\n      persistCredentials: true\n' : ''}` + install +
-      '    - script: |\n' +
-      (ms
-        ? `        docker run -d --name scratch -e ACCEPT_EULA=Y -e 'MSSQL_SA_PASSWORD=${SCRATCH_PASSWORD}' -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest\n` +
-          '        for _ in $(seq 1 30); do\n' +
-          `          docker exec scratch /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P '${SCRATCH_PASSWORD}' -Q 'CREATE DATABASE scratch' && exit 0\n`
-        : `        docker run -d --name scratch -e 'POSTGRES_PASSWORD=${SCRATCH_PASSWORD}' -e POSTGRES_DB=scratch -p 5432:5432 postgres:16\n` +
-          '        for _ in $(seq 1 30); do\n' +
-          // Over TCP: while the image initialises, its server listens on the socket only.
-          '          docker exec scratch pg_isready -h 127.0.0.1 -U postgres -d scratch && exit 0\n') +
-      '          sleep 2\n        done\n        exit 1\n      displayName: Start the scratch database\n' +
+      start +
       '    - script: liftoff model --check --scratch ci_scratch\n      displayName: The schema model builds\n'
     if (!generate) {
       y += '    - script: liftoff check --model --scratch ci_scratch\n      displayName: Every schema model change has a migration script\n'

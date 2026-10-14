@@ -263,6 +263,14 @@ export function needsNoTransaction(sql: string): boolean {
   return ['CONCURRENTLY', 'VACUUM', 'CREATE DATABASE', 'DROP DATABASE', 'ALTER SYSTEM', 'CREATE TABLESPACE', 'DROP TABLESPACE'].some((k) => up.includes(k))
 }
 
+/**
+ * SQLite: VACUUM, and the pragmas that are ignored inside a transaction (switching foreign keys off
+ * to rebuild a table, the journal mode), need a script that runs outside one.
+ */
+export function sqliteNeedsNoTransaction(sql: string): boolean {
+  return /\bVACUUM\b|\bPRAGMA\s+(foreign_keys|journal_mode|legacy_alter_table)\b/i.test(sql.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, ''))
+}
+
 /** SQL Server statements that cannot run inside a transaction. */
 export function tsqlNeedsNoTransaction(sql: string): boolean {
   const up = sql.toUpperCase()

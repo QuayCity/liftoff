@@ -129,7 +129,7 @@ const COMMANDS: Record<string, Command> = {
     help: 'Create liftoff.toml, migrations/ and schema-model/ in the project folder',
     options: {
       name: { type: 'string', help: 'Project name (default: the folder name)' },
-      engine: { type: 'string', default: 'postgresql', help: 'postgresql or sqlserver' },
+      engine: { type: 'string', default: 'postgresql', help: 'postgresql, sqlserver or sqlite' },
       'from-flyway': { type: 'boolean', help: "Convert the folder's flyway.toml or flyway.conf instead of starting empty (the originals stay)" },
       'flyway-config': { type: 'string', help: 'With --from-flyway: which Flyway config file, when the folder has more than one', value: 'FILE' },
       include: { type: 'string', multiple: true, help: 'With --from-flyway: only this environment (repeatable; default: all)', value: 'NAME' },

@@ -70,11 +70,11 @@ allow_clean = true
 | key | default | what |
 | --- | --- | --- |
 | `name` | the folder's name | the project's name, shown in the apps |
-| `engine` | `postgresql` | `postgresql` or `sqlserver`. Set by `liftoff init --engine`; it cannot change later |
+| `engine` | `postgresql` | `postgresql`, `sqlserver` or `sqlite`. Set by `liftoff init --engine`; it cannot change later |
 | `migrations` | `migrations` | the folder with the scripts, relative to the project folder. Sub-folders are read too |
-| `schemas` | `["public"]` or `["dbo"]` | the schemas LiftOff compares, captures and cleans. The history table goes in the first one |
+| `schemas` | `["public"]` or `["dbo"]` | the schemas LiftOff compares, captures and cleans. The history table goes in the first one. SQLite: `[]`, as LiftOff manages the whole file |
 | `history_table` | `liftoff_schema_history` | the history table's name. Do not change it once databases have history |
-| `lock` | `advisory` | PostgreSQL: how two `migrate` runs at once keep out of each other's way. `advisory` uses a session advisory lock; `table` uses a lease row instead, for PgBouncer in transaction pooling, RDS Proxy and Aurora Limitless. SQL Server always uses an application lock |
+| `lock` | `advisory` | PostgreSQL: how two `migrate` runs at once keep out of each other's way. `advisory` uses a session advisory lock; `table` uses a lease row instead, for PgBouncer in transaction pooling, RDS Proxy and Aurora Limitless. SQL Server always uses an application lock, SQLite a lease row |
 | `placeholders` | none | `${name}` values for every environment (see [Placeholders](#placeholders)) |
 | `filters` | none | objects to leave out of comparisons (see [Filters](#filters)) |
 
@@ -154,6 +154,27 @@ sqlserver://myserver.database.windows.net;databaseName=shop;encrypt=true;authent
 
 The account must be a user in the database:
 `CREATE USER [you@example.com] FROM EXTERNAL PROVIDER;` and a role that may change the schema.
+
+### SQLite
+
+```
+sqlite:data/shop.db          (relative to the project folder)
+sqlite:/srv/app/shop.db
+sqlite:C:/data/shop.db
+jdbc:sqlite:data/shop.db     (the JDBC form works too)
+```
+
+A database is a file; a file that does not exist yet is created. A relative path is relative to the
+project folder, so the CLI, the desktop app and VS Code all open the same file. Nothing to install:
+LiftOff uses the SQLite built into it. Every script runs in a transaction, DDL included, so a failed
+script leaves nothing behind. SQLite's ALTER TABLE only adds, drops and renames columns, so a
+migration that changes a table any other way rebuilds it: a new table, the rows copied, the old one
+dropped and the new one renamed, with foreign keys switched off and in one transaction. The rows of
+the columns both tables have are kept. Foreign keys are checked on LiftOff's connections (SQLite's
+own default is not to). `create-scratch` makes `<file>_scratch.db` next to the dev file. In a
+pipeline, the scratch database is a file in the checkout: no service to start. Data compare shows
+values as SQLite literals (`'text'`, `42`, `X'00ff'`): SQLite keeps a type per value, and the integer
+42 and the text '42' are different values.
 
 `ActiveDirectoryPassword` (a user name and password for an Entra account) is not supported:
 Microsoft is retiring it, and it cannot do MFA. Entra ID sign-in is the only time LiftOff

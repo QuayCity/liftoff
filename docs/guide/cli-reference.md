@@ -39,7 +39,7 @@ Usage: liftoff init [OPTIONS]
 
 Options:
       --name <NAME>                  Project name (default: the folder name)
-      --engine <ENGINE>              postgresql or sqlserver [default: postgresql]
+      --engine <ENGINE>              postgresql, sqlserver or sqlite [default: postgresql]
       --from-flyway                  Convert the folder's flyway.toml or flyway.conf instead of starting empty (the originals stay)
       --flyway-config <FILE>         With --from-flyway: which Flyway config file, when the folder has more than one
       --include <NAME>               With --from-flyway: only this environment (repeatable; default: all)

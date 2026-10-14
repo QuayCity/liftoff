@@ -9,7 +9,7 @@ import * as path from 'node:path'
 import { Config, init, saveEnvironment, type Environment, type Role } from '../src/core/config.ts'
 import { open } from '../src/core/db.ts'
 
-export function project(engine: 'postgresql' | 'sqlserver', envs: [name: string, url: string, role: Role, extra?: Partial<Environment>][]) {
+export function project(engine: 'postgresql' | 'sqlserver' | 'sqlite', envs: [name: string, url: string, role: Role, extra?: Partial<Environment>][]) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-it-'))
   init(dir, 'shop', engine)
   for (const [name, url, role, extra] of envs) {

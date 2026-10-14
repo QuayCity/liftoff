@@ -250,11 +250,12 @@ function NewProjectDialog({ open, onOpenChange, onCreated }: { open: boolean; on
           )}
         </Field>
         <Field label="Project name" error={nameError}>{(a) => <Input {...a} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />}</Field>
-        <Field label="Database engine" help={engine === 'sqlserver' ? 'Uses the dbo schema. Importing Flyway history is not available for SQL Server yet; baseline instead.' : undefined}>
+        <Field label="Database engine" help={engine === 'sqlserver' ? 'Uses the dbo schema. Importing Flyway history is not available for SQL Server yet; baseline instead.' : engine === 'sqlite' ? 'Database files on this computer: nothing to install or start.' : undefined}>
           {(a) => (
             <Select {...a} value={engine} onChange={(e) => setEngine(e.target.value as Engine)}>
               <option value="postgresql">PostgreSQL</option>
               <option value="sqlserver">SQL Server</option>
+              <option value="sqlite">SQLite</option>
             </Select>
           )}
         </Field>

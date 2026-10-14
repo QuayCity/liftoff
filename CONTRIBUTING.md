@@ -39,6 +39,8 @@ export LIFTOFF_TEST_PGBOUNCER=postgres://postgres:liftoff@localhost:56432
 export LIFTOFF_TEST_MSSQL='sqlserver://localhost:51433;encrypt=true;trustServerCertificate=true;user=sa;password=Liftoff!2026'
 ```
 
+The SQLite tests need nothing: they use files in a temporary folder.
+
 | what | where | command |
 | --- | --- | --- |
 | core unit tests | `packages/liftoff` | `npm test` |

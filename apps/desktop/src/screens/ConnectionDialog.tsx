@@ -13,8 +13,13 @@ const roles: { value: Role; label: string }[] = [
   { value: 'prod', label: 'Production' },
 ]
 
+type SignIn = { label: string; help: string; user?: string; userHelp?: string; userRequired?: boolean; password?: string; tenant?: 'optional' | 'required' }
+
+/** SQLite files have no users. */
+const NO_SIGN_IN: SignIn = { label: '', help: '' }
+
 /** SQL Server sign-in methods (JDBC names) and what each asks for. */
-const signInFor: Record<string, { label: string; help: string; user?: string; userHelp?: string; userRequired?: boolean; password?: string; tenant?: 'optional' | 'required' }> = {
+const signInFor: Record<string, SignIn> = {
   SqlPassword: { label: 'SQL Server login', help: 'A login with a user name and password on the server.', user: 'User', password: 'Password' },
   ActiveDirectoryDefault: {
     label: 'Microsoft Entra ID: the account you are signed in with',
@@ -45,6 +50,8 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
   const [role, setRole] = useState<Role>(editing?.role ?? defaultRole)
   const engine = project.engine
   const sqlserver = engine === 'sqlserver'
+  // SQLite: a file, no server and no sign-in.
+  const sqlite = engine === 'sqlite'
   // The server details when the URL can be shown that way; else the URL as written.
   const [initial] = useState(() => splitUrl(engine, editing?.url ?? ''))
   const [mode, setMode] = useState<'fields' | 'url'>(initial ? 'fields' : 'url')
@@ -76,16 +83,16 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
   }
   const effectiveUrl = mode === 'url' ? url.trim() : fieldsTouched || !editing ? buildUrl(engine, fields) : editing.url
   const urlError = touched && mode === 'url' && !url.trim() ? 'Enter the connection URL.' : undefined
-  const serverError = touched && mode === 'fields' && !fields.server.trim() ? 'Enter the server name.' : undefined
+  const serverError = touched && mode === 'fields' && !sqlite && !fields.server.trim() ? 'Enter the server name.' : undefined
   const portError = mode === 'fields' && fields.port.trim() && !/^\d{1,5}$/.test(fields.port.trim()) ? 'A port is a number, e.g. ' + defaultPort(engine) + '.' : undefined
-  const databaseError = touched && mode === 'fields' && !fields.database.trim() ? 'Enter the database name.' : undefined
+  const databaseError = touched && mode === 'fields' && !fields.database.trim() ? (sqlite ? 'Enter the database file.' : 'Enter the database name.') : undefined
   const eraseError = touched && role === 'scratch' && !eraseOk ? 'Confirm that this database may be erased.' : undefined
   // How the user and password boxes read for the sign-in method (SQL Server, server details only).
-  const signIn = sqlserver && mode === 'fields' ? signInFor[fields.authentication] ?? signInFor.SqlPassword : signInFor.SqlPassword
+  const signIn = sqlite ? NO_SIGN_IN : sqlserver && mode === 'fields' ? signInFor[fields.authentication] ?? signInFor.SqlPassword : signInFor.SqlPassword
   const tenantError = touched && signIn.tenant === 'required' && !fields.tenantId.trim() ? 'Enter the directory (tenant) ID.' : undefined
   const userError = touched && signIn.userRequired && !user.trim() ? `Enter the ${signIn.user!.toLowerCase()}.` : undefined
   const env = () => ({ url: effectiveUrl, user: signIn.user ? user.trim() || null : null, password: signIn.password ? password || null : null, role, allow_clean: role === 'scratch' || allowClean })
-  const connectionInvalid = mode === 'url' ? !url.trim() : !fields.server.trim() || !fields.database.trim() || !!portError || (signIn.tenant === 'required' && !fields.tenantId.trim()) || (signIn.userRequired && !user.trim())
+  const connectionInvalid = mode === 'url' ? !url.trim() : (!sqlite && !fields.server.trim()) || !fields.database.trim() || !!portError || (signIn.tenant === 'required' && !fields.tenantId.trim()) || (signIn.userRequired && !user.trim())
 
   const toUrl = () => {
     setUrlRaw(effectiveUrl)
@@ -147,7 +154,14 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
           <Field label="Name" error={nameError || undefined}>{(a) => <Input {...a} value={name} disabled={!!editing} onChange={(e) => setName(e.target.value)} placeholder="staging" />}</Field>
           <Field label="Role">{(a) => <Select {...a} value={role} onChange={(e) => setRole(e.target.value as Role)}>{roles.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}</Select>}</Field>
         </div>
-        {mode === 'fields' ? (
+        {mode === 'fields' && sqlite ? (
+          <div className="flex flex-col gap-4">
+            <Field label="Database file" error={databaseError || undefined} help="Relative to the project folder (e.g. data/shop.db), or a full path. A file that does not exist yet is created.">
+              {(a) => <Input {...a} mono value={fields.database} onChange={(e) => set({ database: e.target.value })} placeholder="data/shop.db" spellCheck={false} />}
+            </Field>
+            <p className="text-xs text-muted">Connection URL: <code className="font-mono break-all">{effectiveUrl}</code></p>
+          </div>
+        ) : mode === 'fields' ? (
           <div className="flex flex-col gap-4">
             <div className="grid grid-cols-[2fr_1fr] gap-4">
               <Field label="Server" error={serverError || undefined} help={sqlserver ? 'Host name or address, e.g. localhost or db01.corp.local' : 'Host name or address'}>

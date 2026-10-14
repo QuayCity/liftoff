@@ -29,6 +29,8 @@ import { typeName } from './msdiff.ts'
 import { PgConn, quoteIdent } from './postgres.ts'
 import { quiet, type Log } from './runner.ts'
 import { quote as msQuote, SqlServerConn } from './sqlserver.ts'
+import { q as liteQ } from './litediff.ts'
+import type { SqliteConn } from './sqlite.ts'
 import type { Side } from './compare.ts'
 import { sideLabel } from './compare.ts'
 
@@ -98,8 +100,8 @@ interface Dialect {
   /** the rows with these keys, every compared column as text */
   rows(c: Conn, t: DataTable, keys: Key[]): Promise<Map<string, (string | null)[]>>
   literal(col: DataColumn, v: string | null): string
-  /** one statement deleting `n` copies of each row by its row hash (tables without a key) */
-  deleteCopies(t: DataTable, copies: [string, number][]): string
+  /** one statement deleting `n` copies of each row by its row hash (tables without a key); `rows`: their values by hash */
+  deleteCopies(t: DataTable, copies: [string, number][], rows: Map<string, (string | null)[]>): string
 }
 
 /** `schema.table`; MySQL tables are in the URL's database and go by their name alone. */
@@ -404,7 +406,119 @@ function msFromText(c: DataColumn, text: string): string {
 
 const toPairs = (t: DataTable, rows: unknown[][]): [Key, string][] => rows.map((r) => [r.slice(0, t.key.length).map(String), String(r[t.key.length])])
 
-const dialects: Partial<Record<EngineName, Dialect>> = { PostgreSQL: pg, 'SQL Server': ms }
+/**
+ * SQLite: values travel as SQLite's own literals (quote()): 1, 'text', X'00ff', so a value's type
+ * (SQLite keeps it per value) is part of the comparison, and a value goes back into a script as it is.
+ * The hashes come from functions LiftOff adds to its own connections (sqlite.ts); the scripts it
+ * writes use none of them, so they run in the sqlite3 shell too.
+ */
+const lite: Dialect = {
+  q: liteQ,
+  async tables(c) {
+    const lc = c as SqliteConn
+    const cols = await lc.query(
+      `SELECT m.name, p.name, p.type, p.pk, p.hidden FROM sqlite_schema m JOIN pragma_table_list l ON l.name = m.name AND l.schema = 'main' AND l.type = 'table'
+         JOIN pragma_table_xinfo(m.name) p WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' ORDER BY m.name, p.cid`,
+    )
+    const out = new Map<string, DataTable & { allColumns: Map<string, DataColumn> }>()
+    const pk = new Map<string, [number, string][]>()
+    for (const [name, col, type, inPk, hidden] of cols as [string, string, string, number, number][]) {
+      if (!out.has(name)) out.set(name, { schema: '', name, key: [], columns: [], identity: false, allColumns: new Map() })
+      // Generated columns are not written, so not compared either.
+      if (hidden) continue
+      out.get(name)!.allColumns.set(col, { name: col, type, text: 'plain' })
+      if (inPk) pk.set(name, [...(pk.get(name) ?? []), [Number(inPk), col]])
+    }
+    // The primary key; else, as on the other engines, a unique index on NOT NULL columns.
+    for (const [name, t] of out) {
+      const key = pk.get(name)
+      if (key) t.key = key.sort((a, b) => a[0] - b[0]).map(([, col]) => col)
+      else {
+        const [u] = await lc.query(
+          `SELECT (SELECT json_group_array(ii.name) FROM pragma_index_info(il.name) ii) FROM pragma_index_list(?) il
+            WHERE il."unique" AND il.partial = 0 AND NOT EXISTS (SELECT 1 FROM pragma_index_info(il.name) ii JOIN pragma_table_info(?) ti ON ti.name = ii.name WHERE ti."notnull" = 0)
+              AND NOT EXISTS (SELECT 1 FROM pragma_index_info(il.name) ii WHERE ii.name IS NULL)
+            ORDER BY (SELECT COUNT(*) FROM pragma_index_info(il.name)) LIMIT 1`,
+          [name, name],
+        )
+        if (u) t.key = JSON.parse(String(u[0])) as string[]
+      }
+    }
+    return out
+  },
+  async foreignKeys(c) {
+    return (await (c as SqliteConn).query(
+      `SELECT DISTINCT m.name, f."table" FROM sqlite_schema m JOIN pragma_foreign_key_list(m.name) f WHERE m.type = 'table'`,
+    )) as [string, string][]
+  },
+  async estimate() {
+    // SQLite keeps no row estimate; counting is cheap enough for a file on this computer.
+    return -1
+  },
+  async fingerprint(c, t) {
+    const [[n, sum]] = await (c as SqliteConn).query(`SELECT COUNT(*), liftoff_sum(${liteRowHash(t)}) FROM ${liteFrom(t)}`)
+    return [Number(n), String(sum)]
+  },
+  async buckets(c, t, mask) {
+    const rows = await (c as SqliteConn).query(`SELECT ${liteKeyHash(t)} & ? b, COUNT(*), liftoff_sum(${liteRowHash(t)}) FROM ${liteFrom(t)} GROUP BY b`, [mask])
+    return rows.map(([b, n, s]) => [Number(b), Number(n), String(s)])
+  },
+  async pairs(c, t, mask, buckets) {
+    const select = `SELECT ${[...t.key.map((k) => liteText(k)), `CAST(${liteRowHash(t)} AS TEXT)`].join(', ')} FROM ${liteFrom(t)}`
+    if (!buckets) return toPairs(t, await (c as SqliteConn).query(select))
+    return toPairs(t, await (c as SqliteConn).query(`${select} WHERE ${liteKeyHash(t)} & ? IN (SELECT value FROM json_each(?))`, [mask, JSON.stringify(buckets)]))
+  },
+  async rows(c, t, keys) {
+    const out = new Map<string, (string | null)[]>()
+    const values = t.columns.map((col) => liteText(col.name)).join(', ')
+    if (!t.key.length) {
+      for (let i = 0; i < keys.length; i += HEAP_READ) {
+        const hashes = [...new Set(keys.slice(i, i + HEAP_READ).map((k) => k[0]))]
+        const rows = await (c as SqliteConn).query(`SELECT CAST(${liteRowHash(t)} AS TEXT), ${values} FROM ${liteFrom(t)} WHERE CAST(${liteRowHash(t)} AS TEXT) IN (SELECT value FROM json_each(?))`, [JSON.stringify(hashes)])
+        for (const r of rows) out.set(keyId([String(r[0])]), r.slice(1).map((v) => (v === null ? null : String(v))))
+      }
+      return out
+    }
+    for (let i = 0; i < keys.length; i += 5000) {
+      // The keys as their literals, in one JSON text: matched on quote(), so on the same type too.
+      const on = t.key.map((k, j) => `${liteText(k)} = json_extract(v.value, '$[${j}]')`).join(' AND ')
+      const rows = await (c as SqliteConn).query(
+        `SELECT ${t.key.map((k) => liteText(k)).join(', ')}, ${values} FROM ${liteFrom(t)} JOIN json_each(?) v ON ${on}`,
+        [JSON.stringify(keys.slice(i, i + 5000))],
+      )
+      for (const r of rows) out.set(keyId(r.slice(0, t.key.length).map(String)), r.slice(t.key.length).map((v) => (v === null ? null : String(v))))
+    }
+    return out
+  },
+  literal(_col, v) {
+    return v ?? 'NULL'
+  },
+  deleteCopies(t, copies, rows) {
+    // By the rows' values (IS also matches NULL), n copies each: no LiftOff function in a script.
+    return copies
+      .map(([h, n]) => {
+        const r = rows.get(keyId([h]))!
+        const where = t.columns.map((c, j) => `${liteQ(c.name)} IS ${r[j] ?? 'NULL'}`).join(' AND ')
+        return `DELETE FROM ${liteQ(t.name)} WHERE rowid IN (SELECT rowid FROM ${liteQ(t.name)} WHERE ${where} LIMIT ${n});`
+      })
+      .join('\n')
+  },
+}
+
+const liteFrom = (t: DataTable) => `${liteQ(t.name)} t`
+/** A value as its SQLite literal; NULL stays NULL. */
+const liteText = (col: string) => `CASE WHEN t.${liteQ(col)} IS NULL THEN NULL ELSE quote(t.${liteQ(col)}) END`
+/** Literals are self-delimiting ('it''s', 1, X'00', NULL), so joined with commas they say which row it is. */
+const liteRowHash = (t: DataTable) => `liftoff_hash(${t.columns.map((c) => `quote(t.${liteQ(c.name)})`).join(` || ',' || `) || "''"})`
+/** The bucket source: a single INTEGER key as it is, else 32 bits of the hash of the key (no key: the row hash). */
+const liteKeyHash = (t: DataTable) => {
+  if (!t.key.length) return liteRowHash(t)
+  const k = t.columns.find((c) => c.name === t.key[0])
+  if (t.key.length === 1 && /^INT/i.test(k?.type ?? '')) return `t.${liteQ(t.key[0])}`
+  return `(liftoff_hash(${t.key.map((n) => `quote(t.${liteQ(n)})`).join(` || ',' || `)}) & 4294967295)`
+}
+
+const dialects: Partial<Record<EngineName, Dialect>> = { PostgreSQL: pg, 'SQL Server': ms, SQLite: lite }
 
 function dialectOf(c: Conn): Dialect {
   const d = dialects[c.engine]
@@ -685,7 +799,7 @@ export class DataSession {
         if (!d.table.key.length) {
           // One statement (one pass over the table) per HEAP_DELETE distinct rows; their values above it.
           for (const [hashes, rows] of await this.byHash(this.b, d.table, d.onlyInTarget)) {
-            yield hashes.map(([h, n]) => `-- ${n > 1 ? `${n} copies of ` : ''}${JSON.stringify(rows.get(keyId([h])))}`).join('\n') + `\n${dl.deleteCopies(d.table, hashes)}\n`
+            yield hashes.map(([h, n]) => `-- ${n > 1 ? `${n} copies of ` : ''}${JSON.stringify(rows.get(keyId([h])))}`).join('\n') + `\n${dl.deleteCopies(d.table, hashes, rows)}\n`
           }
           continue
         }
