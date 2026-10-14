@@ -23,7 +23,8 @@ when LiftOff starts again (after an update too), each on the screen it was on. T
 workspaces: **Overview**, **Changes**, **Environments**, **Compare**, **Scripts**, **Rules**,
 **Commit**, **History** and **Pipelines** (Ctrl+1 to Ctrl+9). It shows only icons (hover one for
 its name); the button at its foot widens it to show the names too, and the app remembers your
-choice. The gear at the foot of the sidebar opens **Settings**.
+choice. The gear at the foot of the sidebar opens [Project settings](#settings); the gear in the
+title bar (and on the start page) opens **App settings**, for LiftOff itself.
 
 **About LiftOff.** The ⓘ button, top right on the start page and in the title bar, shows this
 version, the newest LiftOff release, and what is new in it (its release notes), with **Check
@@ -189,11 +190,16 @@ preview** and the secrets to add, then writes `.github/workflows/liftoff.yml` or
 
 ## Settings
 
-The gear. **Project**: name, migrations folder, schemas, the history table (fixed once databases
+Two kinds, each with its own gear.
+
+**Project settings**, the gear at the foot of the sidebar, are this project's, kept in its
+`liftoff.toml`. **Project**: name, migrations folder, schemas, the history table (fixed once databases
 have history) and the run lock. **Comparison filters**: **Add filter**, with Leave out or Include,
 the object type and a pattern. **Save settings** writes `liftoff.toml`; leaving with unsaved
-changes asks first. **This app**: settings for LiftOff on this computer, in every project; see
-[Updates](#updates).
+changes asks first.
+
+**App settings**, the gear in the title bar or on the start page, are for LiftOff on this computer,
+the same in every project, and saved as soon as you change them: see [Updates](#updates).
 
 ## Updates
 
@@ -204,7 +210,7 @@ with the same projects open, and your settings stay. With unsaved changes in Set
 asks first, as the restart would lose them. The first start of the new version shows **What's new in
 x.y.z**, which opens its release notes; it goes away once opened.
 
-**Settings > This app > Updates** chooses how:
+**App settings > Updates** chooses how:
 
 | choice | what happens |
 | --- | --- |

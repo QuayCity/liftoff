@@ -1,11 +1,28 @@
 // Updates of the app itself: the Update button in the title bar and the start page, and the
-// choice on the Settings screen. The main process (electron/updates.ts) does the work.
+// choice in App settings. The main process (electron/updates.ts) does the work.
 
-import { AlertTriangle, Download, ExternalLink, RotateCw, Sparkles } from 'lucide-react'
+import { AlertTriangle, Download, ExternalLink, RotateCw, Settings, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { updates, type UpdateInfo, type UpdateMode } from '../api'
-import { Button, Field, Select } from './controls'
-import { useToast } from './overlays'
+import { Button, Field, IconButton, Select } from './controls'
+import { Dialog, useToast } from './overlays'
+
+/**
+ * App settings: LiftOff on this computer, the same in every project (project settings are in each
+ * project's sidebar). In the title bar and on the start page, so it is there with no project open.
+ */
+export function AppSettingsButton() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <IconButton label="App settings" icon={Settings} onClick={() => setOpen(true)} />
+      <Dialog open={open} onOpenChange={setOpen} title="App settings" description="For LiftOff on this computer, in every project. Saved as soon as you change it."
+        footer={<Button onClick={() => setOpen(false)}>Close</Button>}>
+        <UpdateSettings />
+      </Dialog>
+    </>
+  )
+}
 
 /** The update state, kept current by the main process. */
 export function useUpdate(): UpdateInfo | null {

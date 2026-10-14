@@ -210,6 +210,6 @@ and V0002 is **pending** again.
 - "Coming from **Flyway**? **Open folder…** offers to convert the settings and keeps the scripts."
 - "**Compare** → **Data** compares rows too, fast on tables with millions of rows."
 - "It is open source (MIT), with no telemetry. Besides your databases it talks to one thing: GitHub,
-  to see whether there is a newer LiftOff. **Settings > This app** switches that off."
+  to see whether there is a newer LiftOff. **App settings** switches that off."
 
 **Show:** [the documentation](../README.md) and its tutorials, for those who want to try it.

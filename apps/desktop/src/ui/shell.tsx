@@ -7,7 +7,7 @@ import { IconButton, cx } from './controls'
 import { Kbd, Spinner } from './display'
 import { Tooltip } from './overlays'
 import { ThemeToggle } from './theme'
-import { UpdateButton } from './update'
+import { AppSettingsButton, UpdateButton } from './update'
 import { AboutButton } from './about'
 
 export const workspaces = ['Overview', 'Changes', 'Environments', 'Compare', 'Scripts', 'Rules', 'Commit', 'History', 'Pipelines'] as const
@@ -37,6 +37,7 @@ export function TitleBar({ tabs, onPalette, buttons = true }: { tabs: ReactNode;
       <UpdateButton />
       <AboutButton />
       <ThemeToggle />
+      <AppSettingsButton />
       </>}
     </header>
   )
@@ -69,7 +70,7 @@ export function ProjectTabs({ projects, active, onSwitch, onClose, onAdd }: {
 /** Workspace sidebar: icons only (with tooltips) or icons and names; the choice is remembered per computer. */
 export function Sidebar({ workspace, active = true, onWorkspace, settings = false, onSettings }: {
   workspace: Workspace; active?: boolean; onWorkspace: (w: Workspace) => void
-  /** Settings is open (it is not a workspace, so `active` is false then). */
+  /** Project settings is open (it is not a workspace, so `active` is false then). */
   settings?: boolean; onSettings: () => void
 }) {
   const [wide, setWide] = useState(() => {
@@ -110,8 +111,8 @@ export function Sidebar({ workspace, active = true, onWorkspace, settings = fals
         {workspaces.map((w) => entry(w, icons[w], active && w === workspace, () => onWorkspace(w)))}
       </nav>
       <div className="flex-1" />
-      {/* With the project it belongs to, not in the title bar, which is shared by every open project. */}
-      {entry('Settings', Settings, settings, onSettings)}
+      {/* With the project it belongs to; App settings, for every project, is in the title bar. */}
+      {entry('Project settings', Settings, settings, onSettings)}
       <button aria-label={wide ? 'Collapse sidebar' : 'Expand sidebar'} aria-expanded={wide} onClick={toggle} className={cx(item, 'text-muted')}>
         {wide ? <PanelLeftClose aria-hidden className="size-4 shrink-0" /> : <PanelLeftOpen aria-hidden className="size-4 shrink-0" />}
         {wide && <span>Collapse</span>}

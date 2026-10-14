@@ -30,7 +30,7 @@ export function AboutButton() {
   const newest =
     checking || s?.state === 'checking' ? 'Checking…'
     : latest ? (latest.version === info?.current ? `${latest.version}, the one you have` : latest.version)
-    : info?.mode === 'off' ? 'Not checked: update checks are off (Settings > This app)'
+    : info?.mode === 'off' ? 'Not checked: update checks are off (App settings)'
     : s?.state === 'failed' ? 'Could not check'
     : 'Not checked yet'
   return (

@@ -82,11 +82,13 @@ test.describe('F01 Home and projects', () => {
     await expect(nav.getByText('Scripts')).toBeVisible()
     await page.getByRole('button', { name: 'Collapse sidebar' }).click()
     await expect(nav.getByText('Scripts')).toHaveCount(0)
-    // Settings sits at the foot of the sidebar, with its project; the title bar, shared by every open project, has none.
-    await page.getByRole('complementary').getByRole('button', { name: 'Settings' }).click()
-    await expect(page.getByRole('complementary').getByRole('button', { name: 'Settings' })).toHaveAttribute('aria-current', 'page')
+    // Project settings sits at the foot of the sidebar, with its project; the title bar, shared by every
+    // open project, has App settings only.
+    await page.getByRole('button', { name: 'Project settings' }).click()
+    await expect(page.getByRole('button', { name: 'Project settings' })).toHaveAttribute('aria-current', 'page')
     await expect(page.getByRole('button', { name: 'Save settings' })).toBeVisible()
-    await expect(page.getByRole('banner').getByRole('button', { name: /settings/i })).toHaveCount(0)
+    await expect(page.getByRole('banner').getByRole('button', { name: /settings/i })).toHaveText([''])
+    await expect(page.getByRole('banner').getByRole('button', { name: 'App settings' })).toBeVisible()
   })
 
   test('F01-H5 the theme menu: system, light, dark in one choice, remembered, also in a project', async ({ page }) => {
