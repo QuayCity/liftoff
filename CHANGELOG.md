@@ -5,6 +5,14 @@ workflow publishes that section as the release notes (the desktop app shows them
 What's new) and refuses a tag without one. Keep each list item on one line, and use only
 headings, list items and bold: the app shows nothing else.
 
+## 0.4.2
+
+### New
+- **All of LiftOff inside VS Code.** Open LiftOff (the rocket on the status bar, or the command palette) shows every screen of the desktop app in an editor tab: Overview, Changes, Environments, Compare, Scripts, Rules, Commit, History, Pipelines and Project settings. You no longer need to leave your editor.
+- **The workspace's projects open by themselves** in VS Code, one tab each, and the panel follows VS Code's light or dark theme and uses its own file pickers and questions.
+- **Each project tab shows its database**: PG for PostgreSQL, MS for SQL Server.
+- **Drag project tabs into the order you like**, or move the tab in focus with Alt+Left and Alt+Right. The desktop app remembers the order.
+
 ## 0.4.1
 
 ### New
