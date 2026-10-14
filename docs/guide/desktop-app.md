@@ -22,7 +22,7 @@ Each project keeps its own screen while you look at another. The sidebar on the 
 workspaces: **Overview**, **Changes**, **Environments**, **Compare**, **Scripts**, **Rules**,
 **Commit**, **History** and **Pipelines** (Ctrl+1 to Ctrl+9). It shows only icons (hover one for
 its name); the button at its foot widens it to show the names too, and the app remembers your
-choice. The gear in the title bar opens **Settings**.
+choice. The gear at the foot of the sidebar opens **Settings**.
 
 **About LiftOff.** The ⓘ button, top right on the start page and in the title bar, shows this
 version, the newest LiftOff release, and what is new in it (its release notes), with **Check

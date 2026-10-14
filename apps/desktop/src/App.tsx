@@ -54,7 +54,7 @@ export function App() {
     <>
       {active === null && (open.length === 0 ? <Home onOpen={show} /> : (
         <div className="flex h-full flex-col">
-          <TitleBar tabs={tabs} />
+          <TitleBar tabs={tabs} buttons={false} />
           <div className="min-h-0 flex-1 overflow-auto"><Home onOpen={show} /></div>
         </div>
       ))}
@@ -144,9 +144,9 @@ function ProjectShell({ project, active, tabs, onProject, onDirty }: {
 
   return (
     <div className="flex h-full flex-col">
-      <TitleBar tabs={tabs} onSettings={() => setView('Settings')} />
+      <TitleBar tabs={tabs} />
       <div className="flex min-h-0 flex-1">
-      <Sidebar workspace={view === 'Settings' ? 'Environments' : view} active={view !== 'Settings'} onWorkspace={setView} />
+      <Sidebar workspace={view === 'Settings' ? 'Environments' : view} active={view !== 'Settings'} onWorkspace={setView} settings={view === 'Settings'} onSettings={() => setView('Settings')} />
       <main className="min-h-0 flex-1 overflow-auto">
         <h1 className="sr-only">{`${view}: ${project.name}`}</h1>
         {reloadError && <div className="p-4 pb-0"><InlineAlert tone="danger" title="Could not read the project files again">{reloadError} The screens show the project as it was; fix the file and come back to this window.</InlineAlert></div>}

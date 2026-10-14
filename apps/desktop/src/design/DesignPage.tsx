@@ -48,9 +48,9 @@ function Page() {
 
   return (
     <div className="flex h-full flex-col">
-      <TitleBar tabs={<ProjectTabs projects={[{ name: 'shop-db', root: 'shop-db' }]} active="shop-db" onSwitch={() => {}} onClose={() => {}} onAdd={() => {}} />} onPalette={() => toast({ tone: 'info', title: 'Command palette: not built yet' })} onSettings={() => {}} />
+      <TitleBar tabs={<ProjectTabs projects={[{ name: 'shop-db', root: 'shop-db' }]} active="shop-db" onSwitch={() => {}} onClose={() => {}} onAdd={() => {}} />} onPalette={() => toast({ tone: 'info', title: 'Command palette: not built yet' })} />
       <div className="flex min-h-0 flex-1">
-      <Sidebar workspace={workspace} onWorkspace={setWorkspace} />
+      <Sidebar workspace={workspace} onWorkspace={setWorkspace} onSettings={() => {}} />
       <main className="flex-1 overflow-auto">
         <div className="mx-auto flex max-w-5xl flex-col gap-10 p-8">
           <div className="flex items-center justify-between">
