@@ -23,7 +23,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { Config, Environment } from './config.ts'
 import { compares } from './config.ts'
-import { open, ownTables, type Conn, type EngineName } from './db.ts'
+import { dialect, open, ownTables, type Conn, type EngineName } from './db.ts'
 import { configError } from './errors.ts'
 import { typeName } from './msdiff.ts'
 import { PgConn, quoteIdent } from './postgres.ts'
@@ -33,7 +33,7 @@ import type { Side } from './compare.ts'
 import { sideLabel } from './compare.ts'
 
 /** A column as both sides have it; only columns in both, and not computed, are compared. */
-export type DataColumn = { name: string; type: string; /** how values become text and back (SQL Server) */ text: 'plain' | 'binary' | 'clr' | 'float' | 'datetime' }
+export type DataColumn = { name: string; type: string; /** how values become text and back (SQL Server, MySQL) */ text: 'plain' | 'binary' | 'clr' | 'float' | 'datetime' | 'number' }
 
 /** A table as compared. */
 export type DataTable = {
@@ -102,7 +102,8 @@ interface Dialect {
   deleteCopies(t: DataTable, copies: [string, number][]): string
 }
 
-const tableName = (t: { schema: string; name: string }) => `${t.schema}.${t.name}`
+/** `schema.table`; MySQL tables are in the URL's database and go by their name alone. */
+const tableName = (t: { schema: string; name: string }) => (t.schema ? `${t.schema}.${t.name}` : t.name)
 const keyId = (k: Key) => JSON.stringify(k)
 
 const pg: Dialect = {
@@ -676,7 +677,7 @@ export class DataSession {
     const dl = dialectOf(this.a)
     const isMs = this.a.engine === 'SQL Server'
     yield `-- Makes the rows of ${this.result.target} match ${this.result.source}\n-- Written by LiftOff ${new Date().toISOString()}. Review before running.\n`
-    const fq = (t: DataTable) => `${dl.q(t.schema)}.${dl.q(t.name)}`
+    const fq = (t: DataTable) => (t.schema ? `${dl.q(t.schema)}.${dl.q(t.name)}` : dl.q(t.name))
     const where = (t: DataTable, k: Key) => t.key.map((name, i) => `${dl.q(name)} = ${dl.literal(t.columns.find((c) => c.name === name)!, k[i])}`).join(' AND ')
     if (doDelete) {
       for (const id of [...order].reverse()) {
@@ -748,7 +749,7 @@ export class DataSession {
   async apply(tables?: string[], what?: { insert?: boolean; update?: boolean; delete?: boolean }, log: Log = quiet): Promise<{ statements: number }> {
     const b = this.b
     let statements = 0
-    await b.batch(b.engine === 'SQL Server' ? 'BEGIN TRANSACTION' : 'BEGIN')
+    await b.batch(dialect[b.engine].begin)
     try {
       for await (const chunk of this.script(tables, what)) {
         const body = chunk.split('\n').filter((l) => l && !l.startsWith('--')).join('\n')

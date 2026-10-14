@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { expectNoA11yViolations, watchConsole } from '../helpers'
+import { expectNoA11yViolations, watchConsole, withoutSavedTabs } from '../helpers'
 
 const base = process.env.LIFTOFF_TEST_PG
 const container = process.env.LIFTOFF_TEST_PG_CONTAINER ?? 'liftoff-pg'
@@ -43,6 +43,7 @@ let project: string
 let app: ElectronApplication
 let page: Page
 let checkConsole: () => void
+let restoreTabs: () => Promise<void> = async () => {}
 
 test.beforeAll(async () => {
   for (const db of ['shop_dev', 'shop_scratch', 'shop_test']) psql(db, 'drop schema if exists public cascade; create schema public;')
@@ -61,11 +62,13 @@ test.beforeAll(async () => {
 
   app = await _electron.launch({ executablePath: electron, args: [desktop], cwd: desktop, env: { ...process.env, LO_E2E_TEST_DB: 'shop_test' } })
   page = await app.firstWindow()
+  restoreTabs = await withoutSavedTabs(page)
   checkConsole = watchConsole(page)
   await expect(page.getByRole('heading', { name: 'LiftOff' })).toBeVisible({ timeout: 30_000 })
 })
 
 test.afterAll(async () => {
+  await restoreTabs()
   await app?.close().catch(() => {})
   restoreAll()
   if (project) fs.rmSync(project, { recursive: true, force: true })

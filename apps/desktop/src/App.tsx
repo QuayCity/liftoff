@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { api, ask, engineName, errorText, hostProjects, inDesktop, type Project } from './api'
+import { api, ask, engineAndSchemas, errorText, hostProjects, inDesktop, type Project } from './api'
 import { Compare } from './screens/Compare'
 import { Changes } from './screens/Changes'
 import { Environments } from './screens/Environments'
@@ -208,7 +208,7 @@ function ProjectShell({ project, active, tabs, onProject, onDirty }: {
         {view === 'Pipelines' && <Pipelines project={project} />}
       </main>
       </div>
-      <StatusBar path={project.root} engine={`${engineName(project.engine)} · ${project.schemas.join(', ')}`} />
+      <StatusBar path={project.root} engine={engineAndSchemas(project)} />
     </div>
   )
 }

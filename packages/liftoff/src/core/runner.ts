@@ -505,8 +505,9 @@ function dryRun(cfg: Config, engine: EngineName, name: string, as: Target, scrip
   const q = d.quote
   let infos = compute(scripts, rows, as)
   validate(infos, { ...opts, outOfOrder: opts.outOfOrder || !!opts.only || opts.topic !== undefined })
-  const [schema, table] = [q(cfg.historySchema()), q(cfg.project.history_table)]
-  let sql = `-- Dry run for ${name}: nothing below has been executed.\n-- History table: ${schema}.${table}\n`
+  // An engine that uses the connection's own schema (no schemas set): the history table goes without one.
+  const history = cfg.historySchema() ? `${q(cfg.historySchema())}.${q(cfg.project.history_table)}` : q(cfg.project.history_table)
+  let sql = `-- Dry run for ${name}: nothing below has been executed.\n-- History table: ${history}\n`
   const result: MigrateResult = { environment: name, applied: [], execution_time_ms: 0, dry_run_sql: null }
   const b = rows.length === 0 && !opts.only && opts.topic === undefined ? baselineScript(scripts, target) : undefined
   if (b) {
@@ -521,8 +522,8 @@ function dryRun(cfg: Config, engine: EngineName, name: string, as: Target, scrip
     const version = s.version ? `'${s.version.text}'` : 'NULL'
     const esc = (x: string) => x.replaceAll("'", "''")
     const record =
-      `INSERT INTO ${schema}.${table} (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success)\n` +
-      `  SELECT coalesce(max(installed_rank), 0) + 1, ${version}, '${esc(s.description)}', 'SQL', '${esc(s.fileName)}', ${s.checksum}, ${d.currentUser}, 0, ${d.true} FROM ${schema}.${table};`
+      `INSERT INTO ${history} (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success)\n` +
+      `  SELECT coalesce(max(installed_rank), 0) + 1, ${version}, '${esc(s.description)}', 'SQL', '${esc(s.fileName)}', ${s.checksum}, ${d.currentUser}, 0, ${d.true} FROM ${history};`
     sql += `\n-- ${s.fileName}${transactional ? '' : ' (runs outside a transaction)'}\n`
     const body = sqlFor(cfg, name, s).trimEnd()
     sql += transactional ? `${d.begin};\n${body}\n${record}\nCOMMIT;\n` : `${body}\n${record}\n`
@@ -579,10 +580,15 @@ async function migrateLocked(c: Conn, cfg: Config, name: string, as: Target, scr
     }
   }
   if (!todo.length && !result.applied.length) log('info', `${name} is up to date`)
+  let ddlNoted = false
   for (const i of todo) {
     const s = scripts.find((s) => s.fileName === i.script)!
     const transactional = !dialect[c.engine].needsNoTransaction(s.sql)
-    if (!transactional) log('warn', `${s.fileName} runs outside a transaction; if it fails part-way it cannot be rolled back`)
+    if (!transactional && dialect[c.engine].ddlCommits) {
+      // Said once: on such an engine nearly every script has DDL.
+      if (!ddlNoted) log('info', `${c.engine} commits DDL at once: if a script with DDL fails part-way, what ran stays (repair, then fix the script)`)
+      ddlNoted = true
+    } else if (!transactional) log('warn', `${s.fileName} runs outside a transaction; if it fails part-way it cannot be rolled back`)
     log('info', `Running ${s.fileName}`)
     const t = Date.now()
     try {

@@ -10,7 +10,7 @@ import * as activity from '../core/activity.ts'
 import * as checks from '../core/checks.ts'
 import * as ci from '../core/ci.ts'
 import { Config, defaultSchemas, init, PROJECT_FILE, readSettings, saveSettings, type Environment, type Role, type SettingsChange } from '../core/config.ts'
-import { ENGINES, engineForUrl, engineOf, open } from '../core/db.ts'
+import { ENGINES, engineById, engineForUrl, engineOf, open } from '../core/db.ts'
 import * as compare from '../core/compare.ts'
 import { DataSession } from '../core/datacompare.ts'
 import { adopt } from '../core/adopt.ts'
@@ -170,7 +170,7 @@ const COMMANDS: Record<string, Command> = {
           `  migrations: ${r.migrations}   schemas: ${r.schemas.join(', ')}`,
           ...r.notes.map((n) => `  note: ${n}`),
           ...r.not_converted.map((n) => `  not converted: ${n}`),
-          Config.load(ctx.root).project.engine === 'sqlserver'
+          Config.load(ctx.root).project.engine !== 'postgresql'
             ? 'Next, per database that already ran the scripts: liftoff -e <environment> baseline --version <the latest version it ran>'
             : `Next, per database: liftoff -e <environment> import-flyway-history --table ${r.flyway_table}`,
         ]
@@ -382,7 +382,7 @@ const COMMANDS: Record<string, Command> = {
           ...Object.entries(rules.RULES).map(([id, r]) => ({ id, severity: eff[id].severity, pattern: eff[id].pattern ?? null, engine: r.engine ?? null, help: r.help, custom: false })),
           ...cfg.rules.custom.map((c) => ({ id: c.id, severity: c.severity, pattern: c.pattern, engine: null, help: c.message, custom: true })),
         ]
-        return [list, list.map((r) => `${r.id.padEnd(26)} ${r.severity.padEnd(5)}  ${r.help}${r.engine ? ` (${r.engine === 'sqlserver' ? 'SQL Server' : 'PostgreSQL'})` : ''}`).join('\n')]
+        return [list, list.map((r) => `${r.id.padEnd(26)} ${r.severity.padEnd(5)}  ${r.help}${r.engine ? ` (${engineById(r.engine).name})` : ''}`).join('\n')]
       }
       const r = rules.lint(cfg, { scripts: v.script as string[] | undefined, since: str(v, 'since') })
       const report = str(v, 'report')

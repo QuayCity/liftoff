@@ -295,7 +295,7 @@ export async function importHistory(cfg: Config, envName: string | undefined, fr
   const conn = await open(name, env)
   if (!(conn instanceof PgConn)) {
     await conn.close()
-    throw configError("importing Flyway history works on PostgreSQL only for now; on SQL Server, baseline the database at Flyway's latest version instead")
+    throw configError(`importing Flyway history works on PostgreSQL only for now; on ${conn.engine}, baseline the database at Flyway's latest version instead`)
   }
   const c = conn
   const held = await c.lock(schema, table, cfg.project.lock, () => log('info', 'Another run holds the lock on this database; waiting'), () => open(name, env))

@@ -1,6 +1,7 @@
 // The desktop app's own updates, against a local stand-in for GitHub's releases API: it finds a
 // newer release, downloads the file for this platform, checks its checksum, and offers a restart.
 // A file that does not match its checksum is refused. Installing is not run here.
+import { withoutSavedTabs } from '../helpers'
 import { _electron, expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -66,7 +67,10 @@ async function github(digest: string, zip?: Buffer) {
 async function launch(url: string) {
   const app = await _electron.launch({ executablePath: electron, args: [desktop], cwd: desktop, env: { ...process.env, LIFTOFF_UPDATE_URL: url } })
   const page = await app.firstWindow()
+  const restoreTabs = await withoutSavedTabs(page)
   await expect(page.getByRole('heading', { name: 'LiftOff' })).toBeVisible({ timeout: 30_000 })
+  // These tests open no project, so the tabs can go back at once.
+  await restoreTabs()
   return { app, page }
 }
 

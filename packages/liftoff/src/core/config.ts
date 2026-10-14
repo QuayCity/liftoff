@@ -4,7 +4,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { parse, stringify } from 'smol-toml'
-import { engineById } from './db.ts'
+import { engineById, type EngineId } from './db.ts'
 import { configError } from './errors.ts'
 import { keychainDelete, keychainEnabled, keychainGet, keychainSet } from './keychain.ts'
 import { effective, NO_RULES, parseRules, RULES, type RulesConfig } from './rules.ts'
@@ -13,7 +13,7 @@ export const PROJECT_FILE = 'liftoff.toml'
 export const USER_FILE = 'liftoff.user.toml'
 
 export type Role = 'dev' | 'scratch' | 'test' | 'prod'
-export type Engine = 'postgresql' | 'sqlserver'
+export type Engine = EngineId
 
 /**
  * `advisory` (default): a PostgreSQL session advisory lock.

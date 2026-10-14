@@ -2,6 +2,23 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, type Page } from '@playwright/test'
 
 /** Collects console errors and uncaught exceptions; call the returned check at the end of a test. */
+/**
+ * The real app opens again with the tabs of last time; the tests start from the start page. Sets
+ * the saved tabs aside (reloading without them) and returns a function that puts them back: call
+ * it before the app closes, after the test's own tabs, which the app saves too.
+ */
+export async function withoutSavedTabs(page: Page): Promise<() => Promise<void>> {
+  const key = 'liftoff:open-projects'
+  const saved = await page.evaluate((k) => localStorage.getItem(k), key)
+  if (saved !== null) {
+    await page.evaluate((k) => localStorage.removeItem(k), key)
+    await page.reload()
+  }
+  return async () => {
+    if (saved !== null) await page.evaluate(([k, v]) => localStorage.setItem(k, v), [key, saved]).catch(() => {})
+  }
+}
+
 export function watchConsole(page: Page) {
   const errors: string[] = []
   page.on('console', (m) => {

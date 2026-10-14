@@ -138,6 +138,8 @@ export type EngineInfo = {
   currentUser: string
   true: string
   needsNoTransaction: (sql: string) => boolean
+  /** DDL commits at once (MySQL): a script with DDL never runs in a transaction, which is no cause for a warning */
+  ddlCommits?: boolean
   quote: (name: string) => string
   /**
    * The schemas a new project manages. Empty: the schema the connection uses (the database in a

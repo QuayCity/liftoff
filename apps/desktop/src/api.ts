@@ -8,7 +8,10 @@ export type EnvView = { name: string; role: Role; url: string; user: string | nu
 export type Filter = { action: 'include' | 'exclude'; object: string; pattern: string }
 export type LockMode = 'advisory' | 'table'
 export type Engine = 'postgresql' | 'sqlserver'
-export const engineName = (engine: string) => (engine === 'sqlserver' ? 'SQL Server' : 'PostgreSQL')
+const ENGINE_NAMES: Record<string, string> = { postgresql: 'PostgreSQL', sqlserver: 'SQL Server' }
+export const engineName = (engine: string) => ENGINE_NAMES[engine] ?? 'PostgreSQL'
+/** The engine and its schemas, as the status bar shows them (none: the engine manages the database the URL names). */
+export const engineAndSchemas = (p: { engine: string; schemas: string[] }) => (p.schemas.length ? `${engineName(p.engine)} · ${p.schemas.join(', ')}` : engineName(p.engine))
 /** An example connection URL for the project's engine, for placeholders and help. */
 export const urlExample = (engine: string) => (engine === 'sqlserver' ? 'sqlserver://localhost:1433;databaseName=shop;encrypt=true;trustServerCertificate=true' : 'postgres://localhost:5432/shop')
 /** The engine a connection URL points at. */
