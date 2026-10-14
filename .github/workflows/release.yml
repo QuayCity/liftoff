@@ -4,7 +4,8 @@
 #   LiftOff-Setup-<version>.exe, LiftOff-<version>-x86_64.AppImage  the desktop app (Windows, Linux)
 #   LiftOff-<version>-win-x64.zip                                   the desktop app unpacked: what an installed app updates from
 # No desktop app for macOS: unsigned, Gatekeeper blocks it, and signing needs a paid Apple account.
-# The tag has to match the version in the code (see the first job), so a release says what it is.
+# The tag has to match the version in the code (see the first job), so a release says what it is,
+# and CHANGELOG.md needs a "## <version>" section: that section is the release's notes.
 # Run it by hand (Actions > Release > Run workflow) for a dry run: everything is built, nothing published.
 name: Release
 
@@ -18,7 +19,7 @@ permissions:
 
 jobs:
   version:
-    name: The tag matches the version in the code
+    name: The tag matches the version in the code, with release notes
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
@@ -32,6 +33,7 @@ jobs:
           app=$(node -p "require('./apps/desktop/package.json').version")
           echo "tag $tag, CLI $cli, packages/liftoff $core, apps/vscode $ext, apps/desktop $app"
           [ "$tag" = "$cli" ] && [ "$tag" = "$core" ] && [ "$tag" = "$ext" ] && [ "$tag" = "$app" ] || { echo "::error::set the version to $tag in main.ts and the three package.json files"; exit 1; }
+          awk -v v="$tag" '/^## /{p = ($2 == v); next} p' CHANGELOG.md | grep -q '[^[:space:]]' || { echo "::error::write the release notes: a '## $tag' section in CHANGELOG.md"; exit 1; }
 
   build:
     name: Build for ${{ matrix.name }}
@@ -96,12 +98,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
+      - name: The release notes, from CHANGELOG.md
+        run: awk -v v="${GITHUB_REF_NAME#v}" '/^## /{p = ($2 == v); next} p' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         # Every file, wherever it sits: the installers keep their apps/desktop/release/ folders.
-        run: find dist -type f -print0 | xargs -0 gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "LiftOff $GITHUB_REF_NAME" --generate-notes
+        # The notes come first; GitHub adds the link to the full list of commits after them.
+        run: find dist -type f -print0 | xargs -0 gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "LiftOff $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes
