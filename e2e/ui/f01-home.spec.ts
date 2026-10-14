@@ -31,21 +31,23 @@ test.describe('F01 Home and projects', () => {
     await expect(nav.getByText('Scripts')).toHaveCount(0)
   })
 
-  test('F01-H5 the theme switch: system, light, dark, remembered, also in a project', async ({ page }) => {
+  test('F01-H5 the theme menu: system, light, dark in one choice, remembered, also in a project', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'light' })
     const html = page.locator('html')
     const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor)
     await expect(html).not.toHaveAttribute('data-theme')
     const light = await bg()
-    await page.getByRole('button', { name: /^Theme: same as the system/ }).click()
-    await expect(html).toHaveAttribute('data-theme', 'light')
-    await page.getByRole('button', { name: /^Theme: light/ }).click()
+    // Every choice is in the menu, the current one ticked: dark is one pick away, whatever is set.
+    await page.getByRole('button', { name: 'Theme: same as the system' }).click()
+    await expect(page.getByRole('menuitemradio', { name: 'Same as the system' })).toHaveAttribute('aria-checked', 'true')
+    await page.getByRole('menuitemradio', { name: 'Dark' }).click()
     await expect(html).toHaveAttribute('data-theme', 'dark')
     expect(await bg()).not.toBe(light)
     await page.reload()
     await expect(html).toHaveAttribute('data-theme', 'dark')
     await page.getByRole('button', { name: 'shop-db', exact: true }).click()
-    await page.getByRole('banner').getByRole('button', { name: /^Theme: dark/ }).click()
+    await page.getByRole('banner').getByRole('button', { name: 'Theme: dark' }).click()
+    await page.getByRole('menuitemradio', { name: 'Same as the system' }).click()
     await expect(html).not.toHaveAttribute('data-theme')
     expect(await bg()).toBe(light)
   })
