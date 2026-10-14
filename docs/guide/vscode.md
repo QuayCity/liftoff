@@ -8,6 +8,20 @@ Open a folder with a `liftoff.toml` and click the LiftOff rocket in the activity
 without one offers **Create LiftOff Project**; a folder with a Flyway project offers **Import
 Flyway Project**.
 
+## The LiftOff panel
+
+**Open LiftOff** (the rocket on the status bar, the rocket at the top of the Environments view, or
+the command palette) opens the [desktop app](desktop-app.md)'s screens in an editor tab, so you
+have everything without leaving VS Code: Overview with each database's activity, Changes,
+Environments (with Repair, Clean, Capture and the rest), Compare for schemas and data, Scripts
+(new script, squash, rebaseline), Rules, Commit, History and Pipelines (GitHub Actions or Azure
+DevOps). Every project in the workspace opens as a tab; **+** opens another folder. The panel
+follows VS Code's colour theme, asks its questions in VS Code's dialogs, and keeps its place while
+it is in the background. It runs the same `liftoff` program as the rest of the extension and
+lists the same recent projects as the desktop app.
+
+The views below stay for quick work beside the code.
+
 ## The Environments view
 
 Every environment in `liftoff.toml` and `liftoff.user.toml`, and under each one every migration

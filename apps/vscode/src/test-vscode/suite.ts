@@ -1,5 +1,6 @@
 // Runs inside VS Code (see run.ts). VS Code calls `run`; a thrown error fails the test.
 
+import type { UiPanel } from '../uiPanel'
 import assert from 'node:assert/strict'
 import * as path from 'node:path'
 import * as vscode from 'vscode'
@@ -181,6 +182,16 @@ export async function run(): Promise<void> {
   await wipeDoc.save()
   await until('the allowed finding to leave Problems', () => vscode.languages.getDiagnostics(wipe).length === 0)
   fs.rmSync(wipe.fsPath)
+
+  // The LiftOff panel: the desktop app's screens, with the workspace's project open. The page has
+  // loaded and its calls reach the commands when the project comes back from `liftoff ui-host`.
+  const ui = await vscode.commands.executeCommand<UiPanel>('liftoff.open')
+  assert.equal(ui?.panel.title, 'LiftOff')
+  assert.match(ui!.panel.webview.html, /<base href=".+\/media\/ui\/">/)
+  await until('the panel to open the project through ui-host', () => ui!.answered.find((a) => a.name === 'project_open' && a.ok), 30000)
+  await until('the Environments screen to ask for the migrations', () => ui!.answered.find((a) => a.name === 'migrations_info'), 30000)
+  assert.equal(await vscode.commands.executeCommand<UiPanel>('liftoff.open'), ui, 'one panel per window')
+  ui!.panel.dispose()
 
   fs.writeFileSync(path.join(workspace, '.suite-passed'), '')
   console.log('liftoff suite: all checks passed')

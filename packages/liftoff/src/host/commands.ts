@@ -1,26 +1,27 @@
-// The desktop app's commands: each maps to one core function and returns the same JSON shape as
+// The commands behind the LiftOff screens (the desktop app, and the VS Code panel through
+// `liftoff ui-host`): each maps to one core function and returns the same JSON shape as
 // `liftoff --output-type json`. The screens call them through src/api.ts.
 
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import * as activity from '../../../packages/liftoff/src/core/activity.ts'
-import * as checks from '../../../packages/liftoff/src/core/checks.ts'
-import * as ci from '../../../packages/liftoff/src/core/ci.ts'
-import * as compare from '../../../packages/liftoff/src/core/compare.ts'
-import { DataSession } from '../../../packages/liftoff/src/core/datacompare.ts'
-import { rebaseline } from '../../../packages/liftoff/src/core/rebaseline.ts'
-import { adopt } from '../../../packages/liftoff/src/core/adopt.ts'
-import { Config, init, interpolate, orderEnvironments, PROJECT_FILE, readSettings, redactUrl, saveProject, saveRules, saveSettings, type Environment, type Project, type Role } from '../../../packages/liftoff/src/core/config.ts'
-import { open } from '../../../packages/liftoff/src/core/db.ts'
-import * as diff from '../../../packages/liftoff/src/core/diff.ts'
-import { configError, LiftoffError } from '../../../packages/liftoff/src/core/errors.ts'
-import * as flyway from '../../../packages/liftoff/src/core/flyway.ts'
-import * as git from '../../../packages/liftoff/src/core/git.ts'
-import { scan, versionNote } from '../../../packages/liftoff/src/core/migration.ts'
-import * as model from '../../../packages/liftoff/src/core/model.ts'
-import * as rules from '../../../packages/liftoff/src/core/rules.ts'
-import * as runner from '../../../packages/liftoff/src/core/runner.ts'
-import { createSample } from '../../../packages/liftoff/src/core/sample.ts'
+import * as activity from '../core/activity.ts'
+import * as checks from '../core/checks.ts'
+import * as ci from '../core/ci.ts'
+import * as compare from '../core/compare.ts'
+import { DataSession } from '../core/datacompare.ts'
+import { rebaseline } from '../core/rebaseline.ts'
+import { adopt } from '../core/adopt.ts'
+import { Config, init, interpolate, orderEnvironments, PROJECT_FILE, readSettings, redactUrl, saveProject, saveRules, saveSettings, type Environment, type Project, type Role } from '../core/config.ts'
+import { open } from '../core/db.ts'
+import * as diff from '../core/diff.ts'
+import { configError, LiftoffError } from '../core/errors.ts'
+import * as flyway from '../core/flyway.ts'
+import * as git from '../core/git.ts'
+import { scan, versionNote } from '../core/migration.ts'
+import * as model from '../core/model.ts'
+import * as rules from '../core/rules.ts'
+import * as runner from '../core/runner.ts'
+import { createSample } from '../core/sample.ts'
 
 /** What a command gets besides its arguments. */
 export type Host = {

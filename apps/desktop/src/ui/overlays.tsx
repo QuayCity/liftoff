@@ -2,6 +2,7 @@ import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react'
 import { AlertDialog, Dialog as RDialog, DropdownMenu, Toast as RToast, Tooltip as RTooltip } from 'radix-ui'
 import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { Button, Input, cx } from './controls'
+import { ask } from '../api'
 
 export function Tooltip({ label, side, children }: { label: string; side?: 'top' | 'right' | 'bottom' | 'left'; children: ReactElement }) {
   return (
@@ -40,10 +41,10 @@ export function Dialog({ open, onOpenChange, title, description, size = 'md', di
   size?: keyof typeof dialogWidth; dirty?: boolean; submitting?: boolean; footer: ReactNode; children: ReactNode
 }) {
   const returnFocus = useReturnFocus(open)
-  const close = (o: boolean) => {
+  const close = async (o: boolean) => {
     if (o) return onOpenChange(true)
     if (submitting) return
-    if (dirty && !window.confirm('Discard your changes?')) return // ponytail: native confirm; swap for an in-app prompt
+    if (dirty && !(await ask('Discard your changes?'))) return // ponytail: the window's (or VS Code's) yes/no; swap for an in-app prompt
     onOpenChange(false)
   }
   return (

@@ -25,6 +25,7 @@ import * as rules from '../core/rules.ts'
 import * as runner from '../core/runner.ts'
 import { createSample } from '../core/sample.ts'
 import { FlywayArgError, translate, type Adhoc } from './flyway-args.ts'
+import { serve } from '../host/serve.ts'
 
 const VERSION = '0.4.1'
 
@@ -897,6 +898,11 @@ function findCommand(args: string[], options: Record<string, OptionSpec>): strin
 }
 
 async function main(argv: string[]): Promise<number> {
+  // The VS Code panel's connection (host/serve.ts); not a command people type, so not in --help.
+  if (argv[0] === 'ui-host') {
+    await serve(process.stdin, (line) => process.stdout.write(line))
+    return 0
+  }
   let json = argv.includes('json') // good enough to format a usage error before parsing
   try {
     const { args, adhoc } = translate(argv)

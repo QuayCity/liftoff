@@ -3,7 +3,7 @@
 
 import { AlertTriangle, Download, ExternalLink, RotateCw, Settings, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { updates, type UpdateInfo, type UpdateMode } from '../api'
+import { ask, inVsCode, updates, type UpdateInfo, type UpdateMode } from '../api'
 import { Button, Field, IconButton, Select } from './controls'
 import { Dialog, useToast } from './overlays'
 
@@ -12,6 +12,11 @@ import { Dialog, useToast } from './overlays'
  * project's sidebar). In the title bar and on the start page, so it is there with no project open.
  */
 export function AppSettingsButton() {
+  return inVsCode ? null : <AppSettings />
+}
+
+/** None in VS Code: its one setting is the app's updates, and VS Code updates the extension. */
+function AppSettings() {
   const [open, setOpen] = useState(false)
   return (
     <>
@@ -43,8 +48,8 @@ export function useUpdate(): UpdateInfo | null {
 export const unsaved = new Map<string, string>()
 
 /** Restarts into the downloaded version; asks first when there are unsaved edits. Open projects come back by themselves. */
-function restart() {
-  if (unsaved.size && !window.confirm(`${[...unsaved.values()].join(', ')} ${unsaved.size === 1 ? 'has' : 'have'} unsaved changes, which the restart would lose. Restart anyway?`)) return
+async function restart() {
+  if (unsaved.size && !(await ask(`${[...unsaved.values()].join(', ')} ${unsaved.size === 1 ? 'has' : 'have'} unsaved changes, which the restart would lose. Restart anyway?`))) return
   void updates.install()
 }
 

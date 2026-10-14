@@ -1,4 +1,4 @@
-// Typed wrappers over the desktop app's commands (electron/commands.ts), reached through the
+// Typed wrappers over the desktop app's commands (packages/liftoff/src/host/commands.ts), reached through the
 // bridge in electron/preload.ts. Outside the app (plain browser: screenshots, UI tests) the same
 // signatures run against seeded fake data.
 
@@ -103,8 +103,17 @@ export type Activity = {
 }
 export type EnvironmentOverview = { name: string; role: Role; error: string | null; version: string | null; pending: number; failed: number; activity: Activity[]; migrations: MigrationInfo[] }
 
-/** The bridge electron/preload.ts puts on the window. */
+/** The bridge electron/preload.ts puts on the window (or the VS Code panel, apps/vscode/src/uiPanel.ts). */
 type Bridge = {
+  /** set in VS Code, where the panel shows these screens */
+  host?: 'vscode'
+  /** VS Code: the workspace's project folders, opened as tabs on start */
+  projects?: string[]
+  /** VS Code: the editor's colour theme, and its changes */
+  theme?(): 'light' | 'dark'
+  onTheme?(cb: (theme: 'light' | 'dark') => void): () => void
+  /** VS Code: a yes/no question in its own dialog (webviews block window.confirm) */
+  confirm?(message: string): Promise<boolean>
   invoke(name: string, args?: Record<string, unknown>): Promise<{ ok: true; value: unknown } | { ok: false; error: ErrorReport }>
   pickFolder(): Promise<string | null>
   openFile(filterName: string, extensions: string[]): Promise<string | null>
@@ -116,8 +125,21 @@ type Bridge = {
 }
 const bridge = (window as unknown as { liftoff?: Bridge }).liftoff
 
-/** True inside the desktop app, false in a plain browser. */
+/** True inside the desktop app (or the VS Code panel), false in a plain browser. */
 export const inDesktop = bridge !== undefined
+/** In the VS Code panel: the theme follows the editor, and VS Code updates the extension. */
+export const inVsCode = bridge?.host === 'vscode'
+/** VS Code: the workspace's project folders, to open on start. */
+export const hostProjects = bridge?.projects
+/** A yes/no question: the window's confirm, or VS Code's own dialog in the panel, where confirm is blocked. */
+export const ask = (message: string): Promise<boolean> => (bridge?.confirm ? bridge.confirm(message) : Promise.resolve(window.confirm(message)))
+
+/** VS Code: applies the editor's theme now and whenever it changes. */
+export function followHostTheme(apply: (theme: 'light' | 'dark') => void): void {
+  if (!bridge?.theme || !bridge.onTheme) return
+  apply(bridge.theme())
+  bridge.onTheme(apply)
+}
 
 /** The window frame follows the app's theme; a browser has none to change. */
 export const setNativeTheme = (theme: 'system' | 'light' | 'dark') => void bridge?.setTheme(theme)

@@ -90,6 +90,12 @@
     ],
     "commands": [
       {
+        "command": "liftoff.open",
+        "title": "Open LiftOff",
+        "category": "LiftOff",
+        "icon": "$(rocket)"
+      },
+      {
         "command": "liftoff.refresh",
         "title": "Refresh",
         "category": "LiftOff",
@@ -269,6 +275,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "liftoff.open",
+          "when": "view == liftoff.environments",
+          "group": "navigation@0"
+        },
         {
           "command": "liftoff.refresh",
           "when": "view == liftoff.environments",
@@ -476,7 +487,8 @@
     "test": "npm run build && node --test \"out/test/*.test.js\"",
     "test:vscode": "npm run build && node out/test-vscode/run.js",
     "bundle-cli": "node scripts/bundle-cli.mjs",
-    "package": "npm run build && npm run bundle-cli && vsce package"
+    "copy-ui": "node scripts/copy-ui.mjs",
+    "package": "npm run build && npm run bundle-cli && npm run copy-ui && vsce package"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

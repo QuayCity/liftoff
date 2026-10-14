@@ -68,7 +68,10 @@ jobs:
         run: ./build/${{ matrix.exe }} --version
       - name: The VS Code extension for this platform
         working-directory: apps/vscode
-        run: npm ci && npm run build && npm run bundle-cli && npx vsce package --target ${{ matrix.vsce }} --out ../../liftoff-vscode-${{ matrix.vsce }}.vsix
+        # The LiftOff panel shows the desktop app's screens: built in apps/desktop, copied into media/ui.
+        run: |
+          (cd ../desktop && npm ci && npm run build)
+          npm ci && npm run build && npm run bundle-cli && npm run copy-ui && npx vsce package --target ${{ matrix.vsce }} --out ../../liftoff-vscode-${{ matrix.vsce }}.vsix
       - name: The desktop app's installer for this platform (the CLI goes inside it)
         if: matrix.name != 'macos-arm64'
         working-directory: apps/desktop

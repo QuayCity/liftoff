@@ -4,6 +4,7 @@
 
 import * as path from 'node:path'
 import * as vscode from 'vscode'
+import { UiPanel } from './uiPanel'
 import { findBinary, LiftoffError, runCli } from './cli'
 import { registerCompare, type CompareView } from './compareView'
 import { registerDataCompare } from './dataCompare'
@@ -88,7 +89,8 @@ export class Liftoff implements vscode.TreeDataProvider<Item> {
 
   constructor(private readonly extensionDir: string) {}
 
-  private binary(): string {
+  /** The liftoff program: the configured one, the one shipped in the extension, or the PATH's. */
+  binary(): string {
     return findBinary(this.extensionDir, vscode.workspace.getConfiguration('liftoff').get('cliPath', ''))
   }
 
@@ -469,6 +471,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
     vscode.commands.registerCommand('liftoff.lint', () => checkRules(lo, lo.rules!)),
     vscode.commands.registerCommand('liftoff.testConnection', (item?: EnvironmentItem) => testConnection(lo, item)),
     vscode.commands.registerCommand('liftoff.showLog', () => lo.log.show()),
+    // The desktop app's screens in a panel: everything LiftOff does, without leaving VS Code.
+    vscode.commands.registerCommand('liftoff.open', () => UiPanel.show(context.extensionUri, () => lo.binary(), lo.log)),
     vscode.commands.registerCommand('liftoff.importFlyway', (answers?: ImportAnswers) => importFlyway(lo, answers)),
     vscode.commands.registerCommand('liftoff.rebaseline', (answers?: { description: string; archive?: string; restart?: boolean }) => rebaselineProject(lo, answers)),
     vscode.commands.registerCommand('liftoff.adopt', (item?: EnvironmentItem) => adoptDatabase(lo, item?.env)),
@@ -485,6 +489,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<Liftof
       lo.rules?.onSave(doc.fileName)
     }),
   )
+  const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50)
+  status.text = '$(rocket) LiftOff'
+  status.tooltip = 'Open LiftOff: environments, changes, compare, scripts, rules and more'
+  status.command = 'liftoff.open'
+  status.show()
+  context.subscriptions.push(status)
   lo.rules = new Rules(lo)
   context.subscriptions.push(lo.rules.diagnostics)
   await lo.load()

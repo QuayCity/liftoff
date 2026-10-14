@@ -1,7 +1,7 @@
 // S17 Pipelines: a GitHub Actions workflow or an Azure Pipelines file that runs the migrations, stage by stage.
 import { Rocket } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { api, errorText, type CiPlatform, type Project } from '../api'
+import { api, ask, errorText, type CiPlatform, type Project } from '../api'
 import { Button, Checkbox, Field, Input, RadioGroup, Switch } from '../ui/controls'
 import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
 import { useToast } from '../ui/overlays'
@@ -47,7 +47,7 @@ export function Pipelines({ project }: { project: Project }) {
       toast({ tone: 'success', title: `Wrote ${path}` })
     } catch (e) {
       const msg = errorText(e)
-      if (msg.includes('already exists') && window.confirm(`${msg}. Replace it?`)) return write(true)
+      if (msg.includes('already exists') && (await ask(`${msg}. Replace it?`))) return write(true)
       setError(msg)
     } finally {
       setWriting(false)

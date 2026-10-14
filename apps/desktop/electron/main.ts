@@ -3,7 +3,7 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron'
 import * as path from 'node:path'
 import { asLiftoffError } from '../../../packages/liftoff/src/core/errors.ts'
-import { commands, type Host } from './commands.ts'
+import { commands, type Host } from '../../../packages/liftoff/src/host/commands.ts'
 import { Updater, type UpdateMode } from './updates.ts'
 
 // Kept from the earlier desktop build, so recent projects carry over.

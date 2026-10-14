@@ -44,7 +44,7 @@ export LIFTOFF_TEST_MSSQL='sqlserver://localhost:51433;encrypt=true;trustServerC
 | core unit tests | `packages/liftoff` | `npm test` |
 | against real databases, and the CLI contract | `packages/liftoff` | `npm run test:db` |
 | the single-file CLI | `packages/liftoff` | `npm run build:cli`, then `LIFTOFF_CLI=build/liftoff.exe node --test test/cli.test.ts` |
-| VS Code extension | `apps/vscode` | `npm test`, and `npm run test:vscode` (a real VS Code) |
+| VS Code extension | `apps/vscode` | `npm test`, and `npm run test:vscode` (a real VS Code; first `npm run build` in apps/desktop and `npm run copy-ui` here, for the LiftOff panel) |
 | desktop app | `e2e` | `npx playwright test` (build the app first: `npm run build && npm run build:electron` in `apps/desktop`) |
 
 Tests that need a database skip themselves when its variable is not set. Set

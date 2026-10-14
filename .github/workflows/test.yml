@@ -94,9 +94,12 @@ jobs:
       - name: VS Code extension, unit tests
         working-directory: apps/vscode
         run: npm ci && npm test
-      - name: VS Code extension, in a real VS Code
+      - name: VS Code extension, in a real VS Code (with the desktop app's screens for its panel)
         working-directory: apps/vscode
-        run: xvfb-run -a npm run test:vscode
+        run: |
+          (cd ../desktop && npm ci && npm run build)
+          npm run copy-ui
+          xvfb-run -a npm run test:vscode
 
   desktop:
     name: Desktop app screens

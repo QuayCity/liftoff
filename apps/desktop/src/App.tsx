@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { api, engineName, errorText, inDesktop, type Project } from './api'
+import { api, ask, engineName, errorText, hostProjects, inDesktop, type Project } from './api'
 import { Compare } from './screens/Compare'
 import { Changes } from './screens/Changes'
 import { Environments } from './screens/Environments'
@@ -38,7 +38,7 @@ export function App() {
   /** The project shown, by folder; null shows the start page. */
   const [active, setActive] = useState<string | null>(null)
   // Until the saved tabs are open again, show nothing rather than the start page for a moment.
-  const [restoring, setRestoring] = useState(() => !params.get('open') && savedTabs().roots.length > 0)
+  const [restoring, setRestoring] = useState(() => !params.get('open') && (hostProjects ?? savedTabs().roots).length > 0)
 
   const show = useCallback((p: Project) => {
     setOpen((o) => (o.some((x) => x.root === p.root) ? o : [...o, p]))
@@ -49,9 +49,9 @@ export function App() {
     if (d) unsaved.set(p.root, p.name)
     else unsaved.delete(p.root)
   }, [])
-  const close = (root: string) => {
+  const close = async (root: string) => {
     const p = open.find((x) => x.root === root)
-    if (unsaved.has(root) && !window.confirm(`Close ${p?.name} without saving your changes?`)) return
+    if (unsaved.has(root) && !(await ask(`Close ${p?.name} without saving your changes?`))) return
     unsaved.delete(root)
     const rest = open.filter((x) => x.root !== root)
     setOpen(rest)
@@ -64,8 +64,9 @@ export function App() {
       if (!inDesktop) api.projectOpen('C:/repos/shop-db').then(show)
       return
     }
-    // The tabs of last time. A folder that has gone or no longer opens is left out.
-    const saved = savedTabs()
+    // The tabs of last time (in VS Code: the workspace's projects, the first in view). A folder that
+    // has gone or no longer opens is left out.
+    const saved = hostProjects ? { roots: hostProjects, active: hostProjects[0] ?? null } : savedTabs()
     if (!saved.roots.length) return
     void Promise.allSettled(saved.roots.map((r) => api.projectOpen(r))).then((rs) => {
       const ps = rs.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
@@ -123,8 +124,8 @@ function ProjectShell({ project, active, tabs, onProject, onDirty }: {
     onDirty(project, settingsDirty)
   }, [onDirty, project, settingsDirty])
   const reloadRef = useRef(() => {})
-  const setView = useCallback((v: View) => {
-    if (settingsDirty && v !== viewRef.current && !window.confirm(`Leave ${viewRef.current} without saving your changes?`)) return
+  const setView = useCallback(async (v: View) => {
+    if (settingsDirty && v !== viewRef.current && !(await ask(`Leave ${viewRef.current} without saving your changes?`))) return
     if (v !== viewRef.current) setSettingsDirty(false)
     setViewRaw(v)
     viewRef.current = v

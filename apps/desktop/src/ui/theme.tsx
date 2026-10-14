@@ -5,7 +5,7 @@
 import { Check, Monitor, Moon, Sun } from 'lucide-react'
 import { DropdownMenu } from 'radix-ui'
 import { useEffect, useState } from 'react'
-import { setNativeTheme } from '../api'
+import { inVsCode, setNativeTheme } from '../api'
 import { IconButton } from './controls'
 
 export type Theme = 'system' | 'light' | 'dark'
@@ -32,8 +32,12 @@ export function applyTheme(t: Theme): void {
   setNativeTheme(t)
 }
 
-/** A menu with the three choices; the button shows the current one. */
+/** A menu with the three choices; the button shows the current one. None in VS Code, which sets the theme. */
 export function ThemeToggle() {
+  return inVsCode ? null : <ThemeMenu />
+}
+
+function ThemeMenu() {
   const [theme, setTheme] = useState(savedTheme)
   // Each open project has its own title bar: a choice in one shows in all.
   useEffect(() => {

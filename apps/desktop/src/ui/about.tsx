@@ -3,12 +3,17 @@
 
 import { ExternalLink, Info } from 'lucide-react'
 import { useState } from 'react'
-import { updates, type LatestRelease } from '../api'
+import { inVsCode, updates, type LatestRelease } from '../api'
 import { Button, IconButton } from './controls'
 import { Dialog } from './overlays'
 import { UpdateButton, useUpdate } from './update'
 
+/** None in VS Code: the extension's own page there has the version, and VS Code updates it. */
 export function AboutButton() {
+  return inVsCode ? null : <About />
+}
+
+function About() {
   const [open, setOpen] = useState(false)
   const info = useUpdate()
   const [checking, setChecking] = useState(false)
