@@ -26,7 +26,7 @@ import * as runner from '../core/runner.ts'
 import { createSample } from '../core/sample.ts'
 import { FlywayArgError, translate, type Adhoc } from './flyway-args.ts'
 
-const VERSION = '0.2.1'
+const VERSION = '0.3.0'
 
 type OptionSpec = { type: 'string' | 'boolean'; short?: string; multiple?: boolean; default?: string; help: string; value?: string }
 type Values = Record<string, string | boolean | string[] | undefined>
