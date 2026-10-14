@@ -22,6 +22,15 @@ export function useUpdate(): UpdateInfo | null {
   return info
 }
 
+/** Open projects with unsaved edits (Settings, Rules), folder to name; kept by App. Restarting would lose them. */
+export const unsaved = new Map<string, string>()
+
+/** Restarts into the downloaded version; asks first when there are unsaved edits. Open projects come back by themselves. */
+function restart() {
+  if (unsaved.size && !window.confirm(`${[...unsaved.values()].join(', ')} ${unsaved.size === 1 ? 'has' : 'have'} unsaved changes, which the restart would lose. Restart anyway?`)) return
+  void updates.install()
+}
+
 /** Nothing when there is nothing to do; otherwise Update, the download's progress, Restart, or
  * (on the first start after an update) What's new. */
 export function UpdateButton() {
@@ -31,7 +40,7 @@ export function UpdateButton() {
   if (!s) return null
   if (s.state === 'available') return <Button size="sm" variant="primary" icon={Download} onClick={() => void updates.download()}>Update to {s.version}</Button>
   if (s.state === 'downloading') return <Button size="sm" variant="primary" loading disabled>{s.percent < 100 ? `Downloading ${s.percent}%` : 'Preparing the update'}</Button>
-  if (s.state === 'ready') return <Button size="sm" variant="primary" icon={RotateCw} onClick={() => void updates.install()}>Restart to update</Button>
+  if (s.state === 'ready') return <Button size="sm" variant="primary" icon={RotateCw} onClick={restart}>Restart to update</Button>
   if (s.state === 'manual') return <Button size="sm" icon={ExternalLink} onClick={() => void updates.openPage()}>Download {s.version}</Button>
   // A failed swap: the old version runs again, and says why when asked.
   if (s.state === 'failed') return <Button size="sm" icon={AlertTriangle} onClick={() => toast({ tone: 'danger', title: s.message })}>Update failed</Button>

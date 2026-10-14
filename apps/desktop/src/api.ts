@@ -406,6 +406,7 @@ const fake = {
   notGit: new URLSearchParams(location.search).has('nogit'),
 }
 const fakeProject = (): Project => ({ ...fake.project, has_scripts: !new URLSearchParams(location.search).has('noscripts'), notes: new URLSearchParams(location.search).has('nearlimit') ? ['the scripts have reached version 9991; rebaseline with a restart (liftoff rebaseline --restart) so the numbering starts again at 0001'] : [] })
+const fakeSample = (folder: string): Project => ({ ...fakeProject(), root: `${folder}/liftoff-sample`, name: 'shop-sample', environments: [] })
 const fakeInfo = (env: string): MigrationInfo[] => [
   ...fake.scripts.map(([version, description], i): MigrationInfo => {
     const done = i < (fake.applied[env] ?? 0)
@@ -548,6 +549,7 @@ const fakeApi: Api = {
     await wait()
     if (path.includes('old')) throw fail('LIFTOFF_CONFIG', `no liftoff.toml in ${path}; run \`liftoff init\` first`, 2)
     if (path.includes('flyway')) throw fail('LIFTOFF_FLYWAY_PROJECT', 'This folder has a Flyway project. Convert its settings to open it in LiftOff.', 2)
+    if (path.endsWith('/liftoff-sample')) return fakeSample(path.slice(0, -'/liftoff-sample'.length))
     return fakeProject()
   },
   convertFlyway: async (path) => {
@@ -603,7 +605,7 @@ const fakeApi: Api = {
   },
   sampleCreate: async (folder) => {
     await wait(300)
-    return { ...fakeProject(), root: `${folder}/liftoff-sample`, name: 'shop-sample', environments: [] }
+    return fakeSample(folder)
   },
   modelStatus: async () => {
     await wait(300)

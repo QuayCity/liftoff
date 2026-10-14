@@ -47,6 +47,28 @@ test.describe('F01 Home and projects', () => {
     await expect(page.getByRole('heading', { name: 'LiftOff' })).toBeVisible()
   })
 
+  test('F01-H8 the open projects come back after a restart, the one in view too', async ({ page }) => {
+    await page.getByRole('button', { name: 'shop-db', exact: true }).click()
+    const tabs = page.getByRole('navigation', { name: 'Open projects' })
+    const nav = page.getByRole('navigation', { name: 'Workspaces' })
+    await nav.getByRole('button', { name: 'Scripts' }).click()
+    await tabs.getByRole('button', { name: 'Open another project' }).click()
+    await page.getByRole('button', { name: 'Create sample…' }).click()
+    await expect(tabs.getByRole('button', { name: 'shop-sample', exact: true })).toHaveAttribute('aria-current', 'page')
+
+    await page.reload()
+    await expect(tabs.getByRole('button', { name: 'shop-sample', exact: true })).toHaveAttribute('aria-current', 'page')
+    await tabs.getByRole('button', { name: 'shop-db', exact: true }).click()
+    await expect(nav.getByRole('button', { name: 'Scripts' })).toHaveAttribute('aria-current', 'page')
+
+    // Closed tabs stay closed.
+    await tabs.getByRole('button', { name: 'Close shop-sample' }).click()
+    await tabs.getByRole('button', { name: 'Close shop-db' }).click()
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'LiftOff' })).toBeVisible()
+    await expect(tabs).toHaveCount(0)
+  })
+
   test('F01-H6 the sidebar: icons with tooltips, expands to show names, remembered', async ({ page }) => {
     await page.getByRole('button', { name: 'shop-db', exact: true }).click()
     const nav = page.getByRole('navigation', { name: 'Workspaces' })

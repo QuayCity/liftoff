@@ -18,7 +18,8 @@ says how to get it.
 
 Several projects can be open at once, one tab each in the title bar: **+** goes back to the start
 page to open another, and × closes one (it asks first when Settings or Rules has unsaved changes).
-Each project keeps its own screen while you look at another. The sidebar on the left has the
+Each project keeps its own screen while you look at another, and the open projects come back
+when LiftOff starts again (after an update too), each on the screen it was on. The sidebar on the left has the
 workspaces: **Overview**, **Changes**, **Environments**, **Compare**, **Scripts**, **Rules**,
 **Commit**, **History** and **Pipelines** (Ctrl+1 to Ctrl+9). It shows only icons (hover one for
 its name); the button at its foot widens it to show the names too, and the app remembers your
@@ -198,8 +199,9 @@ changes asks first. **This app**: settings for LiftOff on this computer, in ever
 
 When there is a newer LiftOff, it downloads in the background, its SHA-256 checksum is checked
 against the one GitHub publishes, and a **Restart to update** button appears at the top, on the
-start page and in the title bar. Click it when it suits you: the new version installs and starts,
-and your projects and settings stay. The first start of the new version shows **What's new in
+start page and in the title bar. Click it when it suits you: the new version installs and starts
+with the same projects open, and your settings stay. With unsaved changes in Settings or Rules it
+asks first, as the restart would lose them. The first start of the new version shows **What's new in
 x.y.z**, which opens its release notes; it goes away once opened.
 
 **Settings > This app > Updates** chooses how:

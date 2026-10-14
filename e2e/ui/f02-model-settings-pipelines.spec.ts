@@ -133,3 +133,13 @@ test('S15-E2 closing the project tab with unsaved settings asks first', async ({
   await tabs.getByRole('button', { name: 'Close shop-db' }).click()
   await expect(page.getByRole('heading', { name: 'LiftOff' })).toBeVisible()
 })
+
+test('S15-E3 restarting for an update with unsaved settings asks first', async ({ page }) => {
+  await page.goto('/?open=1&ws=Settings&update=ready')
+  await page.getByRole('button', { name: 'Add filter' }).click()
+  await expect(page.getByText('Unsaved changes')).toBeVisible()
+  const asked = new Promise<string>((resolve) => page.once('dialog', (d) => { resolve(d.message()); void d.dismiss() }))
+  await page.getByRole('banner').getByRole('button', { name: 'Restart to update' }).click()
+  expect(await asked).toContain('shop-db has unsaved changes')
+  await expect(page.getByRole('group', { name: 'Filter 1' })).toBeVisible()
+})
