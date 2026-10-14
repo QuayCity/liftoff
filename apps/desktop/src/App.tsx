@@ -58,6 +58,16 @@ export function App() {
     if (active === root) setActive(rest.at(-1)?.root ?? null)
   }
 
+  // Dragged tabs (or Alt+Left / Alt+Right) keep their order, and it is remembered with the tabs.
+  const move = (root: string, to: number) =>
+    setOpen((o) => {
+      const p = o.find((x) => x.root === root)
+      if (!p) return o
+      const rest = o.filter((x) => x !== p)
+      rest.splice(Math.max(0, Math.min(to, rest.length)), 0, p)
+      return rest
+    })
+
   useEffect(() => {
     // Browser preview only: ?open=1 jumps straight into the seeded demo project (screenshots, UI tests).
     if (params.get('open')) {
@@ -85,7 +95,7 @@ export function App() {
   }, [open, active, restoring])
   if (restoring) return null
 
-  const tabs = <ProjectTabs projects={open} active={active} onSwitch={setActive} onClose={close} onAdd={() => setActive(null)} />
+  const tabs = <ProjectTabs projects={open} active={active} onSwitch={setActive} onClose={close} onAdd={() => setActive(null)} onMove={move} />
   return (
     <>
       {active === null && (open.length === 0 ? <Home onOpen={show} /> : (

@@ -43,20 +43,62 @@ export function TitleBar({ tabs, onPalette, buttons = true }: { tabs: ReactNode;
   )
 }
 
-/** One tab per open project, each with its close button, and + for the start page to open another. */
-export function ProjectTabs({ projects, active, onSwitch, onClose, onAdd }: {
-  projects: { name: string; root: string }[]; active: string | null
+/**
+ * One tab per open project, with its engine and close button, and + for the start page to open
+ * another. With `onMove`, a tab is dragged to another place, or moved with Alt+Left / Alt+Right.
+ */
+export function ProjectTabs({ projects, active, onSwitch, onClose, onAdd, onMove }: {
+  projects: { name: string; root: string; engine: string }[]; active: string | null
   onSwitch: (root: string) => void; onClose: (root: string) => void; onAdd: () => void
+  /** Puts the tab of `root` at `to` (an index in `projects`). */
+  onMove?: (root: string, to: number) => void
 }) {
+  const [dragging, setDragging] = useState<string | null>(null)
+  const [over, setOver] = useState<string | null>(null)
+  const end = () => {
+    setDragging(null)
+    setOver(null)
+  }
   return (
     <nav aria-label="Open projects" className="flex min-w-0 items-center gap-1 overflow-x-auto">
-      {projects.map((p) => {
+      {projects.map((p, i) => {
         const current = p.root === active
+        const sqlserver = p.engine === 'sqlserver'
         return (
-          <div key={p.root} className={cx('flex h-7 min-w-0 shrink-0 items-center rounded-md', current ? 'bg-accent-subtle' : 'hover:bg-surface-sunken')}>
-            <button aria-current={current ? 'page' : undefined} title={p.root} onClick={() => onSwitch(p.root)}
-              className={cx('max-w-48 truncate pr-1 pl-2.5 text-sm', current ? 'font-semibold text-fg' : 'text-muted hover:text-fg')}>
-              {p.name}
+          <div key={p.root} draggable={!!onMove}
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = 'move'
+              e.dataTransfer.setData('text/plain', p.root)
+              setDragging(p.root)
+            }}
+            onDragOver={(e) => {
+              if (!dragging) return
+              e.preventDefault()
+              setOver(p.root)
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              if (dragging && dragging !== p.root) onMove?.(dragging, i)
+              end()
+            }}
+            onDragEnd={end}
+            className={cx('flex h-7 min-w-0 shrink-0 items-center rounded-md', current ? 'bg-accent-subtle' : 'hover:bg-surface-sunken',
+              dragging === p.root && 'opacity-50', over === p.root && dragging !== p.root && 'ring-2 ring-accent')}>
+            <button aria-current={current ? 'page' : undefined} title={`${p.root} · ${sqlserver ? 'SQL Server' : 'PostgreSQL'}${onMove ? '\nDrag, or Alt+Left / Alt+Right, to change the order' : ''}`}
+              onClick={() => onSwitch(p.root)}
+              onKeyDown={(e) => {
+                if (!onMove || !e.altKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return
+                e.preventDefault()
+                onMove(p.root, i + (e.key === 'ArrowLeft' ? -1 : 1))
+              }}
+              aria-keyshortcuts={onMove ? 'Alt+ArrowLeft Alt+ArrowRight' : undefined}
+              className={cx('flex max-w-56 min-w-0 items-center gap-1.5 pr-1 pl-1.5 text-sm', current ? 'font-semibold text-fg' : 'text-muted hover:text-fg')}>
+              {/* The engine at a glance; the name stays the button's name (the title says the engine in full). */}
+              <span aria-hidden data-engine={p.engine}
+                className={cx('shrink-0 rounded-sm px-1 font-mono text-[10px] leading-4 font-semibold', sqlserver ? 'bg-warning-subtle text-warning' : 'bg-accent-subtle text-accent', current && 'bg-surface')}>
+                {sqlserver ? 'MS' : 'PG'}
+              </span>
+              <span className="truncate">{p.name}</span>
             </button>
             <IconButton size="sm" label={`Close ${p.name}`} icon={X} onClick={() => onClose(p.root)} className="size-6 text-muted" />
           </div>

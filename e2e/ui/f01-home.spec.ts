@@ -33,6 +33,20 @@ test.describe('F01 Home and projects', () => {
     await expect(nav.getByRole('button', { name: 'Scripts' })).toHaveAttribute('aria-current', 'page')
     await expectNoA11yViolations(page, 'Two projects open')
 
+    // Each tab shows its engine; tabs are dragged, or moved with Alt+arrows, and keep that order.
+    const order = () => tabs.getByRole('button', { name: /^shop-/ }).allTextContents()
+    await expect(tabs.locator('[data-engine="postgresql"]')).toHaveCount(2)
+    await expect(tabs.getByRole('button', { name: 'shop-db', exact: true })).toHaveAttribute('title', /PostgreSQL/)
+    expect(await order()).toEqual(['PGshop-db', 'PGshop-sample'])
+    await tabs.getByRole('button', { name: 'shop-sample', exact: true }).dragTo(tabs.getByRole('button', { name: 'shop-db', exact: true }))
+    expect(await order()).toEqual(['PGshop-sample', 'PGshop-db'])
+    await tabs.getByRole('button', { name: 'shop-sample', exact: true }).press('Alt+ArrowRight')
+    expect(await order()).toEqual(['PGshop-db', 'PGshop-sample'])
+    await tabs.getByRole('button', { name: 'shop-db', exact: true }).press('Alt+ArrowRight')
+    await page.reload()
+    await expect.poll(order).toEqual(['PGshop-sample', 'PGshop-db'])
+    await tabs.getByRole('button', { name: 'shop-db', exact: true }).click()
+
     // Opening an open project again switches to its tab instead of adding one.
     await tabs.getByRole('button', { name: 'Open another project' }).click()
     await page.getByRole('button', { name: 'shop-db', exact: true }).last().click()
@@ -137,6 +151,12 @@ test.describe('F01 Home and projects', () => {
     await dialog.getByLabel('Project name').fill('mssql-shop')
     await dialog.getByLabel('Database engine').selectOption('sqlserver')
     await dialog.getByRole('button', { name: 'Create project' }).click()
+    // Its tab says SQL Server, readable in both themes.
+    await expect(page.getByRole('navigation', { name: 'Open projects' }).locator('[data-engine="sqlserver"]')).toHaveText('MS')
+    await expectNoA11yViolations(page, 'SQL Server tab, light')
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await expectNoA11yViolations(page, 'SQL Server tab, dark')
+    await page.emulateMedia({ colorScheme: 'light' })
     await page.getByRole('button', { name: 'Add environment' }).first().click()
     const env = page.getByRole('dialog', { name: 'Add environment' })
     // Server details, not a URL: the URL is built from them.
