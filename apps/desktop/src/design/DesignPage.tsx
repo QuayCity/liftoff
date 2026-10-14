@@ -4,7 +4,7 @@ import { Button, Checkbox, Field, IconButton, Input, PasswordInput, RadioGroup, 
 import { ChangeList, CommandBar, DataTable, EnvironmentColumn, LogConsole, type Env, type ObjectChange } from '../ui/data'
 import { Badge, Card, CodeBlock, EmptyState, InlineAlert, Kbd, Spinner, StatePill, type MigrationState } from '../ui/display'
 import { ConfirmDestructive, Dialog, OverlayProvider, useToast } from '../ui/overlays'
-import { Section, StatusBar, TitleBar, type Workspace } from '../ui/shell'
+import { Section, Sidebar, StatusBar, TitleBar, type Workspace } from '../ui/shell'
 
 // Static sample data. Our own wording and examples, nothing from the original.
 const changes: ObjectChange[] = [
@@ -48,7 +48,9 @@ function Page() {
 
   return (
     <div className="flex h-full flex-col">
-      <TitleBar project="shop-db" workspace={workspace} onWorkspace={setWorkspace} onPalette={() => toast({ tone: 'info', title: 'Command palette: not built yet' })} onSettings={() => {}} />
+      <TitleBar project="shop-db" onPalette={() => toast({ tone: 'info', title: 'Command palette: not built yet' })} onSettings={() => {}} />
+      <div className="flex min-h-0 flex-1">
+      <Sidebar workspace={workspace} onWorkspace={setWorkspace} />
       <main className="flex-1 overflow-auto">
         <div className="mx-auto flex max-w-5xl flex-col gap-10 p-8">
           <div className="flex items-center justify-between">
@@ -181,6 +183,7 @@ function Page() {
           </Section>
         </div>
       </main>
+      </div>
       <StatusBar path="~/repos/shop-db" branch="main" ahead={2} engine="PostgreSQL 16" task="Comparing local" />
     </div>
   )

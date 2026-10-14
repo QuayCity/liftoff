@@ -10,8 +10,9 @@ import { Commit } from './screens/Commit'
 import { Pipelines } from './screens/Pipelines'
 import { Overview } from './screens/Overview'
 import { Rules } from './screens/Rules'
+import { ObjectHistory } from './screens/ObjectHistory'
 import { InlineAlert } from './ui/display'
-import { StatusBar, TitleBar, workspaces, type Workspace } from './ui/shell'
+import { Sidebar, StatusBar, TitleBar, workspaces, type Workspace } from './ui/shell'
 
 const params = new URLSearchParams(location.search)
 
@@ -90,14 +91,9 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
 
   return (
     <div className="flex h-full flex-col">
-      <TitleBar
-        project={project.name}
-        workspace={view === 'Settings' ? 'Environments' : view}
-        tabsActive={view !== 'Settings'}
-        onWorkspace={setView}
-        onSettings={() => setView('Settings')}
-        onClose={onClose}
-      />
+      <TitleBar project={project.name} onSettings={() => setView('Settings')} onClose={onClose} />
+      <div className="flex min-h-0 flex-1">
+      <Sidebar workspace={view === 'Settings' ? 'Environments' : view} active={view !== 'Settings'} onWorkspace={setView} />
       <main className="min-h-0 flex-1 overflow-auto">
         <h1 className="sr-only">{`${view}: ${project.name}`}</h1>
         {reloadError && <div className="p-4 pb-0"><InlineAlert tone="danger" title="Could not read the project files again">{reloadError} The screens show the project as it was; fix the file and come back to this window.</InlineAlert></div>}
@@ -109,8 +105,10 @@ function ProjectShell({ project, onProject, onClose }: { project: Project; onPro
         {view === 'Scripts' && <Scripts project={project} />}
         {view === 'Rules' && <Rules project={project} onDirty={setSettingsDirty} />}
         {view === 'Commit' && <Commit project={project} />}
+        {view === 'History' && <ObjectHistory project={project} />}
         {view === 'Pipelines' && <Pipelines project={project} />}
       </main>
+      </div>
       <StatusBar path={project.root} engine={`${engineName(project.engine)} · ${project.schemas.join(', ')}`} />
     </div>
   )

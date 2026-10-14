@@ -3,12 +3,12 @@ import { AlertDialog, Dialog as RDialog, DropdownMenu, Toast as RToast, Tooltip 
 import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { Button, Input, cx } from './controls'
 
-export function Tooltip({ label, children }: { label: string; children: ReactElement }) {
+export function Tooltip({ label, side, children }: { label: string; side?: 'top' | 'right' | 'bottom' | 'left'; children: ReactElement }) {
   return (
     <RTooltip.Root delayDuration={400}>
       <RTooltip.Trigger asChild>{children}</RTooltip.Trigger>
       <RTooltip.Portal>
-        <RTooltip.Content sideOffset={6} className="z-50 rounded-sm bg-fg px-2 py-1 text-xs text-bg shadow-pop">
+        <RTooltip.Content side={side} sideOffset={6} className="z-50 rounded-sm bg-fg px-2 py-1 text-xs text-bg shadow-pop">
           {label}
         </RTooltip.Content>
       </RTooltip.Portal>

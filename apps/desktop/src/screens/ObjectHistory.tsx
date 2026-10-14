@@ -1,16 +1,15 @@
-// S20: the history of one object in the schema model: the commits that changed its file, and what
+// S20, the History workspace: the history of each object in the schema model: the commits that changed its file, and what
 // each one changed. Straight from git, following renames.
 import { FileClock, Search } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { api, errorText, isErrorReport, type ObjectCommit, type Project } from '../api'
-import { Button, cx, Input } from '../ui/controls'
+import { cx, Input } from '../ui/controls'
 import { DiffView } from '../ui/diffview'
 import { EmptyState, InlineAlert, Spinner } from '../ui/display'
-import { Dialog } from '../ui/overlays'
 
 const dateOf = (iso: string) => iso.slice(0, 16).replace('T', ' ')
 
-export function ObjectHistory({ open, onOpenChange, project }: { open: boolean; onOpenChange: (o: boolean) => void; project: Project }) {
+export function ObjectHistory({ project }: { project: Project }) {
   const [files, setFiles] = useState<string[] | null>(null)
   const [filter, setFilter] = useState('')
   const [file, setFile] = useState<string | undefined>()
@@ -21,7 +20,6 @@ export function ObjectHistory({ open, onOpenChange, project }: { open: boolean; 
   const [notGit, setNotGit] = useState(false)
 
   useEffect(() => {
-    if (!open) return
     setError(null)
     api.modelFiles(project.root).then(
       (f) => {
@@ -30,7 +28,7 @@ export function ObjectHistory({ open, onOpenChange, project }: { open: boolean; 
       },
       (e) => setError(errorText(e)),
     )
-  }, [open, project.root])
+  }, [project.root])
 
   useEffect(() => {
     if (!file) return
@@ -60,13 +58,16 @@ export function ObjectHistory({ open, onOpenChange, project }: { open: boolean; 
   const commit = commits?.[at]
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} size="xl" title="Object history" description="Every commit that changed an object's file in the schema model, and what it changed."
-      footer={<Button onClick={() => onOpenChange(false)}>Close</Button>}>
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-3 border-b border-border bg-surface px-6 py-3">
+        <p className="text-sm">Every commit that changed an object's file in the schema model, and what it changed.</p>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col p-6">
       {error && <div className="mb-3"><InlineAlert tone="danger" title="Couldn't read the history">{error}</InlineAlert></div>}
       {files?.length === 0 ? (
         <EmptyState icon={FileClock} text="The schema model is empty. Compare dev with it and save, then commit the files to start their history." />
       ) : (
-        <div className="grid h-[60vh] grid-cols-[14rem_16rem_1fr] gap-3">
+        <div className="grid min-h-0 flex-1 grid-cols-[14rem_16rem_1fr] gap-3">
           <section aria-label="Objects" className="flex min-h-0 flex-col gap-2">
             <label className="relative">
               <span className="sr-only">Filter objects</span>
@@ -114,6 +115,7 @@ export function ObjectHistory({ open, onOpenChange, project }: { open: boolean; 
           </section>
         </div>
       )}
-    </Dialog>
+      </div>
+    </div>
   )
 }

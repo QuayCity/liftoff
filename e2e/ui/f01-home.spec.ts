@@ -16,6 +16,21 @@ test.describe('F01 Home and projects', () => {
     await expect(page.getByRole('region', { name: 'staging environment' })).toBeVisible()
   })
 
+  test('F01-H6 the sidebar: icons with tooltips, expands to show names, remembered', async ({ page }) => {
+    await page.getByRole('button', { name: 'shop-db', exact: true }).click()
+    const nav = page.getByRole('navigation', { name: 'Workspaces' })
+    await expect(nav.getByText('Scripts')).toHaveCount(0)
+    await nav.getByRole('button', { name: 'Scripts' }).hover()
+    await expect(page.getByRole('tooltip', { name: 'Scripts' })).toBeVisible()
+    await page.getByRole('button', { name: 'Expand sidebar' }).click()
+    await expect(nav.getByText('Scripts')).toBeVisible()
+    await page.reload()
+    await page.getByRole('button', { name: 'shop-db', exact: true }).click()
+    await expect(nav.getByText('Scripts')).toBeVisible()
+    await page.getByRole('button', { name: 'Collapse sidebar' }).click()
+    await expect(nav.getByText('Scripts')).toHaveCount(0)
+  })
+
   test('F01-H5 the theme switch: system, light, dark, remembered, also in a project', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'light' })
     const html = page.locator('html')
