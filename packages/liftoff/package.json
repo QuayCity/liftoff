@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@azure/identity": "^4.13.3",
+    "mysql2": "^3.24.6",
     "pg": "^8.23.1",
     "smol-toml": "^1.9.1",
     "tedious": "^20.3.3"

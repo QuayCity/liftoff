@@ -2,6 +2,7 @@
 //   LIFTOFF_TEST_PG        postgres://postgres:liftoff@localhost:55432 (databases shop_dev, shop_scratch, shop_test)
 //   LIFTOFF_TEST_PGBOUNCER postgres://postgres:liftoff@localhost:56432 (PgBouncer, transaction pooling)
 //   LIFTOFF_TEST_MSSQL     sqlserver://localhost:51433;encrypt=true;trustServerCertificate=true;user=sa;password=…
+//   LIFTOFF_TEST_MYSQL     mysql://root:liftoff@localhost:53306 (no database: the tests add it)
 
 import * as fs from 'node:fs'
 import * as os from 'node:os'
@@ -9,7 +10,7 @@ import * as path from 'node:path'
 import { Config, init, saveEnvironment, type Environment, type Role } from '../src/core/config.ts'
 import { open } from '../src/core/db.ts'
 
-export function project(engine: 'postgresql' | 'sqlserver', envs: [name: string, url: string, role: Role, extra?: Partial<Environment>][]) {
+export function project(engine: 'postgresql' | 'sqlserver' | 'mysql', envs: [name: string, url: string, role: Role, extra?: Partial<Environment>][]) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-it-'))
   init(dir, 'shop', engine)
   for (const [name, url, role, extra] of envs) {

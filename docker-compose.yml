@@ -36,3 +36,11 @@ services:
       MSSQL_PID: Developer
       MSSQL_SA_PASSWORD: Liftoff!2026
     ports: ['51433:1433']
+
+  mysql:
+    image: mysql:8.4
+    container_name: liftoff-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: liftoff
+    ports: ['53306:3306']

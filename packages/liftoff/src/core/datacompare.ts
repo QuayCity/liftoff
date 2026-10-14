@@ -29,6 +29,7 @@ import { typeName } from './msdiff.ts'
 import { PgConn, quoteIdent } from './postgres.ts'
 import { quiet, type Log } from './runner.ts'
 import { quote as msQuote, SqlServerConn } from './sqlserver.ts'
+import { lit as myLit, quote as myQuote, type MySqlConn } from './mysql.ts'
 import type { Side } from './compare.ts'
 import { sideLabel } from './compare.ts'
 
@@ -404,7 +405,114 @@ function msFromText(c: DataColumn, text: string): string {
 
 const toPairs = (t: DataTable, rows: unknown[][]): [Key, string][] => rows.map((r) => [r.slice(0, t.key.length).map(String), String(r[t.key.length])])
 
-const dialects: Partial<Record<EngineName, Dialect>> = { PostgreSQL: pg, 'SQL Server': ms }
+const my: Dialect = {
+  q: myQuote,
+  async tables(c) {
+    const mc = c as MySqlConn
+    const cols = await mc.query(
+      `SELECT table_name, column_name, data_type, column_type, extra FROM information_schema.columns
+        WHERE table_schema = DATABASE() AND table_name IN (SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE')
+        ORDER BY table_name, ordinal_position`,
+    )
+    // The primary key, else the unique index with the fewest columns, all of them NOT NULL.
+    const keys = await mc.query(
+      `SELECT s.table_name, s.index_name, s.column_name FROM information_schema.statistics s
+        WHERE s.table_schema = DATABASE() AND s.non_unique = 0
+          AND NOT EXISTS (SELECT 1 FROM information_schema.statistics x JOIN information_schema.columns c
+                           ON c.table_schema = x.table_schema AND c.table_name = x.table_name AND c.column_name = x.column_name
+                          WHERE x.table_schema = s.table_schema AND x.table_name = s.table_name AND x.index_name = s.index_name AND (c.is_nullable = 'YES' OR x.column_name IS NULL))
+        ORDER BY s.table_name, s.index_name <> 'PRIMARY', (SELECT COUNT(*) FROM information_schema.statistics y WHERE y.table_schema = s.table_schema AND y.table_name = s.table_name AND y.index_name = s.index_name), s.index_name, s.seq_in_index`,
+    )
+    const out = new Map<string, DataTable & { allColumns: Map<string, DataColumn> }>()
+    for (const [name, col, dataType, columnType, extra] of cols as [string, string, string, string, string][]) {
+      if (!out.has(name)) out.set(name, { schema: '', name, key: [], columns: [], identity: false, allColumns: new Map() })
+      // Generated columns are not written, so not compared either.
+      if (/GENERATED/i.test(extra)) continue
+      const t = dataType.toLowerCase()
+      const text: DataColumn['text'] = /binary|blob|geometry|point|linestring|polygon/.test(t) ? 'binary' : t === 'bit' ? 'number' : 'plain'
+      out.get(name)!.allColumns.set(col, { name: col, type: columnType, text })
+    }
+    const chosen = new Map<string, string>()
+    for (const [name, index, col] of keys as [string, string, string][]) {
+      if (!chosen.has(name)) chosen.set(name, index)
+      if (chosen.get(name) === index) out.get(name)?.key.push(col)
+    }
+    return out
+  },
+  async foreignKeys(c) {
+    return (await (c as MySqlConn).query(
+      'SELECT DISTINCT table_name, referenced_table_name FROM information_schema.key_column_usage WHERE table_schema = DATABASE() AND referenced_table_schema = DATABASE()',
+    )) as [string, string][]
+  },
+  async estimate(c, t) {
+    const [row] = await (c as MySqlConn).query('SELECT table_rows FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?', [t.name])
+    return row?.[0] == null ? -1 : Number(row[0])
+  },
+  async fingerprint(c, t) {
+    const [[n, sum]] = await (c as MySqlConn).query(`SELECT COUNT(*), CAST(COALESCE(SUM(h), 0) AS CHAR) FROM (SELECT ${myRowHash(t)} AS h FROM ${myFrom(t)}) x`)
+    return [Number(n), String(sum)]
+  },
+  async buckets(c, t, mask) {
+    const rows = await (c as MySqlConn).query(`SELECT b, COUNT(*), CAST(SUM(h) AS CHAR) FROM (SELECT ${myKeyHash(t)} & ? AS b, ${myRowHash(t)} AS h FROM ${myFrom(t)}) x GROUP BY b`, [mask])
+    return rows.map(([b, n, s]) => [Number(b), Number(n), String(s)])
+  },
+  async pairs(c, t, mask, buckets) {
+    const select = `SELECT ${[...t.key.map((k) => myText(t.columns.find((c) => c.name === k)!)), `CAST(${myRowHash(t)} AS CHAR)`].join(', ')} FROM ${myFrom(t)}`
+    if (!buckets) return toPairs(t, await (c as MySqlConn).query(select))
+    return toPairs(t, await (c as MySqlConn).query(`${select} WHERE ${myKeyHash(t)} & ? IN (${buckets.join(', ')})`, [mask]))
+  },
+  async rows(c, t, keys) {
+    const out = new Map<string, (string | null)[]>()
+    if (!t.key.length) {
+      for (let i = 0; i < keys.length; i += HEAP_READ) {
+        const hashes = [...new Set(keys.slice(i, i + HEAP_READ).map((k) => k[0]))]
+        const rows = await (c as MySqlConn).query(
+          `SELECT CAST(x.liftoff_h AS CHAR), ${t.columns.map((col) => myText(col, 'x')).join(', ')} FROM (SELECT ${myRowHash(t)} AS liftoff_h, t.* FROM ${myFrom(t)}) x WHERE x.liftoff_h IN (${hashes.join(', ')})`,
+        )
+        for (const r of rows) out.set(keyId([String(r[0])]), r.slice(1).map((v) => (v === null ? null : String(v))))
+      }
+      return out
+    }
+    const keyCols = t.key.map((k) => t.columns.find((c) => c.name === k)!)
+    for (let i = 0; i < keys.length; i += 5000) {
+      const tuples = keys.slice(i, i + 5000).map((k) => `(${k.map((v, j) => my.literal(keyCols[j], v)).join(', ')})`)
+      const rows = await (c as MySqlConn).query(
+        `SELECT ${keyCols.map((col) => myText(col)).join(', ')}, ${t.columns.map((col) => myText(col)).join(', ')} FROM ${myFrom(t)} WHERE (${keyCols.map((col) => `t.${myQuote(col.name)}`).join(', ')}) IN (${tuples.join(', ')})`,
+      )
+      for (const r of rows) out.set(keyId(r.slice(0, t.key.length).map(String)), r.slice(t.key.length).map((v) => (v === null ? null : String(v))))
+    }
+    return out
+  },
+  literal(col, v) {
+    if (v === null) return 'NULL'
+    if (col.text === 'binary') return `UNHEX('${v}')`
+    if (col.text === 'number') return String(Number(v))
+    return myLit(v)
+  },
+  deleteCopies(t, copies) {
+    // ponytail: one DELETE … LIMIT n per distinct row, each a pass over the table; fine for the
+    // keyless tables MySQL has (InnoDB tables nearly always have a key).
+    return copies.map(([h, n]) => `DELETE FROM ${myQuote(t.name)} WHERE ${myRowHash(t, myQuote(t.name))} = ${h} LIMIT ${n};`).join('\n')
+  },
+}
+
+const myFrom = (t: DataTable) => `${myQuote(t.name)} t`
+/** A value as text that converts back exactly: binary as hex, BIT as a number, the rest as MySQL writes it. */
+function myText(c: DataColumn, alias = 't'): string {
+  const col = `${alias}.${myQuote(c.name)}`
+  if (c.text === 'binary') return `HEX(${col})`
+  if (c.text === 'number') return `CAST(${col} AS UNSIGNED)`
+  return `CAST(${col} AS CHAR)`
+}
+/** The row as one text: each value as `<length>:<text>`, NULL as `-` (unambiguous, and NULL differs from ''). */
+const myRowText = (cols: DataColumn[], alias = 't') => `CONCAT(${cols.map((c) => `IFNULL(CONCAT(CHAR_LENGTH(${myText(c, alias)}), ':', ${myText(c, alias)}), '-')`).join(', ')}, '')`
+/** 60 bits of the md5 of the row text. */
+const myRowHash = (t: DataTable, alias = 't') => `CAST(CONV(SUBSTRING(MD5(${myRowText(t.columns, alias)}), 1, 15), 16, 10) AS UNSIGNED)`
+/** The bucket source: a single integer key as it is, else 32 bits of the md5 of the key (no key: the row hash). */
+const myKeyHash = (t: DataTable) =>
+  !t.key.length ? myRowHash(t) : t.key.length === 1 && /^(tiny|small|medium|big)?int\b/i.test(t.columns.find((c) => c.name === t.key[0])?.type ?? '') ? `t.${myQuote(t.key[0])}` : `CAST(CONV(SUBSTRING(MD5(${myRowText(t.key.map((k) => t.columns.find((c) => c.name === k)!))}), 1, 8), 16, 10) AS UNSIGNED)`
+
+const dialects: Partial<Record<EngineName, Dialect>> = { PostgreSQL: pg, 'SQL Server': ms, MySQL: my }
 
 function dialectOf(c: Conn): Dialect {
   const d = dialects[c.engine]

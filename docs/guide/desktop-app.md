@@ -10,7 +10,7 @@ says how to get it.
 
 | button | does |
 | --- | --- |
-| **New project…** | pick an empty folder, a project name and the database engine (PostgreSQL or SQL Server); writes `liftoff.toml`, `migrations/` and `schema-model/` |
+| **New project…** | pick an empty folder, a project name and the database engine (PostgreSQL, SQL Server or MySQL); writes `liftoff.toml`, `migrations/` and `schema-model/` |
 | **Open folder…** | open a folder with a `liftoff.toml`. A folder with a Flyway project offers **Convert settings…** instead (see [Moving from Flyway](flyway.md)) |
 | **Create sample…** | a small sample shop project to look around in |
 | **Recent** | projects opened before; **Remove** takes one off the list (the folder stays) |

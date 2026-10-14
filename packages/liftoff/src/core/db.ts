@@ -4,12 +4,12 @@
 
 import type { Environment, LockMode } from './config.ts'
 import { configError, connectError } from './errors.ts'
-import { needsNoTransaction, tsqlNeedsNoTransaction } from './migration.ts'
+import { mysqlNeedsNoTransaction, needsNoTransaction, tsqlNeedsNoTransaction } from './migration.ts'
 
 /** As liftoff.toml names it (`engine = "postgresql"`). */
-export type EngineId = 'postgresql' | 'sqlserver'
+export type EngineId = 'postgresql' | 'sqlserver' | 'mysql'
 /** As people read it. */
-export type EngineName = 'PostgreSQL' | 'SQL Server'
+export type EngineName = 'PostgreSQL' | 'SQL Server' | 'MySQL'
 
 export type ServerInfo = { version: string; user: string; database: string }
 
@@ -175,6 +175,12 @@ export const ENGINES: EngineInfo[] = [
     id: 'sqlserver', name: 'SQL Server', tag: 'ms', matches: isSqlServerUrl, example: 'sqlserver://localhost:1433;databaseName=shop;encrypt=true',
     begin: 'BEGIN TRANSACTION', currentUser: 'SUSER_SNAME()', true: '1', needsNoTransaction: tsqlNeedsNoTransaction, quote: (s) => `[${s.replaceAll(']', ']]')}]`, schemas: ['dbo'],
     open: async (n, e) => (await import('./sqlserver.ts')).SqlServerConn.open(n, e),
+  },
+  {
+    id: 'mysql', name: 'MySQL', tag: 'my', matches: (u) => /^(jdbc:)?mysql:\/\//i.test(u.trim()), example: 'mysql://localhost:3306/shop',
+    begin: 'START TRANSACTION', currentUser: "SUBSTRING_INDEX(CURRENT_USER(), '@', 1)", true: '1', needsNoTransaction: mysqlNeedsNoTransaction, ddlCommits: true,
+    quote: (s) => `\`${s.replaceAll('`', '``')}\``, schemas: [],
+    open: async (n, e) => (await import('./mysql.ts')).MySqlConn.open(n, e),
   },
 ]
 

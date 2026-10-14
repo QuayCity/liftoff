@@ -43,6 +43,16 @@ function scratchService(engine: string): { service: string; url: string; prepare
         '            sleep 2\n          done\n          exit 1\n',
     }
   }
+  if (engine === 'mysql') {
+    return {
+      service:
+        '    services:\n      scratch:\n        image: mysql:8.4\n' +
+        `        env:\n          MYSQL_ROOT_PASSWORD: '${SCRATCH_PASSWORD}'\n          MYSQL_DATABASE: scratch\n        ports: ['3306:3306']\n` +
+        `        options: >-\n          --health-cmd 'mysqladmin ping -h 127.0.0.1 -uroot -p${SCRATCH_PASSWORD}' --health-interval 2s --health-timeout 5s --health-retries 60\n`,
+      url: `mysql://root:${SCRATCH_PASSWORD}@localhost:3306/scratch`,
+      prepare: '',
+    }
+  }
   return {
     service:
       '    services:\n      scratch:\n        image: postgres:16\n' +
@@ -194,23 +204,26 @@ export function azurePipelines(cfg: Config, o: CiOptions): string {
     `    - script: liftoff renumber --check --after "origin/\${BASE#refs/heads/}"\n      displayName: Check the numbering\n${base}` +
     `    - script: liftoff lint --since "origin/\${BASE#refs/heads/}"\n      displayName: The rules on the new scripts\n${base}`
   if (withModel) {
-    const ms = cfg.project.engine === 'sqlserver'
-    const url = ms
-      ? `sqlserver://localhost:1433;databaseName=scratch;encrypt=true;trustServerCertificate=true;user=sa;password=${SCRATCH_PASSWORD}`
-      : `postgres://postgres:${SCRATCH_PASSWORD}@localhost:5432/scratch`
+    const engine = cfg.project.engine
+    const url = scratchService(engine).url
     y +=
       "  - job: schema_model\n    displayName: 'Schema model'\n    pool:\n      vmImage: ubuntu-latest\n" +
       `    variables:\n      LIFTOFF_ENV_CI_SCRATCH_URL: ${yamlStr(url)}\n      LIFTOFF_ENV_CI_SCRATCH_ROLE: scratch\n` +
       `    steps:\n    - checkout: self\n${generate ? '      fetchDepth: 0\n      persistCredentials: true\n' : ''}` + install +
       '    - script: |\n' +
-      (ms
+      (engine === 'sqlserver'
         ? `        docker run -d --name scratch -e ACCEPT_EULA=Y -e 'MSSQL_SA_PASSWORD=${SCRATCH_PASSWORD}' -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest\n` +
           '        for _ in $(seq 1 30); do\n' +
           `          docker exec scratch /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P '${SCRATCH_PASSWORD}' -Q 'CREATE DATABASE scratch' && exit 0\n`
-        : `        docker run -d --name scratch -e 'POSTGRES_PASSWORD=${SCRATCH_PASSWORD}' -e POSTGRES_DB=scratch -p 5432:5432 postgres:16\n` +
-          '        for _ in $(seq 1 30); do\n' +
-          // Over TCP: while the image initialises, its server listens on the socket only.
-          '          docker exec scratch pg_isready -h 127.0.0.1 -U postgres -d scratch && exit 0\n') +
+        : engine === 'mysql'
+          ? `        docker run -d --name scratch -e 'MYSQL_ROOT_PASSWORD=${SCRATCH_PASSWORD}' -e MYSQL_DATABASE=scratch -p 3306:3306 mysql:8.4\n` +
+            '        for _ in $(seq 1 60); do\n' +
+            // Over TCP: while the image initialises, its server listens on the socket only.
+            `          docker exec scratch mysqladmin ping -h 127.0.0.1 -uroot '-p${SCRATCH_PASSWORD}' --silent && exit 0\n`
+          : `        docker run -d --name scratch -e 'POSTGRES_PASSWORD=${SCRATCH_PASSWORD}' -e POSTGRES_DB=scratch -p 5432:5432 postgres:16\n` +
+            '        for _ in $(seq 1 30); do\n' +
+            // Over TCP: while the image initialises, its server listens on the socket only.
+            '          docker exec scratch pg_isready -h 127.0.0.1 -U postgres -d scratch && exit 0\n') +
       '          sleep 2\n        done\n        exit 1\n      displayName: Start the scratch database\n' +
       '    - script: liftoff model --check --scratch ci_scratch\n      displayName: The schema model builds\n'
     if (!generate) {

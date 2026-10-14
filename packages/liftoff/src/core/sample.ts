@@ -4,6 +4,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { init } from './config.ts'
+import { engineById } from './db.ts'
 import { configError } from './errors.ts'
 
 const POSTGRES: Record<string, string> = {
@@ -67,6 +68,41 @@ GROUP BY c.id, c.email;
 `,
 }
 
+/** The same shop for MySQL. */
+const MYSQL: Record<string, string> = {
+  'V0001__customers.sql': `-- A first table. Versioned scripts run once, in version order.
+-- MySQL commits DDL at once: if a script with DDL fails part-way, what ran stays (repair, then fix it).
+create table customers (
+    id bigint auto_increment primary key,
+    email varchar(320) not null unique,
+    created_at datetime not null default current_timestamp
+);
+`,
+  'V0002__orders.sql': `create table orders (
+    id bigint auto_increment primary key,
+    customer_id bigint not null,
+    total decimal(10, 2) not null default 0,
+    placed_at datetime not null default current_timestamp,
+    foreign key (customer_id) references customers (id)
+);
+`,
+  'V0003__orders_by_customer.sql': `-- Starts with placed_at: an index that starts with customer_id would become the foreign key's, and could not be dropped.
+create index orders_customer_idx on orders (placed_at, customer_id);
+`,
+  'U0003__orders_by_customer.sql': `-- Undo for V0003: \`liftoff undo\` runs it when V0003 is the latest applied script.
+drop index orders_customer_idx on orders;
+`,
+  'R__customer_totals.sql': `-- Repeatable: runs again whenever this file changes.
+create or replace view customer_totals as
+select c.id, c.email, count(o.id) as orders, coalesce(sum(o.total), 0) as spent
+from customers c
+left join orders o on o.customer_id = c.id
+group by c.id, c.email;
+`,
+}
+
+const SCRIPTS: Record<string, Record<string, string>> = { postgresql: POSTGRES, sqlserver: SQLSERVER, mysql: MYSQL }
+
 const readme = (engine: string) => `# LiftOff sample
 
 Five scripts for a small shop database, in migrations/:
@@ -75,7 +111,7 @@ Five scripts for a small shop database, in migrations/:
 - U0003 undoes V0003
 - R__customer_totals is a view, run again whenever the file changes
 
-To run them, add an environment (a ${engine === 'sqlserver' ? 'SQL Server' : 'PostgreSQL'} database you may write to), then run the pending
+To run them, add an environment (a ${engineById(engine).name} database you may write to), then run the pending
 scripts. Change the database by hand and compare it with the scripts to see a migration written for you.
 `
 
@@ -84,7 +120,7 @@ export function createSample(root: string, engine = 'postgresql'): string {
   if (fs.existsSync(root) && fs.readdirSync(root).length) throw configError(`${root} is not empty; pick an empty or new folder for the sample`)
   fs.mkdirSync(root, { recursive: true })
   init(root, 'shop-sample', engine) // refuses an unknown engine before anything else is written
-  for (const [file, sql] of Object.entries(engine === 'sqlserver' ? SQLSERVER : POSTGRES)) fs.writeFileSync(path.join(root, 'migrations', file), sql)
+  for (const [file, sql] of Object.entries(SCRIPTS[engine])) fs.writeFileSync(path.join(root, 'migrations', file), sql)
   fs.writeFileSync(path.join(root, 'README.md'), readme(engine))
   return root
 }

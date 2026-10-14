@@ -153,7 +153,7 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
               <Field label="Server" error={serverError || undefined} help={sqlserver ? 'Host name or address, e.g. localhost or db01.corp.local' : 'Host name or address'}>
                 {(a) => <Input {...a} value={fields.server} onChange={(e) => set({ server: e.target.value })} placeholder="localhost" spellCheck={false} />}
               </Field>
-              <Field label="Port" error={portError} help={sqlserver ? 'Empty: 1433, or the named instance\'s own port' : 'Empty: 5432'}>
+              <Field label="Port" error={portError} help={sqlserver ? 'Empty: 1433, or the named instance\'s own port' : `Empty: ${defaultPort(engine)}`}>
                 {(a) => <Input {...a} inputMode="numeric" value={fields.port} onChange={(e) => set({ port: e.target.value })} placeholder={defaultPort(engine)} />}
               </Field>
             </div>
@@ -176,7 +176,12 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
                 {(a) => (
                   <Select {...a} value={fields.sslmode} onChange={(e) => set({ sslmode: e.target.value })}>
                     <option value="">When the server offers it (default)</option>
-                    <option value="require">Always, and verify the certificate</option>
+                    {engine === 'mysql' ? (
+                      <>
+                        <option value="require">Always</option>
+                        <option value="verify-full">Always, and verify the certificate</option>
+                      </>
+                    ) : <option value="require">Always, and verify the certificate</option>}
                     <option value="disable">Off</option>
                   </Select>
                 )}

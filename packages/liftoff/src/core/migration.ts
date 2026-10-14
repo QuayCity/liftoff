@@ -263,6 +263,14 @@ export function needsNoTransaction(sql: string): boolean {
   return ['CONCURRENTLY', 'VACUUM', 'CREATE DATABASE', 'DROP DATABASE', 'ALTER SYSTEM', 'CREATE TABLESPACE', 'DROP TABLESPACE'].some((k) => up.includes(k))
 }
 
+/**
+ * MySQL commits DDL at once, so a script with DDL cannot be rolled back: it runs outside a
+ * transaction (a failure is then recorded for repair). Data changes alone run in one.
+ */
+export function mysqlNeedsNoTransaction(sql: string): boolean {
+  return /\b(CREATE|ALTER|DROP|RENAME|TRUNCATE|GRANT|REVOKE|LOCK\s+TABLES?)\b/i.test(sql.replace(/--[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\//g, ''))
+}
+
 /** SQL Server statements that cannot run inside a transaction. */
 export function tsqlNeedsNoTransaction(sql: string): boolean {
   const up = sql.toUpperCase()

@@ -12,7 +12,7 @@ test.describe('F21 Rules', () => {
 
   test('F21-H1 every rule with its severity; changing one, a pattern rule needs its pattern, then save', async ({ page }) => {
     await expect(page.getByRole('combobox', { name: 'Severity of delete-without-where' })).toHaveValue('error')
-    await expect(page.getByText('SQL Server only')).toBeVisible()
+    await expect(page.getByText('USE switches database: the rest of the script runs there (SQL Server, MySQL)')).toBeVisible()
     const save = page.getByRole('button', { name: 'Save rules' })
     await expect(save).toBeDisabled()
     await page.getByRole('combobox', { name: 'Severity of drop-table' }).selectOption('error')

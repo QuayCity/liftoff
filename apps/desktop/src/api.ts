@@ -7,15 +7,16 @@ export type ErrorReport = { code: string; exit_code: number; message: string; di
 export type EnvView = { name: string; role: Role; url: string; user: string | null; has_password: boolean; allow_clean: boolean; /** in liftoff.toml (else this computer only) */ shared: boolean }
 export type Filter = { action: 'include' | 'exclude'; object: string; pattern: string }
 export type LockMode = 'advisory' | 'table'
-export type Engine = 'postgresql' | 'sqlserver'
-const ENGINE_NAMES: Record<string, string> = { postgresql: 'PostgreSQL', sqlserver: 'SQL Server' }
+export type Engine = 'postgresql' | 'sqlserver' | 'mysql'
+const ENGINE_NAMES: Record<string, string> = { postgresql: 'PostgreSQL', sqlserver: 'SQL Server', mysql: 'MySQL' }
 export const engineName = (engine: string) => ENGINE_NAMES[engine] ?? 'PostgreSQL'
 /** The engine and its schemas, as the status bar shows them (none: the engine manages the database the URL names). */
 export const engineAndSchemas = (p: { engine: string; schemas: string[] }) => (p.schemas.length ? `${engineName(p.engine)} · ${p.schemas.join(', ')}` : engineName(p.engine))
 /** An example connection URL for the project's engine, for placeholders and help. */
-export const urlExample = (engine: string) => (engine === 'sqlserver' ? 'sqlserver://localhost:1433;databaseName=shop;encrypt=true;trustServerCertificate=true' : 'postgres://localhost:5432/shop')
+export const urlExample = (engine: string) =>
+  engine === 'sqlserver' ? 'sqlserver://localhost:1433;databaseName=shop;encrypt=true;trustServerCertificate=true' : engine === 'mysql' ? 'mysql://localhost:3306/shop' : 'postgres://localhost:5432/shop'
 /** The engine a connection URL points at. */
-export const engineOfUrl = (url: string): Engine => (/^(jdbc:)?sqlserver:\/\//i.test(url.trim()) ? 'sqlserver' : 'postgresql')
+export const engineOfUrl = (url: string): Engine => (/^(jdbc:)?sqlserver:\/\//i.test(url.trim()) ? 'sqlserver' : /^(jdbc:)?mysql:\/\//i.test(url.trim()) ? 'mysql' : 'postgresql')
 export type ProjectSettings = { name: string; engine: string; migrations: string; schemas: string[]; history_table: string; filters: Filter[]; lock: LockMode }
 export type Project = {
   root: string; name: string; engine: string; schemas: string[]; migrations: string; history_table: string; filters: Filter[]; lock: LockMode; environments: EnvView[]
@@ -470,7 +471,7 @@ const fakeRules: RulesView = {
     ['table-without-primary-key', 'A new table without a primary key', 'warn'], ['grant-to-public', 'Grants to PUBLIC', 'warn'],
   ] as const).map(([id, help, d]) => ({ id, help, engine: null, default: d, needs_pattern: false, severity: d, pattern: null }) as BuiltinRule)
     .concat([{ id: 'table-names', help: 'New table names must match a pattern (set pattern = "regex")', engine: null, default: 'off', needs_pattern: true, severity: 'off', pattern: null },
-      { id: 'use-database', help: 'USE switches database inside a script', engine: 'sqlserver', default: 'warn', needs_pattern: false, severity: 'warn', pattern: null }]),
+      { id: 'use-database', help: 'USE switches database: the rest of the script runs there (SQL Server, MySQL)', engine: null, default: 'warn', needs_pattern: false, severity: 'warn', pattern: null }]),
   custom: [{ id: 'no-cascade', pattern: '\\bCASCADE\\b', message: 'Drop with CASCADE takes dependent objects along', severity: 'error' }],
 }
 
@@ -569,7 +570,7 @@ const fakeApi: Api = {
     return { statements: 135 }
   },
   dataClose: async () => {},
-  projectInit: async (path, name, engine) => ({ ...fakeProject(), root: path, name, engine, schemas: [engine === 'sqlserver' ? 'dbo' : 'public'], environments: [] }),
+  projectInit: async (path, name, engine) => ({ ...fakeProject(), root: path, name, engine, schemas: engine === 'mysql' ? [] : [engine === 'sqlserver' ? 'dbo' : 'public'], environments: [] }),
   projectOpen: async (path) => {
     await wait()
     if (path.includes('old')) throw fail('LIFTOFF_CONFIG', `no liftoff.toml in ${path}; run \`liftoff init\` first`, 2)

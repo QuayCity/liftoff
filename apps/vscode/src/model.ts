@@ -8,7 +8,7 @@ export type Role = 'dev' | 'scratch' | 'test' | 'prod'
 export type Environment = {
   name: string
   role: Role
-  /** "PostgreSQL" or "SQL Server" */
+  /** "PostgreSQL", "SQL Server" or "MySQL" */
   engine: string
   allow_clean: boolean
 }

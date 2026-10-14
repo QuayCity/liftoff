@@ -70,7 +70,18 @@ test('select star, grants, users and USE', () => {
   assert.deepEqual(run('GRANT SELECT ON t TO PUBLIC WITH GRANT OPTION;'), ['grant-option:1', 'grant-to-public:1', 'permissions:1'])
   assert.deepEqual(run('CREATE ROLE reporting;\nALTER USER app WITH PASSWORD NULL;'), ['users-and-roles:1', 'users-and-roles:2'])
   assert.deepEqual(run("USE other\nEXEC sp_addrolemember 'db_owner', 'x'", 'sqlserver'), ['use-database:1', 'users-and-roles:2'])
-  assert.deepEqual(run('USE other;'), [], 'USE is a SQL Server rule')
+  assert.deepEqual(run('USE other;'), [], 'PostgreSQL has no USE')
+  assert.deepEqual(run('USE other;', 'mysql'), ['use-database:1'])
+})
+
+test('MySQL: backtick names, # comments and backslash escapes do not count', () => {
+  const sql = [
+    '# DROP TABLE a;',
+    "INSERT INTO log VALUES ('it\\'s; DROP TABLE b');",
+    'CREATE TABLE `delete` (id int PRIMARY KEY, `update` int);',
+  ].join('\n')
+  assert.deepEqual(run(sql, 'mysql'), [])
+  assert.deepEqual(run('ALTER TABLE `t` DROP COLUMN `x`;', 'mysql'), ['drop-column:1'])
 })
 
 test('sensitive column names, naming patterns and the undo-script rule', () => {

@@ -55,7 +55,7 @@ export const RULES: Record<string, Rule> = {
   'grant-to-public': { severity: 'warn', help: 'GRANT … TO PUBLIC gives every user access' },
   'grant-option': { severity: 'warn', help: 'WITH GRANT OPTION lets the grantee pass the permission on' },
   'users-and-roles': { severity: 'warn', help: 'Creates, changes or drops users, logins or roles' },
-  'use-database': { severity: 'warn', engine: 'sqlserver', help: 'USE switches database: the rest of the script runs there' },
+  'use-database': { severity: 'warn', help: 'USE switches database: the rest of the script runs there (SQL Server, MySQL)' },
   'sensitive-columns': { severity: 'info', help: 'A column name that suggests personal or financial data (ssn, iban, card number, date of birth, …)' },
   'table-names': { severity: 'off', needsPattern: true, help: 'New table names must match a pattern (set pattern = "regex")' },
   'column-names': { severity: 'off', needsPattern: true, help: 'New column names must match a pattern (set pattern = "regex")' },
@@ -136,7 +136,7 @@ export function mask(sql: string, engine: Engine): { text: string; quoted: Map<n
   while (i < sql.length) {
     const c = sql[i]
     const next = sql[i + 1]
-    if (c === '-' && next === '-') {
+    if ((c === '-' && next === '-') || (c === '#' && engine === 'mysql')) {
       const end = sql.indexOf('\n', i)
       const stop = end < 0 ? sql.length : end
       blank(i, stop)
@@ -152,7 +152,8 @@ export function mask(sql: string, engine: Engine): { text: string; quoted: Map<n
       blank(i, j)
       i = j
     } else if (c === "'") {
-      const backslash = engine === 'postgresql' && /[eE]/.test(sql[i - 1] ?? '') && !/[\p{L}\p{N}_]/u.test(sql[i - 2] ?? '')
+      // MySQL strings always take backslash escapes; PostgreSQL's only as E'…'.
+      const backslash = engine === 'mysql' || (engine === 'postgresql' && /[eE]/.test(sql[i - 1] ?? '') && !/[\p{L}\p{N}_]/u.test(sql[i - 2] ?? ''))
       let j = i + 1
       while (j < sql.length) {
         if (backslash && sql[j] === '\\') j += 2
@@ -162,8 +163,8 @@ export function mask(sql: string, engine: Engine): { text: string; quoted: Map<n
       }
       blank(i + 1, j)
       i = j + 1
-    } else if (c === '"' || (c === '[' && engine === 'sqlserver')) {
-      const close = c === '"' ? '"' : ']'
+    } else if (c === '"' || (c === '[' && engine === 'sqlserver') || (c === '`' && engine === 'mysql')) {
+      const close = c === '[' ? ']' : c
       let j = i + 1
       let name = ''
       while (j < sql.length) {
@@ -352,7 +353,7 @@ function check(statementsOf: Token[][], engine: Engine, settings: Record<string,
     if ((v0 === 'EXEC' || v0 === 'EXECUTE') && /^sp_(add|drop)(srv)?rolemember$|^sp_addlogin$|^sp_adduser$/i.test(s[1]?.raw ?? '')) {
       hits.push({ rule: 'users-and-roles', line: at(0), message: `runs ${s[1].raw}` })
     }
-    if (v0 === 'USE' && engine === 'sqlserver') hits.push({ rule: 'use-database', line: at(0), message: `switches to database ${s[1]?.raw ?? ''}` })
+    if (v0 === 'USE' && engine !== 'postgresql') hits.push({ rule: 'use-database', line: at(0), message: `switches to database ${s[1]?.raw ?? ''}` })
 
     // CREATE TABLE
     if (v0 === 'CREATE') {

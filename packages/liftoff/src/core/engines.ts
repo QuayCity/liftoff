@@ -6,6 +6,8 @@ import type { Change } from './changes.ts'
 import type { Project } from './config.ts'
 import type { Conn, EngineName } from './db.ts'
 import * as ms from './msdiff.ts'
+import { MySqlConn, quote as myQuote, withDatabase as myWithDatabase } from './mysql.ts'
+import * as my from './mysqldiff.ts'
 import * as pgd from './pgdiff.ts'
 import { PgConn, quoteIdent, withDatabase as pgWithDatabase } from './postgres.ts'
 import { SqlServerConn, quote, withDatabase as msWithDatabase } from './sqlserver.ts'
@@ -67,8 +69,25 @@ const sqlserver: SchemaOps = {
   },
 }
 
+const mysql: SchemaOps = {
+  name: 'MySQL',
+  introspect: (c, schemas, table) => my.introspect(c as MySqlConn, schemas, table),
+  applyFilters: (m, p) => my.applyFilters(m as my.MyModel, p),
+  diff: (a, b) => my.diff(a as my.MyModel, b as my.MyModel),
+  createAll: (m) => my.createAll(m as my.MyModel),
+  files: (m) => my.files(m as my.MyModel),
+  withDatabase: myWithDatabase,
+  async createDatabase(c, database, taken, noRights) {
+    const mc = c as MySqlConn
+    if ((await mc.query('SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?', [database]))[0][0] != 0) throw taken()
+    await mc.batch(`CREATE DATABASE ${myQuote(database)}`).catch((e: { dbCode?: string }) => {
+      throw e.dbCode === '1044' ? noRights('it needs the CREATE privilege') : e
+    })
+  },
+}
+
 /** By the engine's tag (EngineInfo.tag in db.ts), as snapshot files store it. */
-export const ops: Record<string, SchemaOps> = { pg, ms: sqlserver }
+export const ops: Record<string, SchemaOps> = { pg, ms: sqlserver, my: mysql }
 
 /** The schema operations for a connection's engine. */
 export function opsFor(engine: EngineName): [tag: string, SchemaOps] {

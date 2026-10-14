@@ -16,7 +16,7 @@ export type ConnectionFields = {
   authentication: string
   /** SQL Server, Microsoft Entra ID: the directory (tenant) ID */
   tenantId: string
-  /** PostgreSQL: prefer (the default), require or disable */
+  /** PostgreSQL and MySQL: prefer (the default), require, verify-full or disable */
   sslmode: string
   /** other settings of the URL, kept as written: `;applicationName=x` or `connect_timeout=5` */
   extra: string
@@ -24,7 +24,7 @@ export type ConnectionFields = {
 
 export const emptyFields = (): ConnectionFields => ({ server: 'localhost', instance: '', port: '', database: '', encrypt: true, trustServerCertificate: false, authentication: 'SqlPassword', tenantId: '', sslmode: '', extra: '' })
 
-export const defaultPort = (engine: string) => (engine === 'sqlserver' ? '1433' : '5432')
+export const defaultPort = (engine: string) => (engine === 'sqlserver' ? '1433' : engine === 'mysql' ? '3306' : '5432')
 
 export function buildUrl(engine: string, f: ConnectionFields): string {
   const server = f.server.trim() || 'localhost'
@@ -39,7 +39,8 @@ export function buildUrl(engine: string, f: ConnectionFields): string {
   const query = new URLSearchParams(f.extra)
   if (f.sslmode) query.set('sslmode', f.sslmode)
   const q = query.toString()
-  return `postgres://${host}${port ? `:${port}` : ''}/${encodeURIComponent(f.database.trim())}${q ? `?${q}` : ''}`
+  const scheme = engine === 'mysql' ? 'mysql' : 'postgres'
+  return `${scheme}://${host}${port ? `:${port}` : ''}/${encodeURIComponent(f.database.trim())}${q ? `?${q}` : ''}`
 }
 
 /**
@@ -81,7 +82,7 @@ export function splitUrl(engine: string, url: string): (ConnectionFields & { use
     }
     return { ...f, ...(user !== undefined && { user }) }
   }
-  if (!/^postgres(ql)?:\/\//i.test(u)) return undefined
+  if (!(engine === 'mysql' ? /^mysql:\/\//i : /^postgres(ql)?:\/\//i).test(u)) return undefined
   let parsed: URL
   try {
     parsed = new URL(u)

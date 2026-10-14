@@ -1,5 +1,5 @@
 # Every pull request and every push to main: the whole test suite.
-#   core      the core, the CLI and the VS Code extension against real PostgreSQL, PgBouncer and SQL Server
+#   core      the core, the CLI and the VS Code extension against real PostgreSQL, PgBouncer, SQL Server and MySQL
 #   desktop   the desktop app's screens in a browser (Playwright, with axe accessibility checks)
 #   cli       the single-file CLI builds and runs on Windows and macOS too
 # The Electron tests (e2e/app) need Windows and a database; run them locally (CONTRIBUTING.md).
@@ -48,10 +48,18 @@ jobs:
           MSSQL_PID: Developer
           MSSQL_SA_PASSWORD: Liftoff!2026
         ports: ['51433:1433']
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: liftoff
+        ports: ['53306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pliftoff" --health-interval 2s --health-timeout 5s --health-retries 60
     env:
       LIFTOFF_TEST_PG: postgres://postgres:liftoff@localhost:55432
       LIFTOFF_TEST_PGBOUNCER: postgres://postgres:liftoff@localhost:56432
       LIFTOFF_TEST_MSSQL: sqlserver://localhost:51433;encrypt=true;trustServerCertificate=true;user=sa;password=Liftoff!2026
+      LIFTOFF_TEST_MYSQL: mysql://root:liftoff@localhost:53306
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

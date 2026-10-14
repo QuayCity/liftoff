@@ -70,11 +70,11 @@ allow_clean = true
 | key | default | what |
 | --- | --- | --- |
 | `name` | the folder's name | the project's name, shown in the apps |
-| `engine` | `postgresql` | `postgresql` or `sqlserver`. Set by `liftoff init --engine`; it cannot change later |
+| `engine` | `postgresql` | `postgresql`, `sqlserver` or `mysql`. Set by `liftoff init --engine`; it cannot change later |
 | `migrations` | `migrations` | the folder with the scripts, relative to the project folder. Sub-folders are read too |
-| `schemas` | `["public"]` or `["dbo"]` | the schemas LiftOff compares, captures and cleans. The history table goes in the first one |
+| `schemas` | `["public"]` or `["dbo"]` | the schemas LiftOff compares, captures and cleans. The history table goes in the first one. MySQL: `[]`, as LiftOff manages the database each environment's URL names |
 | `history_table` | `liftoff_schema_history` | the history table's name. Do not change it once databases have history |
-| `lock` | `advisory` | PostgreSQL: how two `migrate` runs at once keep out of each other's way. `advisory` uses a session advisory lock; `table` uses a lease row instead, for PgBouncer in transaction pooling, RDS Proxy and Aurora Limitless. SQL Server always uses an application lock |
+| `lock` | `advisory` | PostgreSQL: how two `migrate` runs at once keep out of each other's way. `advisory` uses a session advisory lock; `table` uses a lease row instead, for PgBouncer in transaction pooling, RDS Proxy and Aurora Limitless. SQL Server always uses an application lock, MySQL a named lock (GET_LOCK) |
 | `placeholders` | none | `${name}` values for every environment (see [Placeholders](#placeholders)) |
 | `filters` | none | objects to leave out of comparisons (see [Filters](#filters)) |
 
@@ -154,6 +154,27 @@ sqlserver://myserver.database.windows.net;databaseName=shop;encrypt=true;authent
 
 The account must be a user in the database:
 `CREATE USER [you@example.com] FROM EXTERNAL PROVIDER;` and a role that may change the schema.
+
+### MySQL
+
+```
+mysql://db.example.com:3306/shop
+mysql://app_user@db.example.com/shop?sslmode=verify-full
+jdbc:mysql://db.example.com:3306/shop     (the JDBC form works too)
+```
+
+| setting | what |
+| --- | --- |
+| port | 3306 when left out |
+| the database | the one LiftOff manages: its tables, views, routines and triggers. Dev, test and prod may have databases of different names |
+| `sslmode` | `prefer` (the default: encrypted when the server offers it, as MySQL's own clients do), `require` (always encrypted), `verify-full` (encrypted, and the certificate is checked), or `disable` |
+
+MySQL commits DDL (CREATE, ALTER, DROP, …) at once, so a script with DDL cannot be rolled back: if
+it fails part-way, what ran stays, the history records the failure, and `liftoff repair` clears it
+once you have fixed the script and the database. Scripts with only data changes run in a
+transaction. A script may use `DELIMITER` lines, as the mysql client takes them; routines also work
+without them. Amazon RDS and Aurora MySQL, Azure Database for MySQL and Google Cloud SQL for MySQL
+are MySQL servers to LiftOff.
 
 `ActiveDirectoryPassword` (a user name and password for an Entra account) is not supported:
 Microsoft is retiring it, and it cannot do MFA. Entra ID sign-in is the only time LiftOff
