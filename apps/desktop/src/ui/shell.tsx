@@ -75,7 +75,7 @@ export function Sidebar({ workspace, active = true, onWorkspace }: {
               aria-label={wide ? undefined : w}
               aria-current={current ? 'page' : undefined}
               onClick={() => onWorkspace(w)}
-              className={cx(item, current ? 'bg-surface-sunken font-medium text-fg' : 'text-muted')}
+              className={cx(item, current ? 'bg-accent-subtle font-medium text-fg' : 'text-muted')}
             >
               <Icon aria-hidden className={cx('size-4 shrink-0', current && 'text-accent')} />
               {wide && <span className="truncate">{w}</span>}
