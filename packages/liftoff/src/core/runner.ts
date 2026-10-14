@@ -10,8 +10,6 @@ import { BaselineDiffersError, configError, DbError, MigrationError, notBaseline
 import { activityTable, dialect, open, type Conn, type EngineName, type Held, type HistoryRow } from './db.ts'
 import { run as git } from './git.ts'
 import { applyPlaceholders, compareVersions, holds, isFor, parseExpression, parseVersion, scan, versionNote, type Kind, type Script, type Version } from './migration.ts'
-import { quoteIdent } from './postgres.ts'
-import { quote as quoteTsql } from './sqlserver.ts'
 
 export type State =
   | 'pending'
@@ -504,7 +502,7 @@ function sqlFor(cfg: Config, env: string, s: Script): string {
 
 function dryRun(cfg: Config, engine: EngineName, name: string, as: Target, scripts: Script[], rows: HistoryRow[], opts: MigrateOptions, target: Version | undefined): MigrateResult {
   const d = dialect[engine]
-  const q = engine === 'SQL Server' ? quoteTsql : quoteIdent
+  const q = d.quote
   let infos = compute(scripts, rows, as)
   validate(infos, { ...opts, outOfOrder: opts.outOfOrder || !!opts.only || opts.topic !== undefined })
   const [schema, table] = [q(cfg.historySchema()), q(cfg.project.history_table)]

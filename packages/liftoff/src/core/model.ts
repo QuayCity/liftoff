@@ -10,8 +10,7 @@ import { dialect, open, type Conn } from './db.ts'
 import { diffSchemas, modelOf, notComparedBetween, rebuildScratch, scratchEnv, type Comparison } from './diff.ts'
 import { configError, DbError, ModelInvalidError } from './errors.ts'
 import { quiet, type Log } from './runner.ts'
-import * as ms from './msdiff.ts'
-import * as pgd from './pgdiff.ts'
+import { ops } from './engines.ts'
 
 export const FOLDER = 'schema-model'
 
@@ -105,7 +104,7 @@ export async function status(cfg: Config, dev: string | undefined, log: Log = qu
   const c = await open(name, env)
   try {
     const s = await modelOf(cfg, c)
-    const files = s.engine === 'pg' ? pgd.files(s.model) : ms.files(s.model)
+    const files = ops[s.engine].files(s.model)
     return compareFiles(readFolder(cfg.root, log), files)
   } finally {
     await c.close()

@@ -23,7 +23,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { Config, Environment } from './config.ts'
 import { compares } from './config.ts'
-import { open, ownTables, type Conn } from './db.ts'
+import { open, ownTables, type Conn, type EngineName } from './db.ts'
 import { configError } from './errors.ts'
 import { typeName } from './msdiff.ts'
 import { PgConn, quoteIdent } from './postgres.ts'
@@ -403,7 +403,13 @@ function msFromText(c: DataColumn, text: string): string {
 
 const toPairs = (t: DataTable, rows: unknown[][]): [Key, string][] => rows.map((r) => [r.slice(0, t.key.length).map(String), String(r[t.key.length])])
 
-const dialectOf = (c: Conn): Dialect => (c.engine === 'PostgreSQL' ? pg : ms)
+const dialects: Partial<Record<EngineName, Dialect>> = { PostgreSQL: pg, 'SQL Server': ms }
+
+function dialectOf(c: Conn): Dialect {
+  const d = dialects[c.engine]
+  if (!d) throw configError(`data compare is not available for ${c.engine} yet`)
+  return d
+}
 
 /* ---------- comparing ---------- */
 

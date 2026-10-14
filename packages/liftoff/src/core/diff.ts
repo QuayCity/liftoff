@@ -6,44 +6,37 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { saveEnvironment, type Config, type Environment, type Role } from './config.ts'
 import { PHASES, type Change, type Step } from './changes.ts'
-import { open, type Conn } from './db.ts'
+import { engineForUrl, open, type Conn } from './db.ts'
+import { ops, opsFor, type Model } from './engines.ts'
 import { configError } from './errors.ts'
 import { nextVersion, parseName, scan, compareVersions, parseVersion } from './migration.ts'
-import * as ms from './msdiff.ts'
-import * as pgd from './pgdiff.ts'
-import { PgConn, quoteIdent, withDatabase as pgWithDatabase } from './postgres.ts'
+import { notCompared } from './pgdiff.ts'
 import * as runner from './runner.ts'
-import { SqlServerConn, quote, withDatabase as msWithDatabase } from './sqlserver.ts'
 
-/** A database's schema, read by the engine it runs on. */
-export type Schema = { engine: 'pg'; model: pgd.Model } | { engine: 'ms'; model: ms.MsModel }
+/** A database's schema, read by the engine it runs on (`engine`: the engine's tag, see engines.ts). */
+export type Schema = { engine: string; model: Model }
 
 /** Changes that turn `target` into `source`, with undo steps. */
 export function diffSchemas(source: Schema, target: Schema): Change[] {
-  if (source.engine === 'pg' && target.engine === 'pg') return pgd.diff(source.model, target.model)
-  if (source.engine === 'ms' && target.engine === 'ms') return ms.diff(source.model, target.model)
-  return []
+  if (source.engine !== target.engine) return []
+  return ops[source.engine].diff(source.model, target.model)
 }
 
 /** Everything, as changes against an empty database (capture, squash). */
 export function createAll(s: Schema): Change[] {
-  return s.engine === 'pg' ? pgd.compare(s.model, pgd.emptyModel()) : ms.createAll(s.model)
+  return ops[s.engine].createAll(s.model)
 }
 
 export function notComparedBetween(source: Schema, target: Schema, sourceName: string, targetName: string): string[] {
-  return pgd.notCompared(source.model.not_compared, target.model.not_compared, sourceName, targetName)
+  return notCompared(source.model.not_compared, target.model.not_compared, sourceName, targetName)
 }
 
 /** The schema of the database `c` is connected to, with the project's filters applied. */
 export async function modelOf(cfg: Config, c: Conn): Promise<Schema> {
-  if (c instanceof PgConn) {
-    const m = await pgd.introspect(c, cfg.project.schemas, cfg.project.history_table)
-    pgd.applyFilters(m, cfg.project)
-    return { engine: 'pg', model: m }
-  }
-  const m = await ms.introspect(c as SqlServerConn, cfg.project.schemas, cfg.project.history_table)
-  ms.applyFilters(m, cfg.project)
-  return { engine: 'ms', model: m }
+  const [tag, o] = opsFor(c.engine)
+  const m = await o.introspect(c, cfg.project.schemas, cfg.project.history_table)
+  o.applyFilters(m, cfg.project)
+  return { engine: tag, model: m }
 }
 
 /** Picks and checks the scratch environment: it gets erased. */
@@ -131,21 +124,10 @@ export async function createScratch(cfg: Config, dev: string | undefined, envNam
     const database = `${(await c.serverInfo()).database}_scratch`
     const taken = () => configError(`a database named ${database} already exists on ${devName}'s server; if it may be erased, add it as the scratch environment yourself`)
     const noRights = (needs: string) => configError(`${devName}'s login may not create databases (${needs}); ask an admin to create ${database}, then add it as the scratch environment`)
-    if (c instanceof PgConn) {
-      if ((await c.row('select exists (select 1 from pg_database where datname = $1)', [database]))[0] === true) throw taken()
-      await c.batch(`CREATE DATABASE ${quoteIdent(database)}`).catch((e: { dbCode?: string }) => {
-        throw e.dbCode === '42501' ? noRights('it needs CREATEDB') : e
-      })
-    } else {
-      const sc = c as SqlServerConn
-      if ((await sc.query('SELECT DB_ID(@P1)', [database]))[0]?.[0] != null) throw taken()
-      await sc.batch(`CREATE DATABASE ${quote(database)}`).catch((e: { dbCode?: string }) => {
-        throw e.dbCode === '262' ? noRights('it needs CREATE ANY DATABASE or dbcreator') : e
-      })
-    }
+    await opsFor(c.engine)[1].createDatabase(c, database, taken, noRights)
     return database
   })
-  const url = devEnv.url.match(/^(jdbc:)?sqlserver:/i) ? msWithDatabase(devEnv.url, database) : pgWithDatabase(devEnv.url, database)
+  const url = opsFor(engineForUrl(devEnv.url).name)[1].withDatabase(devEnv.url, database)
   saveEnvironment(cfg.root, envName, { url, user: devEnv.user, password: devEnv.password, role: 'scratch' as Role, allow_clean: true, placeholders: devEnv.placeholders }, false)
   return { environment: envName, database }
 }

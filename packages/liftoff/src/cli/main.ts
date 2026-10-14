@@ -9,8 +9,8 @@ import { parseArgs, type ParseArgsConfig } from 'node:util'
 import * as activity from '../core/activity.ts'
 import * as checks from '../core/checks.ts'
 import * as ci from '../core/ci.ts'
-import { Config, defaultSchema, init, PROJECT_FILE, readSettings, saveSettings, type Environment, type Role, type SettingsChange } from '../core/config.ts'
-import { engineOf, isSqlServerUrl, open } from '../core/db.ts'
+import { Config, defaultSchemas, init, PROJECT_FILE, readSettings, saveSettings, type Environment, type Role, type SettingsChange } from '../core/config.ts'
+import { ENGINES, engineForUrl, engineOf, open } from '../core/db.ts'
 import * as compare from '../core/compare.ts'
 import { DataSession } from '../core/datacompare.ts'
 import { adopt } from '../core/adopt.ts'
@@ -85,23 +85,22 @@ function load(ctx: Ctx): Config {
   const a = ctx.adhoc
   let url: string | undefined
   if (a.url !== undefined) {
-    url = flyway.jdbcToUrl(a.url) ?? (a.url.startsWith('postgres') || isSqlServerUrl(a.url) ? a.url : undefined)
-    if (url === undefined) throw configError(`-url=${a.url}: LiftOff supports PostgreSQL and SQL Server`)
+    url = flyway.jdbcToUrl(a.url) ?? (ENGINES.some((e) => e.matches(a.url!)) ? a.url : undefined)
+    if (url === undefined) throw configError(`-url=${a.url}: LiftOff supports ${ENGINES.map((e) => e.name).join(', ')}`)
   }
   let cfg: Config
   if (url !== undefined && !fs.existsSync(path.join(ctx.root, PROJECT_FILE))) {
     cfg = Config.adhoc(ctx.root, a.locations ?? 'sql')
-    if (isSqlServerUrl(url)) {
-      cfg.project.engine = 'sqlserver'
-      cfg.project.schemas = ['dbo']
-    }
+    const engine = engineForUrl(url)
+    cfg.project.engine = engine.id
+    cfg.project.schemas = [...engine.schemas]
   } else {
     cfg = Config.load(ctx.root)
   }
   if (a.locations !== undefined) cfg.project.migrations = a.locations
   if (a.schemas !== undefined) cfg.project.schemas = a.schemas
   if (a.defaultSchema !== undefined) cfg.project.schemas = [a.defaultSchema, ...cfg.project.schemas.filter((s) => s !== a.defaultSchema)]
-  if (!cfg.project.schemas.length) cfg.project.schemas.push(defaultSchema(cfg.project.engine))
+  if (!cfg.project.schemas.length) cfg.project.schemas.push(...defaultSchemas(cfg.project.engine))
   if (a.table !== undefined) {
     if (a.table.toLowerCase().includes('flyway')) {
       throw configError(`-table=${a.table} is Flyway's history table; LiftOff keeps its own. Import it once with \`liftoff import-flyway-history --table ${a.table}\``)

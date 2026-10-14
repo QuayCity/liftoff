@@ -4,6 +4,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { parse, stringify } from 'smol-toml'
+import { engineById } from './db.ts'
 import { configError } from './errors.ts'
 import { keychainDelete, keychainEnabled, keychainGet, keychainSet } from './keychain.ts'
 import { effective, NO_RULES, parseRules, RULES, type RulesConfig } from './rules.ts'
@@ -171,8 +172,9 @@ export class Config {
     return path.join(this.root, this.project.migrations)
   }
 
+  /** Where the history table is; '' for an engine that uses the connection's own schema. */
   historySchema(): string {
-    return this.project.schemas[0]
+    return this.project.schemas[0] ?? ''
   }
 
   /** Placeholder values for one environment: built-ins, then the project's, then the environment's. */
@@ -262,21 +264,22 @@ function stringMap(v: unknown, what: string): Record<string, string> {
   return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, str(x, `${what}.${k}`)]))
 }
 
-/** Where a new project's history table goes: `public` on PostgreSQL, `dbo` on SQL Server. */
-export function defaultSchema(engine: string): string {
-  if (engine === 'postgresql') return 'public'
-  if (engine === 'sqlserver') return 'dbo'
-  throw configError(`engine '${engine}' is not supported; use postgresql or sqlserver`)
+/**
+ * The schemas a new project manages: `public` on PostgreSQL, `dbo` on SQL Server. None for an
+ * engine that uses the connection's own schema (see EngineInfo.schemas).
+ */
+export function defaultSchemas(engine: string): string[] {
+  return [...engineById(engine).schemas]
 }
 
 /** Creates liftoff.toml, migrations/ and schema-model/, and git-ignores the user file. */
 export function init(root: string, name: string, engine: string): void {
-  initWith(root, name, engine, 'migrations', [defaultSchema(engine)])
+  initWith(root, name, engine, 'migrations', defaultSchemas(engine))
 }
 
 /** `init` with a given migrations folder and schemas (used when converting a Flyway project). */
 export function initWith(root: string, name: string, engine: string, migrations: string, schemas: string[]): void {
-  defaultSchema(engine)
+  engineById(engine)
   const file = path.join(root, PROJECT_FILE)
   if (fs.existsSync(file)) throw configError(`${file} already exists`)
   fs.mkdirSync(path.join(root, migrations), { recursive: true })
@@ -300,7 +303,7 @@ function projectTable(p: Project): Record<string, unknown> {
 
 /** Writes the [project] section (S15), keeping the environments and anything else in the file. */
 export function saveProject(root: string, project: Project): void {
-  if (!project.name.trim() || !project.migrations.trim() || !project.schemas.length) {
+  if (!project.name.trim() || !project.migrations.trim() || (!project.schemas.length && defaultSchemas(project.engine).length)) {
     throw configError('a project needs a name, a migrations folder and at least one schema')
   }
   if (project.migrations.includes('..') || path.isAbsolute(project.migrations)) throw configError('the migrations folder must be inside the project folder')

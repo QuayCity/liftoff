@@ -5,7 +5,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { parse } from 'smol-toml'
-import { Config, defaultSchema, initWith, PROJECT_FILE, redactUrl, saveEnvironment, saveProject, type Role } from './config.ts'
+import { Config, defaultSchemas, initWith, PROJECT_FILE, redactUrl, saveEnvironment, saveProject, type Role } from './config.ts'
 import { open, type HistoryRow } from './db.ts'
 import { configError, validateError } from './errors.ts'
 import { compareVersions, parseVersion, scan } from './migration.ts'
@@ -194,7 +194,7 @@ export function convert(root: string, name: string, useKeychain = keychainEnable
   if (!schemas.length && envSchemas) schemas = envSchemas[1].get('schemas')!.split(',').map((s) => s.trim())
   const engine = p.envs.some(([, e]) => e.get('url')?.trim().startsWith('jdbc:sqlserver:')) ? 'sqlserver' : 'postgresql'
   if (defaultSchemaSetting) schemas = [defaultSchemaSetting, ...schemas.filter((s) => s !== defaultSchemaSetting)]
-  if (!schemas.length) schemas.push(defaultSchema(engine))
+  if (!schemas.length) schemas.push(...defaultSchemas(engine))
   r.schemas = schemas
   const cleanAllowed = take('cleanDisabled')?.toLowerCase() === 'false'
   take('environment')

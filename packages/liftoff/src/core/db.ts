@@ -1,11 +1,14 @@
 // The runner's view of a database: one connection, whichever engine it is. Each engine
-// (postgres.ts, sqlserver.ts) implements the same small set of operations, so the runner
-// (runner.ts) has no engine-specific code.
+// (postgres.ts, sqlserver.ts, …) implements the same small set of operations, so the runner
+// (runner.ts) has no engine-specific code. ENGINES lists them; engines.ts has their schema diffs.
 
 import type { Environment, LockMode } from './config.ts'
-import { connectError } from './errors.ts'
+import { configError, connectError } from './errors.ts'
 import { needsNoTransaction, tsqlNeedsNoTransaction } from './migration.ts'
 
+/** As liftoff.toml names it (`engine = "postgresql"`). */
+export type EngineId = 'postgresql' | 'sqlserver'
+/** As people read it. */
 export type EngineName = 'PostgreSQL' | 'SQL Server'
 
 export type ServerInfo = { version: string; user: string; database: string }
@@ -120,15 +123,77 @@ export function isSqlServerUrl(url: string): boolean {
   return /^(jdbc:)?sqlserver:\/\//i.test(url.trim())
 }
 
-export function engineOf(url: string): EngineName {
-  return isSqlServerUrl(url) ? 'SQL Server' : 'PostgreSQL'
+/** What the runner needs to know about an engine, and how to connect to it. */
+export type EngineInfo = {
+  id: EngineId
+  name: EngineName
+  /** its key in snapshot files */
+  tag: string
+  /** whether a connection URL is for this engine */
+  matches: (url: string) => boolean
+  /** a connection URL, for messages and examples */
+  example: string
+  // The bits of SQL the runner writes itself (dry runs, transactions).
+  begin: string
+  currentUser: string
+  true: string
+  needsNoTransaction: (sql: string) => boolean
+  quote: (name: string) => string
+  /**
+   * The schemas a new project manages. Empty: the schema the connection uses (the database in a
+   * MySQL URL, the user's schema on Oracle); the schemas setting does not apply then.
+   */
+  schemas: string[]
+  open: (envName: string, env: Environment) => Promise<Conn>
 }
 
-/** The per-engine bits of SQL the runner writes itself (dry runs, transactions). */
-export const dialect = {
-  PostgreSQL: { begin: 'BEGIN', currentUser: 'current_user', true: 'true', needsNoTransaction },
-  'SQL Server': { begin: 'BEGIN TRANSACTION', currentUser: 'SUSER_SNAME()', true: '1', needsNoTransaction: tsqlNeedsNoTransaction },
-} as const
+const RESERVED = new Set(
+  (
+    'all analyse analyze and any array as asc asymmetric authorization binary both case cast check collate collation column concurrently ' +
+    'constraint create cross current_catalog current_date current_role current_schema current_time current_timestamp current_user default ' +
+    'deferrable desc distinct do else end except false fetch for foreign freeze from full grant group having ilike in initially inner ' +
+    'intersect into is isnull join lateral leading left like limit localtime localtimestamp natural not notnull null offset on only or ' +
+    'order outer overlaps placing primary references returning right select session_user similar some symmetric system_user table ' +
+    'tablesample then to trailing true union unique user using variadic verbose when where window with'
+  ).split(' '),
+)
+
+/** PostgreSQL: bare when safe (lowercase, not reserved), double-quoted otherwise. */
+export function quoteIdent(s: string): string {
+  return /^[a-z_][a-z0-9_]*$/.test(s) && !RESERVED.has(s) ? s : `"${s.replaceAll('"', '""')}"`
+}
+
+export const ENGINES: EngineInfo[] = [
+  {
+    id: 'postgresql', name: 'PostgreSQL', tag: 'pg', matches: (u) => /^postgres(ql)?:\/\//i.test(u.trim()), example: 'postgres://localhost:5432/shop',
+    begin: 'BEGIN', currentUser: 'current_user', true: 'true', needsNoTransaction, quote: quoteIdent, schemas: ['public'],
+    open: async (n, e) => (await import('./postgres.ts')).PgConn.open(n, e),
+  },
+  {
+    id: 'sqlserver', name: 'SQL Server', tag: 'ms', matches: isSqlServerUrl, example: 'sqlserver://localhost:1433;databaseName=shop;encrypt=true',
+    begin: 'BEGIN TRANSACTION', currentUser: 'SUSER_SNAME()', true: '1', needsNoTransaction: tsqlNeedsNoTransaction, quote: (s) => `[${s.replaceAll(']', ']]')}]`, schemas: ['dbo'],
+    open: async (n, e) => (await import('./sqlserver.ts')).SqlServerConn.open(n, e),
+  },
+]
+
+/** The engine a liftoff.toml names. */
+export function engineById(id: string): EngineInfo {
+  const e = ENGINES.find((x) => x.id === id)
+  if (!e) throw configError(`engine '${id}' is not supported; use ${ENGINES.map((x) => x.id).join(', ')}`)
+  return e
+}
+
+/** The engine a connection URL is for; PostgreSQL when it names none (the driver then says what is wrong). */
+export function engineForUrl(url: string): EngineInfo {
+  return ENGINES.find((e) => e.matches(url)) ?? ENGINES[0]
+}
+
+export function engineOf(url: string): EngineName {
+  return engineForUrl(url).name
+}
+
+/** The per-engine bits of SQL the runner writes itself, by a connection's `engine`. */
+export const dialect = Object.fromEntries(ENGINES.map((e) => [e.name, e])) as Record<EngineName, EngineInfo>
 
 /** `${env.X}` left in a URL, user or password means a variable is not set; say which. */
 export function checkVars(envName: string, env: Environment): void {
@@ -141,12 +206,7 @@ export function checkVars(envName: string, env: Environment): void {
 /** Opens a connection to an environment, on the engine its URL names. */
 export async function open(envName: string, env: Environment): Promise<Conn> {
   checkVars(envName, env)
-  if (isSqlServerUrl(env.url)) {
-    const { SqlServerConn } = await import('./sqlserver.ts')
-    return SqlServerConn.open(envName, env)
-  }
-  const { PgConn } = await import('./postgres.ts')
-  return PgConn.open(envName, env)
+  return engineForUrl(env.url).open(envName, env)
 }
 
 /** Runs `work` on a fresh connection and always closes it. */

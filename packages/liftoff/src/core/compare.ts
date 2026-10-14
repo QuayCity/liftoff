@@ -13,9 +13,8 @@ import type { Config, Environment } from './config.ts'
 import { dialect, open, type Conn } from './db.ts'
 import { createAll, diffSchemas, modelOf, notComparedBetween, rebuildScratch, renderScript, scratchEnv, type Schema } from './diff.ts'
 import { configError } from './errors.ts'
-import * as ms from './msdiff.ts'
+import { ops, type Model } from './engines.ts'
 import { applyModel, FOLDER } from './model.ts'
-import * as pgd from './pgdiff.ts'
 import { quiet, type Log } from './runner.ts'
 
 /** One side of a comparison. */
@@ -109,7 +108,7 @@ export async function compare(cfg: Config, source: Side, target: Side, scratch: 
   return { source: sideLabel(source), target: sideLabel(target), engine: engineName(a), changes, not_compared: notCompared }
 }
 
-const engineName = (s: Schema) => (s.engine === 'pg' ? 'PostgreSQL' : 'SQL Server')
+const engineName = (s: Schema) => ops[s.engine].name
 
 /** The chosen changes (`ids`: Change ids; all when not given). */
 export function pick(changes: Change[], ids: string[] | undefined): Change[] {
@@ -162,12 +161,13 @@ const FORMAT = 'liftoff-snapshot'
 export type SnapshotFile = {
   format: typeof FORMAT
   version: 1
-  engine: 'pg' | 'ms'
+  /** the engine's tag (engines.ts): pg, ms, … */
+  engine: string
   /** what was read, e.g. `prod` */
   of: string
   taken_at: string
   schemas: string[]
-  model: unknown
+  model: Model
 }
 
 // Maps and Sets as tagged arrays, so the model survives JSON.
@@ -203,14 +203,10 @@ export function readSnapshot(cfg: Config, file: string): Schema {
     throw configError(`${p} is not a LiftOff snapshot: ${e instanceof Error ? e.message : String(e)}`)
   }
   if (doc.format !== FORMAT || doc.version !== 1) throw configError(`${p} is not a LiftOff snapshot (format ${String(doc.format)} ${String(doc.version)})`)
-  if (doc.engine === 'pg') {
-    const m = doc.model as pgd.Model
-    pgd.applyFilters(m, cfg.project)
-    return { engine: 'pg', model: m }
-  }
-  const m = doc.model as ms.MsModel
-  ms.applyFilters(m, cfg.project)
-  return { engine: 'ms', model: m }
+  const o = ops[doc.engine]
+  if (!o) throw configError(`${p} is a snapshot of an engine this LiftOff does not know (${String(doc.engine)})`)
+  o.applyFilters(doc.model, cfg.project)
+  return { engine: doc.engine, model: doc.model }
 }
 
 /** For the CLI: is this side a database that apply may change, and is it production? */
