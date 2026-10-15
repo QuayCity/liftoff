@@ -9,7 +9,7 @@ import type { Liftoff } from './extension'
 
 export type NewProjectAnswers = {
   folder?: string
-  engine?: 'postgresql' | 'sqlserver' | 'mysql' | 'oracle'
+  engine?: 'postgresql' | 'sqlserver' | 'mysql' | 'oracle' | 'sqlite'
   sample?: boolean
   name?: string
 }
@@ -33,6 +33,7 @@ export async function newProject(lo: Liftoff, answers: NewProjectAnswers = {}): 
           { label: 'SQL Server', engine: 'sqlserver' as const },
           { label: 'MySQL', engine: 'mysql' as const },
           { label: 'Oracle', engine: 'oracle' as const },
+          { label: 'SQLite', engine: 'sqlite' as const },
         ],
         { title: title(1), placeHolder: 'Which database engine?', ignoreFocusOut: true },
       )

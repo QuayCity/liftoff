@@ -41,6 +41,8 @@ export LIFTOFF_TEST_MYSQL=mysql://root:liftoff@localhost:53306
 export LIFTOFF_TEST_ORACLE=oracle://system:liftoff@localhost:51621/FREEPDB1
 ```
 
+The SQLite tests need nothing: they use files in a temporary folder.
+
 | what | where | command |
 | --- | --- | --- |
 | core unit tests | `packages/liftoff` | `npm test` |

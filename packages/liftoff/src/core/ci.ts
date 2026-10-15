@@ -53,6 +53,8 @@ function scratchService(engine: string): { service: string; url: string; prepare
       prepare: '',
     }
   }
+  // SQLite: the scratch database is a file in the checkout; nothing to start.
+  if (engine === 'sqlite') return { service: '', url: 'sqlite:ci_scratch.db', prepare: '' }
   if (engine === 'oracle') {
     // gvenzl's Oracle Free images (Oracle's free edition), made for CI: APP_USER is the scratch schema.
     return {
@@ -221,7 +223,9 @@ export function azurePipelines(cfg: Config, o: CiOptions): string {
       "  - job: schema_model\n    displayName: 'Schema model'\n    pool:\n      vmImage: ubuntu-latest\n" +
       `    variables:\n      LIFTOFF_ENV_CI_SCRATCH_URL: ${yamlStr(url)}\n      LIFTOFF_ENV_CI_SCRATCH_ROLE: scratch\n` +
       `    steps:\n    - checkout: self\n${generate ? '      fetchDepth: 0\n      persistCredentials: true\n' : ''}` + install +
-      '    - script: |\n' +
+      (engine === 'sqlite'
+        ? ''
+        : '    - script: |\n' +
       (engine === 'sqlserver'
         ? `        docker run -d --name scratch -e ACCEPT_EULA=Y -e 'MSSQL_SA_PASSWORD=${SCRATCH_PASSWORD}' -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest\n` +
           '        for _ in $(seq 1 30); do\n' +
@@ -239,7 +243,7 @@ export function azurePipelines(cfg: Config, o: CiOptions): string {
             '        for _ in $(seq 1 30); do\n' +
             // Over TCP: while the image initialises, its server listens on the socket only.
             '          docker exec scratch pg_isready -h 127.0.0.1 -U postgres -d scratch && exit 0\n') +
-      '          sleep 2\n        done\n        exit 1\n      displayName: Start the scratch database\n' +
+      '          sleep 2\n        done\n        exit 1\n      displayName: Start the scratch database\n') +
       '    - script: liftoff model --check --scratch ci_scratch\n      displayName: The schema model builds\n'
     if (!generate) {
       y += '    - script: liftoff check --model --scratch ci_scratch\n      displayName: Every schema model change has a migration script\n'

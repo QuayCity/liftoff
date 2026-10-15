@@ -250,13 +250,14 @@ function NewProjectDialog({ open, onOpenChange, onCreated }: { open: boolean; on
           )}
         </Field>
         <Field label="Project name" error={nameError}>{(a) => <Input {...a} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />}</Field>
-        <Field label="Database engine" help={engine === 'sqlserver' ? 'Uses the dbo schema. Importing Flyway history is not available for SQL Server yet; baseline instead.' : engine === 'mysql' ? 'Manages the database each environment\'s URL names. MySQL commits DDL at once, so a script that fails part-way is not rolled back.' : engine === 'oracle' ? 'Manages the schema of the user each environment signs in as. Oracle commits DDL at once, so a script that fails part-way is not rolled back.' : undefined}>
+        <Field label="Database engine" help={engine === 'sqlserver' ? 'Uses the dbo schema. Importing Flyway history is not available for SQL Server yet; baseline instead.' : engine === 'mysql' ? 'Manages the database each environment\'s URL names. MySQL commits DDL at once, so a script that fails part-way is not rolled back.' : engine === 'oracle' ? 'Manages the schema of the user each environment signs in as. Oracle commits DDL at once, so a script that fails part-way is not rolled back.' : engine === 'sqlite' ? 'Database files on this computer: nothing to install or start.' : undefined}>
           {(a) => (
             <Select {...a} value={engine} onChange={(e) => setEngine(e.target.value as Engine)}>
               <option value="postgresql">PostgreSQL</option>
               <option value="sqlserver">SQL Server</option>
               <option value="mysql">MySQL</option>
               <option value="oracle">Oracle</option>
+              <option value="sqlite">SQLite</option>
             </Select>
           )}
         </Field>

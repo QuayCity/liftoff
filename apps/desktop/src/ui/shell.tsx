@@ -49,6 +49,7 @@ const ENGINE_BADGES: Record<string, { text: string; name: string; className: str
   sqlserver: { text: 'MS', name: 'SQL Server', className: 'bg-warning-subtle text-warning' },
   mysql: { text: 'MY', name: 'MySQL', className: 'bg-success-subtle text-success' },
   oracle: { text: 'OR', name: 'Oracle', className: 'bg-danger-subtle text-danger' },
+  sqlite: { text: 'LT', name: 'SQLite', className: 'bg-surface-sunken text-fg' },
 }
 
 /**

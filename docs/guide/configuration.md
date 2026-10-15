@@ -70,11 +70,11 @@ allow_clean = true
 | key | default | what |
 | --- | --- | --- |
 | `name` | the folder's name | the project's name, shown in the apps |
-| `engine` | `postgresql` | `postgresql`, `sqlserver`, `mysql` or `oracle`. Set by `liftoff init --engine`; it cannot change later |
+| `engine` | `postgresql` | `postgresql`, `sqlserver`, `mysql`, `oracle` or `sqlite`. Set by `liftoff init --engine`; it cannot change later |
 | `migrations` | `migrations` | the folder with the scripts, relative to the project folder. Sub-folders are read too |
-| `schemas` | `["public"]` or `["dbo"]` | the schemas LiftOff compares, captures and cleans. The history table goes in the first one. MySQL and Oracle: `[]`, as LiftOff manages the database each environment's URL names (MySQL) or the schema of the user it signs in as (Oracle) |
+| `schemas` | `["public"]` or `["dbo"]` | the schemas LiftOff compares, captures and cleans. The history table goes in the first one. MySQL and Oracle: `[]`, as LiftOff manages the database each environment's URL names (MySQL) or the schema of the user it signs in as (Oracle). SQLite: `[]`, the whole file |
 | `history_table` | `liftoff_schema_history` | the history table's name. Do not change it once databases have history |
-| `lock` | `advisory` | PostgreSQL: how two `migrate` runs at once keep out of each other's way. `advisory` uses a session advisory lock; `table` uses a lease row instead, for PgBouncer in transaction pooling, RDS Proxy and Aurora Limitless. SQL Server always uses an application lock, MySQL a named lock (GET_LOCK), Oracle a row lock held by a second connection |
+| `lock` | `advisory` | PostgreSQL: how two `migrate` runs at once keep out of each other's way. `advisory` uses a session advisory lock; `table` uses a lease row instead, for PgBouncer in transaction pooling, RDS Proxy and Aurora Limitless. SQL Server always uses an application lock, MySQL a named lock (GET_LOCK), Oracle a row lock held by a second connection, SQLite a lease row |
 | `placeholders` | none | `${name}` values for every environment (see [Placeholders](#placeholders)) |
 | `filters` | none | objects to leave out of comparisons (see [Filters](#filters)) |
 
@@ -199,6 +199,27 @@ DDL cannot be rolled back: if it fails part-way, what ran stays, the history rec
 and `liftoff repair` clears it. Scripts with only data changes run in one transaction. LiftOff
 cannot create a scratch schema on Oracle (`create-scratch`): ask for a user of its own for it.
 Data compare leaves LOB columns (CLOB, BLOB) out, and an empty text is NULL in Oracle.
+
+### SQLite
+
+```
+sqlite:data/shop.db          (relative to the project folder)
+sqlite:/srv/app/shop.db
+sqlite:C:/data/shop.db
+jdbc:sqlite:data/shop.db     (the JDBC form works too)
+```
+
+A database is a file; a file that does not exist yet is created. A relative path is relative to the
+project folder, so the CLI, the desktop app and VS Code all open the same file. Nothing to install:
+LiftOff uses the SQLite built into it. Every script runs in a transaction, DDL included, so a failed
+script leaves nothing behind. SQLite's ALTER TABLE only adds, drops and renames columns, so a
+migration that changes a table any other way rebuilds it: a new table, the rows copied, the old one
+dropped and the new one renamed, with foreign keys switched off and in one transaction. The rows of
+the columns both tables have are kept. Foreign keys are checked on LiftOff's connections (SQLite's
+own default is not to). `create-scratch` makes `<file>_scratch.db` next to the dev file. In a
+pipeline, the scratch database is a file in the checkout: no service to start. Data compare shows
+values as SQLite literals (`'text'`, `42`, `X'00ff'`): SQLite keeps a type per value, and the integer
+42 and the text '42' are different values.
 
 `ActiveDirectoryPassword` (a user name and password for an Entra account) is not supported:
 Microsoft is retiring it, and it cannot do MFA. Entra ID sign-in is the only time LiftOff

@@ -132,7 +132,39 @@ group by c.id, c.email;
 `,
 }
 
-const SCRIPTS: Record<string, Record<string, string>> = { postgresql: POSTGRES, sqlserver: SQLSERVER, mysql: MYSQL, oracle: ORACLE }
+/** The same shop for SQLite. */
+const SQLITE: Record<string, string> = {
+  'V0001__customers.sql': `-- A first table. Versioned scripts run once, in version order.
+create table customers (
+    id integer primary key,
+    email text not null unique,
+    created_at text not null default current_timestamp
+);
+`,
+  'V0002__orders.sql': `create table orders (
+    id integer primary key,
+    customer_id integer not null references customers (id),
+    total numeric not null default 0,
+    placed_at text not null default current_timestamp
+);
+`,
+  'V0003__orders_by_customer.sql': `-- An index; like every script here, it runs in a transaction and is rolled back if it fails.
+create index orders_customer_idx on orders (customer_id);
+`,
+  'U0003__orders_by_customer.sql': `-- Undo for V0003: \`liftoff undo\` runs it when V0003 is the latest applied script.
+drop index if exists orders_customer_idx;
+`,
+  'R__customer_totals.sql': `-- Repeatable: runs again whenever this file changes.
+drop view if exists customer_totals;
+create view customer_totals as
+select c.id, c.email, count(o.id) as orders, coalesce(sum(o.total), 0) as spent
+from customers c
+left join orders o on o.customer_id = c.id
+group by c.id, c.email;
+`,
+}
+
+const SCRIPTS: Record<string, Record<string, string>> = { postgresql: POSTGRES, sqlserver: SQLSERVER, mysql: MYSQL, oracle: ORACLE, sqlite: SQLITE }
 
 const readme = (engine: string) => `# LiftOff sample
 
@@ -142,7 +174,7 @@ Five scripts for a small shop database, in migrations/:
 - U0003 undoes V0003
 - R__customer_totals is a view, run again whenever the file changes
 
-To run them, add an environment (a ${engineById(engine).name} database you may write to), then run the pending
+To run them, add an environment (${engine === 'sqlite' ? 'a database file, e.g. sqlite:shop.db' : `a ${engineById(engine).name} database you may write to`}), then run the pending
 scripts. Change the database by hand and compare it with the scripts to see a migration written for you.
 `
 

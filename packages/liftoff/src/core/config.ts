@@ -119,6 +119,7 @@ export class Config {
         const v = env[key]
         if (v !== undefined) env[key] = tryInterpolate(v)
       }
+      env.url = anchored(root, env.url)
       env.password ??= keychainGet(root, name)
       environments.set(name, env)
     }
@@ -131,7 +132,7 @@ export class Config {
       const role = process.env[`LIFTOFF_ENV_${m[1]}_ROLE`] ?? 'test'
       if (!ROLES.includes(role as Role)) throw configError(`LIFTOFF_ENV_${m[1]}_ROLE must be dev, scratch, test or prod`)
       environments.set(m[1].toLowerCase(), {
-        url,
+        url: anchored(root, url),
         user: process.env[`LIFTOFF_ENV_${m[1]}_USER`],
         password: process.env[`LIFTOFF_ENV_${m[1]}_PASSWORD`],
         role: role as Role,
@@ -469,6 +470,16 @@ export function applyEnvVars(name: string, env: Environment, get: (k: string) =>
   if (url !== undefined) env.url = url
   if (user !== undefined) env.user = user
   if (password !== undefined) env.password = password
+}
+
+/**
+ * SQLite: a relative file path in a URL is relative to the project folder, so the CLI, the desktop
+ * app and VS Code open the same file wherever they run from.
+ */
+export function anchored(root: string, url: string): string {
+  const m = /^((?:jdbc:)?sqlite:)(.*)$/i.exec(url.trim())
+  if (!m || m[2].includes('${') || m[2] === ':memory:' || m[2].startsWith('//')) return url
+  return path.isAbsolute(m[2]) || /^[A-Za-z]:[\\/]/.test(m[2]) ? url : `sqlite:${path.resolve(root, m[2]).replaceAll('\\', '/')}`
 }
 
 /** `${env.NAME}` resolves from environment variables; a missing one is an error. */

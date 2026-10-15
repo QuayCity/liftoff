@@ -4,12 +4,12 @@
 
 import type { Environment, LockMode } from './config.ts'
 import { configError, connectError } from './errors.ts'
-import { mysqlNeedsNoTransaction, needsNoTransaction, oracleNeedsNoTransaction, tsqlNeedsNoTransaction } from './migration.ts'
+import { mysqlNeedsNoTransaction, needsNoTransaction, oracleNeedsNoTransaction, sqliteNeedsNoTransaction, tsqlNeedsNoTransaction } from './migration.ts'
 
 /** As liftoff.toml names it (`engine = "postgresql"`). */
-export type EngineId = 'postgresql' | 'sqlserver' | 'mysql' | 'oracle'
+export type EngineId = 'postgresql' | 'sqlserver' | 'mysql' | 'oracle' | 'sqlite'
 /** As people read it. */
-export type EngineName = 'PostgreSQL' | 'SQL Server' | 'MySQL' | 'Oracle'
+export type EngineName = 'PostgreSQL' | 'SQL Server' | 'MySQL' | 'Oracle' | 'SQLite'
 
 export type ServerInfo = { version: string; user: string; database: string }
 
@@ -189,6 +189,12 @@ export const ENGINES: EngineInfo[] = [
     // Only LiftOff's own (lower-case) table names are written by the runner: always quoted.
     quote: (s) => `"${s.replaceAll('"', '""')}"`, schemas: [],
     open: async (n, e) => (await import('./oracle.ts')).OracleConn.open(n, e),
+  },
+  {
+    id: 'sqlite', name: 'SQLite', tag: 'lite', matches: (u) => /^(jdbc:)?sqlite:/i.test(u.trim()), example: 'sqlite:data/shop.db',
+    begin: 'BEGIN', currentUser: "'liftoff'", true: '1', needsNoTransaction: sqliteNeedsNoTransaction,
+    quote: (s) => `"${s.replaceAll('"', '""')}"`, schemas: [],
+    open: async (n, e) => (await import('./sqlite.ts')).SqliteConn.open(n, e),
   },
 ]
 
