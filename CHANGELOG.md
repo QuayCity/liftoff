@@ -5,6 +5,17 @@ workflow publishes that section as the release notes (the desktop app shows them
 What's new) and refuses a tag without one. Keep each list item on one line, and use only
 headings, list items and bold: the app shows nothing else.
 
+## 0.5.1
+
+### New
+- **LiftOff has a new home: github.com/QuayCity/liftoff.** Releases, the documentation and the issues are there from now on, and the desktop app looks for its updates there.
+- **The documentation covers every engine**: connections, how a failed script behaves, what is compared and the schema model files for PostgreSQL, SQL Server, MySQL, Oracle and SQLite.
+- **New screenshots** of the current screens in the README and the desktop app guide.
+
+### Good to know
+- **A desktop app from before 0.5.1 does not find this update by itself**: it still asks the old address. Download LiftOff-Setup-0.5.1.exe (Windows) or the AppImage (Linux) once from the new Releases page; it updates itself from then on.
+- **Pipelines written by liftoff ci** download LiftOff from the old address. Run liftoff ci again with --write, or change the address in the workflow to github.com/QuayCity/liftoff.
+
 ## 0.5.0
 
 ### New

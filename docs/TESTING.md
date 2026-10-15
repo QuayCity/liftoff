@@ -21,7 +21,7 @@ Install:
 Then:
 
 ```sh
-gh repo clone sanderstad/liftoff LiftOff-public
+gh repo clone QuayCity/liftoff LiftOff-public
 cd LiftOff-public
 docker compose up -d                      # PostgreSQL :55432, PgBouncer :56432, SQL Server :51433
 

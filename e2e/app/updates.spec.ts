@@ -49,7 +49,7 @@ async function github(digest: string, zip?: Buffer) {
     if (req.url === '/latest') {
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({
-        tag_name: 'v9.9.9', html_url: 'https://github.com/sanderstad/liftoff/releases/tag/v9.9.9', published_at: '2027-01-05T10:00:00Z',
+        tag_name: 'v9.9.9', html_url: 'https://github.com/QuayCity/liftoff/releases/tag/v9.9.9', published_at: '2027-01-05T10:00:00Z',
         body: ['## What changed', '* Something new in 9.9.9'].join(String.fromCharCode(10)),
         assets: [
           { name: 'LiftOff-Setup-9.9.9.exe', browser_download_url: `${base}/file`, size: setup.length, digest: `sha256:${digest}` },
@@ -127,7 +127,7 @@ test("U-H4 the first start after an update offers What's new: the release notes,
       shell.openExternal = async (url: string) => void ((globalThis as { opened?: string }).opened = url)
     })
     await page.getByRole('button', { name: `What's new in ${version}`, exact: true }).click()
-    expect(await app.evaluate(() => (globalThis as { opened?: string }).opened)).toBe(`https://github.com/sanderstad/liftoff/releases/tag/v${version}`)
+    expect(await app.evaluate(() => (globalThis as { opened?: string }).opened)).toBe(`https://github.com/QuayCity/liftoff/releases/tag/v${version}`)
     await expect(page.getByRole('button', { name: /What's new/ })).toBeHidden()
     expect(JSON.parse(fs.readFileSync(settingsFile, 'utf8')).last_version).toBe(version)
   } finally {

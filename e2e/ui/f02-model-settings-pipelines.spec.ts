@@ -48,7 +48,7 @@ test('S17 the workflow follows the chosen stages and installs LiftOff from its r
   const preview = page.getByRole('region', { name: 'Workflow preview' })
   await expect(preview).toContainText("liftoff --environment 'staging' migrate")
   await expect(preview).toContainText('needs: staging')
-  await expect(page.getByLabel('Install command')).toHaveValue(/github\.com\/sanderstad\/liftoff\/releases\/latest\/download\/liftoff-linux-x64/)
+  await expect(page.getByLabel('Install command')).toHaveValue(/github\.com\/QuayCity\/liftoff\/releases\/latest\/download\/liftoff-linux-x64/)
   await page.getByRole('checkbox', { name: 'production (prod)' }).click()
   await expect(preview).not.toContainText('production')
   await expectNoA11yViolations(page, 'Pipelines')

@@ -6,7 +6,7 @@ import { Button, Checkbox, Field, Input, RadioGroup, Switch } from '../ui/contro
 import { Card, CodeBlock, EmptyState, InlineAlert } from '../ui/display'
 import { useToast } from '../ui/overlays'
 
-const DEFAULT_INSTALL = 'curl -fsSL -o liftoff https://github.com/sanderstad/liftoff/releases/latest/download/liftoff-linux-x64 && sudo install -m 755 liftoff /usr/local/bin/liftoff'
+const DEFAULT_INSTALL = 'curl -fsSL -o liftoff https://github.com/QuayCity/liftoff/releases/latest/download/liftoff-linux-x64 && sudo install -m 755 liftoff /usr/local/bin/liftoff'
 const secret = (env: string, field: string) => `LIFTOFF_ENV_${env.toUpperCase().replaceAll('-', '_')}_${field}`
 
 export function Pipelines({ project }: { project: Project }) {

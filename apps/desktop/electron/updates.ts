@@ -31,9 +31,9 @@ export type UpdateState =
 export type LatestRelease = { version: string; page: string; notes: string; published: string | null }
 export type UpdateInfo = { mode: UpdateMode; current: string; status: UpdateState; updated?: string; latest?: LatestRelease }
 
-const LATEST = 'https://api.github.com/repos/sanderstad/liftoff/releases/latest'
+const LATEST = 'https://api.github.com/repos/QuayCity/liftoff/releases/latest'
 const EVERY = 6 * 60 * 60 * 1000
-const NOTES = (v: string) => `https://github.com/sanderstad/liftoff/releases/tag/v${v}`
+const NOTES = (v: string) => `https://github.com/QuayCity/liftoff/releases/tag/v${v}`
 
 export class Updater {
   private status: UpdateState = { state: 'idle' }

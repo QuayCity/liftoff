@@ -170,7 +170,7 @@ const fakeUpdate = (() => {
   let info: UpdateInfo = { mode: 'auto', current: '0.1.0', status: { state: 'idle' } }
   const shown = new URLSearchParams(location.search).get('update')
   const latest: LatestRelease = {
-    version: '0.2.0', page: 'https://github.com/sanderstad/liftoff/releases/tag/v0.2.0', published: '2026-11-02T09:00:00Z',
+    version: '0.2.0', page: 'https://github.com/QuayCity/liftoff/releases/tag/v0.2.0', published: '2026-11-02T09:00:00Z',
     notes: `## What's Changed
 * Schema model files are named <type>/<schema>.<name>.sql
 * The desktop app updates itself
@@ -198,7 +198,7 @@ const fakeUpdate = (() => {
       }
       if (action === 'check') {
         if (!info.latest) {
-          const page = `https://github.com/sanderstad/liftoff/releases/tag/v${info.current}`
+          const page = `https://github.com/QuayCity/liftoff/releases/tag/v${info.current}`
           info = { ...info, latest: { version: info.current, page, published: '2026-10-13T07:10:55Z', notes: `## What's Changed
 * The first release` } }
         }

@@ -27,7 +27,7 @@ You do not need Java, .NET, Node.js or any database driver: the program carries 
 ## The command-line program
 
 Download the file for your platform from the project's
-[Releases](https://github.com/sanderstad/liftoff/releases) page:
+[Releases](https://github.com/QuayCity/liftoff/releases) page:
 
 | platform | file |
 | --- | --- |
@@ -39,14 +39,14 @@ Rename it to `liftoff` (`liftoff.exe` on Windows) and put it in a folder on your
 
 ```sh
 # Linux and macOS
-curl -fsSL -o liftoff https://github.com/sanderstad/liftoff/releases/latest/download/liftoff-linux-x64
+curl -fsSL -o liftoff https://github.com/QuayCity/liftoff/releases/latest/download/liftoff-linux-x64
 sudo install -m 755 liftoff /usr/local/bin/liftoff
 ```
 
 ```powershell
 # Windows, PowerShell
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Programs\liftoff" | Out-Null
-Invoke-WebRequest https://github.com/sanderstad/liftoff/releases/latest/download/liftoff-win-x64.exe `
+Invoke-WebRequest https://github.com/QuayCity/liftoff/releases/latest/download/liftoff-win-x64.exe `
   -OutFile "$env:LOCALAPPDATA\Programs\liftoff\liftoff.exe"
 # then add that folder to your PATH (Settings > System > About > Advanced system settings > Environment Variables)
 ```
@@ -54,7 +54,7 @@ Invoke-WebRequest https://github.com/sanderstad/liftoff/releases/latest/download
 Check it:
 
 ```sh
-liftoff --version     # liftoff 0.5.0
+liftoff --version     # liftoff 0.5.1
 liftoff --help        # the rocket and every command
 ```
 
@@ -119,7 +119,7 @@ See [The desktop app](desktop-app.md).
 For working on the app, with Node.js 24 and git:
 
 ```sh
-git clone https://github.com/sanderstad/liftoff.git
+git clone https://github.com/QuayCity/liftoff.git
 cd liftoff/apps/desktop
 npm install
 npm start              # build and run
