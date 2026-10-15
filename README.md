@@ -11,7 +11,7 @@
 
 Change your dev database the way you always do. LiftOff writes the migration script, shows exactly
 what it will change, and runs it on every environment. One file to install, nothing else to set
-up. PostgreSQL, SQL Server and MySQL. Free and open source (MIT).
+up. PostgreSQL, SQL Server, MySQL and Oracle. Free and open source (MIT).
 
 **[Get started →](#quick-start)**
 

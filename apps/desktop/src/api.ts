@@ -7,16 +7,16 @@ export type ErrorReport = { code: string; exit_code: number; message: string; di
 export type EnvView = { name: string; role: Role; url: string; user: string | null; has_password: boolean; allow_clean: boolean; /** in liftoff.toml (else this computer only) */ shared: boolean }
 export type Filter = { action: 'include' | 'exclude'; object: string; pattern: string }
 export type LockMode = 'advisory' | 'table'
-export type Engine = 'postgresql' | 'sqlserver' | 'mysql'
-const ENGINE_NAMES: Record<string, string> = { postgresql: 'PostgreSQL', sqlserver: 'SQL Server', mysql: 'MySQL' }
+export type Engine = 'postgresql' | 'sqlserver' | 'mysql' | 'oracle'
+const ENGINE_NAMES: Record<string, string> = { postgresql: 'PostgreSQL', sqlserver: 'SQL Server', mysql: 'MySQL', oracle: 'Oracle' }
 export const engineName = (engine: string) => ENGINE_NAMES[engine] ?? 'PostgreSQL'
 /** The engine and its schemas, as the status bar shows them (none: the engine manages the database the URL names). */
 export const engineAndSchemas = (p: { engine: string; schemas: string[] }) => (p.schemas.length ? `${engineName(p.engine)} · ${p.schemas.join(', ')}` : engineName(p.engine))
 /** An example connection URL for the project's engine, for placeholders and help. */
 export const urlExample = (engine: string) =>
-  engine === 'sqlserver' ? 'sqlserver://localhost:1433;databaseName=shop;encrypt=true;trustServerCertificate=true' : engine === 'mysql' ? 'mysql://localhost:3306/shop' : 'postgres://localhost:5432/shop'
+  engine === 'sqlserver' ? 'sqlserver://localhost:1433;databaseName=shop;encrypt=true;trustServerCertificate=true' : engine === 'mysql' ? 'mysql://localhost:3306/shop' : engine === 'oracle' ? 'oracle://localhost:1521/FREEPDB1' : 'postgres://localhost:5432/shop'
 /** The engine a connection URL points at. */
-export const engineOfUrl = (url: string): Engine => (/^(jdbc:)?sqlserver:\/\//i.test(url.trim()) ? 'sqlserver' : /^(jdbc:)?mysql:\/\//i.test(url.trim()) ? 'mysql' : 'postgresql')
+export const engineOfUrl = (url: string): Engine => (/^(jdbc:)?sqlserver:\/\//i.test(url.trim()) ? 'sqlserver' : /^(jdbc:)?mysql:\/\//i.test(url.trim()) ? 'mysql' : /^(oracle:\/\/|jdbc:oracle:)/i.test(url.trim()) ? 'oracle' : 'postgresql')
 export type ProjectSettings = { name: string; engine: string; migrations: string; schemas: string[]; history_table: string; filters: Filter[]; lock: LockMode }
 export type Project = {
   root: string; name: string; engine: string; schemas: string[]; migrations: string; history_table: string; filters: Filter[]; lock: LockMode; environments: EnvView[]
@@ -570,7 +570,7 @@ const fakeApi: Api = {
     return { statements: 135 }
   },
   dataClose: async () => {},
-  projectInit: async (path, name, engine) => ({ ...fakeProject(), root: path, name, engine, schemas: engine === 'mysql' ? [] : [engine === 'sqlserver' ? 'dbo' : 'public'], environments: [] }),
+  projectInit: async (path, name, engine) => ({ ...fakeProject(), root: path, name, engine, schemas: engine === 'mysql' || engine === 'oracle' ? [] : [engine === 'sqlserver' ? 'dbo' : 'public'], environments: [] }),
   projectOpen: async (path) => {
     await wait()
     if (path.includes('old')) throw fail('LIFTOFF_CONFIG', `no liftoff.toml in ${path}; run \`liftoff init\` first`, 2)

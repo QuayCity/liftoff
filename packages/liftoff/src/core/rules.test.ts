@@ -84,6 +84,11 @@ test('MySQL: backtick names, # comments and backslash escapes do not count', () 
   assert.deepEqual(run('ALTER TABLE `t` DROP COLUMN `x`;', 'mysql'), ['drop-column:1'])
 })
 
+test("Oracle: q'[…]' strings do not count, and a / line ends a statement", () => {
+  assert.deepEqual(run("INSERT INTO log VALUES (q'[it's; DROP TABLE b]');", 'oracle'), [])
+  assert.deepEqual(run('BEGIN\n  NULL;\nEND;\n/\nDELETE FROM t\n', 'oracle'), ['delete-without-where:5'])
+})
+
 test('sensitive column names, naming patterns and the undo-script rule', () => {
   assert.deepEqual(run('CREATE TABLE p (id int PRIMARY KEY, customer_ssn text, DateOfBirth date, iban text, name text);'), [
     'sensitive-columns:1',

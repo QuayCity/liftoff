@@ -162,7 +162,7 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
                 {(a) => <Input {...a} value={fields.instance} onChange={(e) => set({ instance: e.target.value })} spellCheck={false} />}
               </Field>
             )}
-            <Field label="Database" error={databaseError || undefined}>
+            <Field label={engine === 'oracle' ? 'Service name' : 'Database'} help={engine === 'oracle' ? 'The database service, e.g. FREEPDB1 or ORCLPDB1. LiftOff manages the schema of the user below.' : undefined} error={databaseError || undefined}>
               {(a) => <Input {...a} value={fields.database} onChange={(e) => set({ database: e.target.value })} placeholder="shop" spellCheck={false} />}
             </Field>
             {sqlserver ? (
@@ -175,14 +175,25 @@ export function ConnectionDialog({ open, onOpenChange, project, editing, default
               <Field label="SSL">
                 {(a) => (
                   <Select {...a} value={fields.sslmode} onChange={(e) => set({ sslmode: e.target.value })}>
-                    <option value="">When the server offers it (default)</option>
-                    {engine === 'mysql' ? (
+                    {engine === 'oracle' ? (
                       <>
+                        <option value="">Off (default)</option>
+                        <option value="require">On (TLS), and verify the certificate</option>
+                      </>
+                    ) : engine === 'mysql' ? (
+                      <>
+                        <option value="">When the server offers it (default)</option>
                         <option value="require">Always</option>
                         <option value="verify-full">Always, and verify the certificate</option>
+                        <option value="disable">Off</option>
                       </>
-                    ) : <option value="require">Always, and verify the certificate</option>}
-                    <option value="disable">Off</option>
+                    ) : (
+                      <>
+                        <option value="">When the server offers it (default)</option>
+                        <option value="require">Always, and verify the certificate</option>
+                        <option value="disable">Off</option>
+                      </>
+                    )}
                   </Select>
                 )}
               </Field>

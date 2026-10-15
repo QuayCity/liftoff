@@ -8,6 +8,8 @@ import type { Conn, EngineName } from './db.ts'
 import * as ms from './msdiff.ts'
 import { MySqlConn, quote as myQuote, withDatabase as myWithDatabase } from './mysql.ts'
 import * as my from './mysqldiff.ts'
+import type { OracleConn } from './oracle.ts'
+import * as ora from './oradiff.ts'
 import * as pgd from './pgdiff.ts'
 import { PgConn, quoteIdent, withDatabase as pgWithDatabase } from './postgres.ts'
 import { SqlServerConn, quote, withDatabase as msWithDatabase } from './sqlserver.ts'
@@ -86,8 +88,22 @@ const mysql: SchemaOps = {
   },
 }
 
+const oracle: SchemaOps = {
+  name: 'Oracle',
+  introspect: (c, schemas, table) => ora.introspect(c as OracleConn, schemas, table),
+  applyFilters: (m, p) => ora.applyFilters(m as ora.OraModel, p),
+  diff: (a, b) => ora.diff(a as ora.OraModel, b as ora.OraModel),
+  createAll: (m) => ora.createAll(m as ora.OraModel),
+  files: (m) => ora.files(m as ora.OraModel),
+  // The schema is the user signed in as: another one is another user, not another URL.
+  withDatabase: (url) => url,
+  async createDatabase(_c, database, _taken, noRights) {
+    throw noRights(`on Oracle a scratch schema is a user of its own; ask a DBA to create a user such as ${database.toUpperCase()}`)
+  },
+}
+
 /** By the engine's tag (EngineInfo.tag in db.ts), as snapshot files store it. */
-export const ops: Record<string, SchemaOps> = { pg, ms: sqlserver, my: mysql }
+export const ops: Record<string, SchemaOps> = { pg, ms: sqlserver, my: mysql, ora: oracle }
 
 /** The schema operations for a connection's engine. */
 export function opsFor(engine: EngineName): [tag: string, SchemaOps] {

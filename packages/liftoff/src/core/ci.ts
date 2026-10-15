@@ -53,6 +53,17 @@ function scratchService(engine: string): { service: string; url: string; prepare
       prepare: '',
     }
   }
+  if (engine === 'oracle') {
+    // gvenzl's Oracle Free images (Oracle's free edition), made for CI: APP_USER is the scratch schema.
+    return {
+      service:
+        '    services:\n      scratch:\n        image: gvenzl/oracle-free:23-slim-faststart\n' +
+        `        env:\n          ORACLE_PASSWORD: '${SCRATCH_PASSWORD}'\n          APP_USER: scratch\n          APP_USER_PASSWORD: '${SCRATCH_PASSWORD}'\n        ports: ['1521:1521']\n` +
+        "        options: >-\n          --health-cmd healthcheck.sh --health-interval 5s --health-timeout 5s --health-retries 60\n",
+      url: `oracle://scratch:${SCRATCH_PASSWORD}@localhost:1521/FREEPDB1`,
+      prepare: '',
+    }
+  }
   return {
     service:
       '    services:\n      scratch:\n        image: postgres:16\n' +
@@ -220,6 +231,10 @@ export function azurePipelines(cfg: Config, o: CiOptions): string {
             '        for _ in $(seq 1 60); do\n' +
             // Over TCP: while the image initialises, its server listens on the socket only.
             `          docker exec scratch mysqladmin ping -h 127.0.0.1 -uroot '-p${SCRATCH_PASSWORD}' --silent && exit 0\n`
+        : engine === 'oracle'
+          ? `        docker run -d --name scratch -e 'ORACLE_PASSWORD=${SCRATCH_PASSWORD}' -e APP_USER=scratch -e 'APP_USER_PASSWORD=${SCRATCH_PASSWORD}' -p 1521:1521 gvenzl/oracle-free:23-slim-faststart\n` +
+            '        for _ in $(seq 1 60); do\n' +
+            '          docker exec scratch healthcheck.sh && exit 0\n'
           : `        docker run -d --name scratch -e 'POSTGRES_PASSWORD=${SCRATCH_PASSWORD}' -e POSTGRES_DB=scratch -p 5432:5432 postgres:16\n` +
             '        for _ in $(seq 1 30); do\n' +
             // Over TCP: while the image initialises, its server listens on the socket only.

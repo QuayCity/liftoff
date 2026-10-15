@@ -48,6 +48,7 @@ const ENGINE_BADGES: Record<string, { text: string; name: string; className: str
   postgresql: { text: 'PG', name: 'PostgreSQL', className: 'bg-accent-subtle text-accent' },
   sqlserver: { text: 'MS', name: 'SQL Server', className: 'bg-warning-subtle text-warning' },
   mysql: { text: 'MY', name: 'MySQL', className: 'bg-success-subtle text-success' },
+  oracle: { text: 'OR', name: 'Oracle', className: 'bg-danger-subtle text-danger' },
 }
 
 /**

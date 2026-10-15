@@ -41,7 +41,7 @@ Plain-SQL database migrations, written from your dev database, next to your code
   tables, and shows the rows that differ in a grid, a page at a time. Then open the INSERT /
   UPDATE / DELETE script or apply it to the target. Tables without a key (heaps) are compared as
   whole rows.
-- **PostgreSQL, SQL Server and MySQL,** including Azure SQL with Microsoft Entra ID sign-in (your `az login`
+- **PostgreSQL, SQL Server, MySQL and Oracle,** including Azure SQL with Microsoft Entra ID sign-in (your `az login`
   account, a browser sign-in with MFA, a service principal or a managed identity).
 
 The extension comes with the `liftoff` program and runs it for you; nothing is sent anywhere but

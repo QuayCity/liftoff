@@ -4,12 +4,12 @@
 
 import type { Environment, LockMode } from './config.ts'
 import { configError, connectError } from './errors.ts'
-import { mysqlNeedsNoTransaction, needsNoTransaction, tsqlNeedsNoTransaction } from './migration.ts'
+import { mysqlNeedsNoTransaction, needsNoTransaction, oracleNeedsNoTransaction, tsqlNeedsNoTransaction } from './migration.ts'
 
 /** As liftoff.toml names it (`engine = "postgresql"`). */
-export type EngineId = 'postgresql' | 'sqlserver' | 'mysql'
+export type EngineId = 'postgresql' | 'sqlserver' | 'mysql' | 'oracle'
 /** As people read it. */
-export type EngineName = 'PostgreSQL' | 'SQL Server' | 'MySQL'
+export type EngineName = 'PostgreSQL' | 'SQL Server' | 'MySQL' | 'Oracle'
 
 export type ServerInfo = { version: string; user: string; database: string }
 
@@ -181,6 +181,14 @@ export const ENGINES: EngineInfo[] = [
     begin: 'START TRANSACTION', currentUser: "SUBSTRING_INDEX(CURRENT_USER(), '@', 1)", true: '1', needsNoTransaction: mysqlNeedsNoTransaction, ddlCommits: true,
     quote: (s) => `\`${s.replaceAll('`', '``')}\``, schemas: [],
     open: async (n, e) => (await import('./mysql.ts')).MySqlConn.open(n, e),
+  },
+  {
+    id: 'oracle', name: 'Oracle', tag: 'ora', matches: (u) => /^(oracle:\/\/|jdbc:oracle:)/i.test(u.trim()), example: 'oracle://localhost:1521/FREEPDB1',
+    // Oracle starts a transaction by itself; SET TRANSACTION marks where the runner's begins.
+    begin: 'SET TRANSACTION READ WRITE', currentUser: 'USER', true: '1', needsNoTransaction: oracleNeedsNoTransaction, ddlCommits: true,
+    // Only LiftOff's own (lower-case) table names are written by the runner: always quoted.
+    quote: (s) => `"${s.replaceAll('"', '""')}"`, schemas: [],
+    open: async (n, e) => (await import('./oracle.ts')).OracleConn.open(n, e),
   },
 ]
 

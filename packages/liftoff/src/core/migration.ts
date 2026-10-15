@@ -271,6 +271,14 @@ export function mysqlNeedsNoTransaction(sql: string): boolean {
   return /\b(CREATE|ALTER|DROP|RENAME|TRUNCATE|GRANT|REVOKE|LOCK\s+TABLES?)\b/i.test(sql.replace(/--[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\//g, ''))
 }
 
+/**
+ * Oracle commits DDL at once (and creating a PL/SQL unit is DDL), so a script with DDL cannot be
+ * rolled back: it runs outside a transaction (a failure is then recorded for repair).
+ */
+export function oracleNeedsNoTransaction(sql: string): boolean {
+  return /\b(CREATE|ALTER|DROP|RENAME|TRUNCATE|GRANT|REVOKE|COMMENT\s+ON|PURGE|FLASHBACK|ANALYZE|AUDIT|NOAUDIT)\b/i.test(sql.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, ''))
+}
+
 /** SQL Server statements that cannot run inside a transaction. */
 export function tsqlNeedsNoTransaction(sql: string): boolean {
   const up = sql.toUpperCase()

@@ -63,7 +63,7 @@ test('SQL Server projects start in dbo; unknown engines are refused', () => {
   const dir = tmp()
   init(dir, 'shop', 'sqlserver')
   assert.deepEqual(Config.load(dir).project.schemas, ['dbo'])
-  assert.throws(() => init(tmp(), 'x', 'oracle'), /not supported/)
+  assert.throws(() => init(tmp(), 'x', 'db2'), /not supported/)
 })
 
 test('reads a liftoff.toml written by the Rust version', () => {

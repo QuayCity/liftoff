@@ -44,3 +44,12 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: liftoff
     ports: ['53306:3306']
+
+  oracle:
+    # Oracle Database Free, as gvenzl packages it; the tests create their users through SYSTEM.
+    image: gvenzl/oracle-free:23-slim
+    container_name: liftoff-oracle
+    restart: unless-stopped
+    environment:
+      ORACLE_PASSWORD: liftoff
+    ports: ['51621:1521']

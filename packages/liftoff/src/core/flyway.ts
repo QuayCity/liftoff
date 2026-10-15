@@ -132,6 +132,8 @@ export function jdbcToUrl(jdbc: string): string | undefined {
   if (j.startsWith('jdbc:sqlserver:')) return `sqlserver:${j.slice('jdbc:sqlserver:'.length)}`
   // MySQL's JDBC URLs are already URLs; their own settings (useSSL=…) mean nothing to LiftOff.
   if (j.startsWith('jdbc:mysql://')) return `mysql://${j.slice('jdbc:mysql://'.length).split('?')[0]}`
+  // Oracle's JDBC thin URLs are read as they are (oracle.ts parseUrl).
+  if (j.startsWith('jdbc:oracle:thin:')) return j
   if (!j.startsWith('jdbc:postgresql:')) return undefined
   const rest = j.slice('jdbc:postgresql:'.length)
   return `postgres://${rest.startsWith('//') ? rest.slice(2) : rest}`
@@ -195,7 +197,7 @@ export function convert(root: string, name: string, useKeychain = keychainEnable
   const envSchemas = p.envs.find(([, e]) => e.has('schemas'))
   if (!schemas.length && envSchemas) schemas = envSchemas[1].get('schemas')!.split(',').map((s) => s.trim())
   const urls = p.envs.map(([, e]) => e.get('url')?.trim() ?? '')
-  const engine = urls.some((u) => u.startsWith('jdbc:sqlserver:')) ? 'sqlserver' : urls.some((u) => u.startsWith('jdbc:mysql:')) ? 'mysql' : 'postgresql'
+  const engine = urls.some((u) => u.startsWith('jdbc:sqlserver:')) ? 'sqlserver' : urls.some((u) => u.startsWith('jdbc:mysql:')) ? 'mysql' : urls.some((u) => u.startsWith('jdbc:oracle:')) ? 'oracle' : 'postgresql'
   if (defaultSchemaSetting) schemas = [defaultSchemaSetting, ...schemas.filter((s) => s !== defaultSchemaSetting)]
   if (!schemas.length) schemas.push(...defaultSchemas(engine))
   r.schemas = schemas
@@ -236,7 +238,7 @@ export function convert(root: string, name: string, useKeychain = keychainEnable
     }
     const url = jdbcToUrl(interpolateFlyway(jdbc))
     if (url === undefined) {
-      r.not_converted.push(`environment ${envName}: ${jdbc}: LiftOff supports PostgreSQL, SQL Server and MySQL`)
+      r.not_converted.push(`environment ${envName}: ${jdbc}: LiftOff supports PostgreSQL, SQL Server, MySQL and Oracle`)
       continue
     }
     const saveName = envName === 'default' ? 'default' : envName.replace(/[^A-Za-z0-9_-]/g, '_')

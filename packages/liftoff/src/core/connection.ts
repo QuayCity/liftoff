@@ -16,7 +16,7 @@ export type ConnectionFields = {
   authentication: string
   /** SQL Server, Microsoft Entra ID: the directory (tenant) ID */
   tenantId: string
-  /** PostgreSQL and MySQL: prefer (the default), require, verify-full or disable */
+  /** PostgreSQL and MySQL: prefer (the default), require, verify-full or disable. Oracle: require for TLS (tcps) */
   sslmode: string
   /** other settings of the URL, kept as written: `;applicationName=x` or `connect_timeout=5` */
   extra: string
@@ -24,7 +24,7 @@ export type ConnectionFields = {
 
 export const emptyFields = (): ConnectionFields => ({ server: 'localhost', instance: '', port: '', database: '', encrypt: true, trustServerCertificate: false, authentication: 'SqlPassword', tenantId: '', sslmode: '', extra: '' })
 
-export const defaultPort = (engine: string) => (engine === 'sqlserver' ? '1433' : engine === 'mysql' ? '3306' : '5432')
+export const defaultPort = (engine: string) => (engine === 'sqlserver' ? '1433' : engine === 'mysql' ? '3306' : engine === 'oracle' ? '1521' : '5432')
 
 export function buildUrl(engine: string, f: ConnectionFields): string {
   const server = f.server.trim() || 'localhost'
@@ -36,6 +36,13 @@ export function buildUrl(engine: string, f: ConnectionFields): string {
     return `sqlserver://${host};databaseName=${f.database.trim()};encrypt=${f.encrypt};trustServerCertificate=${f.trustServerCertificate}${auth}${tenant}${f.extra}`
   }
   const host = server.includes(':') ? `[${server}]` : server
+  if (engine === 'oracle') {
+    // The database field holds the service name; TLS is ?ssl=true.
+    const q = new URLSearchParams(f.extra)
+    if (f.sslmode === 'require') q.set('ssl', 'true')
+    const qs = q.toString()
+    return `oracle://${host}${port ? `:${port}` : ''}/${encodeURIComponent(f.database.trim())}${qs ? `?${qs}` : ''}`
+  }
   const query = new URLSearchParams(f.extra)
   if (f.sslmode) query.set('sslmode', f.sslmode)
   const q = query.toString()
@@ -82,7 +89,7 @@ export function splitUrl(engine: string, url: string): (ConnectionFields & { use
     }
     return { ...f, ...(user !== undefined && { user }) }
   }
-  if (!(engine === 'mysql' ? /^mysql:\/\//i : /^postgres(ql)?:\/\//i).test(u)) return undefined
+  if (!(engine === 'mysql' ? /^mysql:\/\//i : engine === 'oracle' ? /^oracle:\/\//i : /^postgres(ql)?:\/\//i).test(u)) return undefined
   let parsed: URL
   try {
     parsed = new URL(u)
@@ -93,8 +100,9 @@ export function splitUrl(engine: string, url: string): (ConnectionFields & { use
   f.server = decodeURIComponent(parsed.hostname.replace(/^\[|\]$/g, '')) || 'localhost'
   f.port = parsed.port
   f.database = decodeURIComponent(parsed.pathname.replace(/^\//, ''))
-  f.sslmode = parsed.searchParams.get('sslmode') ?? ''
+  f.sslmode = parsed.searchParams.get('sslmode') ?? (/^(true|1|yes)$/i.test(parsed.searchParams.get('ssl') ?? '') && engine === 'oracle' ? 'require' : '')
   parsed.searchParams.delete('sslmode')
+  if (engine === 'oracle') parsed.searchParams.delete('ssl')
   f.extra = parsed.searchParams.toString()
   return { ...f, ...(parsed.username && { user: decodeURIComponent(parsed.username) }) }
 }
