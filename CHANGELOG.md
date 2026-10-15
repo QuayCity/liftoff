@@ -5,6 +5,20 @@ workflow publishes that section as the release notes (the desktop app shows them
 What's new) and refuses a tag without one. Keep each list item on one line, and use only
 headings, list items and bold: the app shows nothing else.
 
+## 0.5.0
+
+### New
+- **MySQL.** Everything LiftOff does now works on MySQL too: migrations, Compare, writing migrations from your dev database, drift checks, the schema model and data compare. Amazon RDS and Aurora MySQL, Azure Database for MySQL and Google Cloud SQL for MySQL work the same way.
+- **Oracle.** The same for Oracle, with nothing extra to install: scripts are read the way SQL*Plus reads them, and a procedure or package that does not compile stops the script with Oracle's errors.
+- **SQLite.** The same for SQLite database files, with nothing to install or start. A migration that changes a table in a way SQLite cannot alter rebuilds the table and keeps its rows.
+- **Each project tab shows its database**: PG, MS, MY, OR or LT.
+- **The connection dialog fits the engine**: a service name for Oracle, a database file for SQLite, and the encryption choices each engine offers.
+
+### Good to know
+- **MySQL and Oracle commit changes to tables at once**, so a script that fails part-way cannot be rolled back: the history marks it failed, and repair clears it once the script and the database are fixed. Scripts that only change data still run in one transaction.
+- **MySQL and Oracle projects manage one database or schema each**: the database the connection names (MySQL) or the schema of the user it signs in as (Oracle), so dev, test and prod may have different names.
+- **Data compare on Oracle leaves CLOB and BLOB columns out.**
+
 ## 0.4.2
 
 ### New
