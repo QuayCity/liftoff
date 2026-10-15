@@ -56,12 +56,12 @@ jobs:
         options: >-
           --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pliftoff" --health-interval 2s --health-timeout 5s --health-retries 60
       oracle:
-        image: gvenzl/oracle-free:23-slim-faststart
+        image: gvenzl/oracle-free:23-slim
         env:
           ORACLE_PASSWORD: liftoff
         ports: ['51621:1521']
         options: >-
-          --health-cmd healthcheck.sh --health-interval 5s --health-timeout 5s --health-retries 60
+          --health-cmd healthcheck.sh --health-interval 5s --health-timeout 5s --health-retries 120
     env:
       LIFTOFF_TEST_PG: postgres://postgres:liftoff@localhost:55432
       LIFTOFF_TEST_PGBOUNCER: postgres://postgres:liftoff@localhost:56432
@@ -69,6 +69,10 @@ jobs:
       LIFTOFF_TEST_MYSQL: mysql://root:liftoff@localhost:53306
       LIFTOFF_TEST_ORACLE: oracle://system:liftoff@localhost:51621/FREEPDB1
     steps:
+      # Four database containers and a VS Code download fill the runner's disk: the SDKs these tests do
+      # not use (.NET, Android, Haskell, CodeQL) make room.
+      - name: Make room on the runner
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL && df -h /
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
