@@ -54,6 +54,12 @@ The SQLite tests need nothing: they use files in a temporary folder.
 Tests that need a database skip themselves when its variable is not set. Set
 `LIFTOFF_TEST_KEYCHAIN=1` to also test the operating system's keychain.
 
+## Screenshots
+
+The screenshots in `docs/images/` are taken from the desktop app's screens on their demo data.
+After a change to the screens, make them again: `npm run build` in `apps/desktop`, then
+`node docs/images/render.mjs` (it uses the Playwright from `e2e/`).
+
 ## Pull requests
 
 - One change per pull request, with a test that fails without it.

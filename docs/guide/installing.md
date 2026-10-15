@@ -12,10 +12,12 @@ the one you want: the desktop app's Windows installer gives you the app and the 
 
 ## What you need
 
-- **A database server you can create databases on**: PostgreSQL, SQL Server, MySQL or Oracle (or a SQLite file), including Azure
-  SQL. The automated tests run against PostgreSQL 16 and SQL Server 2022.
+- **A database**: PostgreSQL, SQL Server (including Azure SQL), MySQL (including Amazon RDS and
+  Aurora, Azure Database for MySQL and Cloud SQL), Oracle, or a SQLite file. The automated tests
+  run against PostgreSQL 16, SQL Server 2022, MySQL 8.4, Oracle Database 23 Free and SQLite 3.
 - **One extra empty database for the scratch environment** (see [Concepts](concepts.md#the-scratch-database)).
-  LiftOff can create it for you if your login is allowed to create databases.
+  LiftOff can create it for you if your login is allowed to create databases; on SQLite it is a
+  file next to the dev file. On Oracle the scratch is a user of its own, which a DBA creates.
 - **git** is recommended. LiftOff works without it, but the migrations are meant to live in a
   repository. `renumber`, `rebaseline` (without `--archive`) and the desktop app's Commit screen
   need it.
@@ -52,7 +54,7 @@ Invoke-WebRequest https://github.com/sanderstad/liftoff/releases/latest/download
 Check it:
 
 ```sh
-liftoff --version     # liftoff 0.1.0
+liftoff --version     # liftoff 0.5.0
 liftoff --help        # the rocket and every command
 ```
 
@@ -74,7 +76,8 @@ code --install-extension liftoff-vscode-win32-x64.vsix
 On Windows, if that command opens a VS Code window and does nothing else, use the full path:
 `"%LOCALAPPDATA%\Programs\Microsoft VS Code\bin\code.cmd" --install-extension …`.
 
-The LiftOff rocket appears in the activity bar on the left. See [The VS Code extension](vscode.md).
+The LiftOff rocket appears in the activity bar on the left, and **LiftOff** on the status bar
+opens the whole app in an editor tab. See [The VS Code extension](vscode.md).
 
 ## The desktop app
 

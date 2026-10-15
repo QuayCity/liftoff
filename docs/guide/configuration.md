@@ -85,7 +85,7 @@ Names use letters, digits, `-` and `_`.
 | key | default | what |
 | --- | --- | --- |
 | `url` | required | the connection URL (see below) |
-| `user` | none | the login. It can also be written inside a PostgreSQL URL |
+| `user` | none | the login. It can also be written inside a PostgreSQL, MySQL or Oracle URL. SQLite has no users |
 | `password` | none | better left out: see [Passwords](#passwords) |
 | `role` | `dev` | `dev`, `scratch`, `test` or `prod` (see [Concepts](concepts.md#environments-and-roles)) |
 | `allow_clean` | `false` | whether `liftoff clean` may erase this database. Scratch databases may always be erased |
@@ -155,6 +155,10 @@ sqlserver://myserver.database.windows.net;databaseName=shop;encrypt=true;authent
 The account must be a user in the database:
 `CREATE USER [you@example.com] FROM EXTERNAL PROVIDER;` and a role that may change the schema.
 
+`ActiveDirectoryPassword` (a user name and password for an Entra account) is not supported:
+Microsoft is retiring it, and it cannot do MFA. Entra ID sign-in is the only time LiftOff
+connects to anything besides your databases: Microsoft's sign-in service.
+
 ### MySQL
 
 ```
@@ -220,10 +224,6 @@ own default is not to). `create-scratch` makes `<file>_scratch.db` next to the d
 pipeline, the scratch database is a file in the checkout: no service to start. Data compare shows
 values as SQLite literals (`'text'`, `42`, `X'00ff'`): SQLite keeps a type per value, and the integer
 42 and the text '42' are different values.
-
-`ActiveDirectoryPassword` (a user name and password for an Entra account) is not supported:
-Microsoft is retiring it, and it cannot do MFA. Entra ID sign-in is the only time LiftOff
-connects to anything besides your databases: Microsoft's sign-in service.
 
 ## Passwords
 

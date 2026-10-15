@@ -4,6 +4,11 @@
 
 Plain-SQL database migrations, written from your dev database, next to your code.
 
+- **The whole app in an editor tab.** **Open LiftOff** (the rocket on the status bar) shows every
+  screen of the LiftOff desktop app without leaving VS Code: the Overview of every environment,
+  the changes in your dev database, deploying, Compare for schemas and data, scripts, rules,
+  commits, the history of each object and pipelines. It follows your colour theme and opens every
+  project in the workspace as a tab.
 - **Environments sidebar.** Every environment in `liftoff.toml`, with each migration script and
   whether it ran there: pending, applied, failed, or edited since it ran. Click a script to open it.
 - **Run from the editor.** Run pending migrations, see the exact SQL that would run first, validate,
@@ -27,7 +32,8 @@ Plain-SQL database migrations, written from your dev database, next to your code
 - **Bring an existing project.** Open a folder that another migration tool already manages, with
   `V1__name.sql` scripts and that tool's config file, and the sidebar offers the import: a few
   steps to choose the environments and their roles, a summary of anything that does not carry
-  over, then (on PostgreSQL) copying the old history table so LiftOff knows what already ran. The
+  over, then (on PostgreSQL) copying the old history table so LiftOff knows what already ran (on the
+  other engines, a baseline marks where each database is). The
   old files stay as they are.
 - **Project settings in an editor tab.** **LiftOff: Project Settings** (the gear in the sidebar)
   edits everything: the project, comparison filters, placeholders and every environment, including

@@ -38,7 +38,7 @@ Do this beforehand; it takes about 10 minutes.
 
 4. Make an empty folder `shop-db`.
 5. Arrange the screen: the app on one side, a SQL tool connected to the server on the other.
-   Pick light or dark with the sun / moon button, whichever shows best on the projector.
+   Pick light or dark in the theme menu (top right), whichever shows best on the projector.
 6. Keep this page open on a second screen to copy from.
 
 Running it again? Drop the three databases and `shop_dev_scratch`, create the three again, and

@@ -17,7 +17,7 @@ up. PostgreSQL, SQL Server, MySQL, Oracle and SQLite. Free and open source (MIT)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/changes-dark.png">
-  <img src="docs/images/changes.png" alt="The desktop app comparing a dev database with the migration scripts: three tables and a view differ; the dropped table is unticked and marked data loss; the orders table is shown side by side with its new column and index.">
+  <img src="docs/images/changes.png" alt="The desktop app comparing a dev database with the migration scripts: three tables and a view differ; the dropped table is unticked and marked data loss; the orders table is shown side by side with its new column and index. The sidebar lists every screen: Overview, Changes, Environments, Compare, Scripts, Rules, Commit, History and Pipelines.">
 </picture>
 
 ## Why LiftOff
@@ -25,9 +25,9 @@ up. PostgreSQL, SQL Server, MySQL, Oracle and SQLite. Free and open source (MIT)
 - **Writing every migration by hand is slow and easy to get wrong.** A column renamed in dev, an
   index added in a hurry, a view changed: someone has to remember it all and write it down as
   SQL. LiftOff compares and writes the script; you review it.
-- **Real PostgreSQL setups need care.** A script with `CREATE INDEX CONCURRENTLY` cannot run in a
-  transaction, and a migration lock has to work behind PgBouncer in transaction pooling and on
-  Aurora Limitless. LiftOff handles both.
+- **Every database has its own ways.** A PostgreSQL script with `CREATE INDEX CONCURRENTLY` cannot
+  run in a transaction; MySQL and Oracle commit table changes at once; Oracle's PL/SQL ends with
+  `/`; SQLite can barely alter a table. LiftOff knows each of them, so you write plain SQL.
 - **Setup should be one step.** One program, on a laptop or a CI runner, whatever language the
   rest of your stack is written in.
 
@@ -73,10 +73,11 @@ up. PostgreSQL, SQL Server, MySQL, Oracle and SQLite. Free and open source (MIT)
   saved snapshot, any database by URL. The rows of two databases too, fast on big tables, with the
   INSERT / UPDATE / DELETE script that makes them match. Tables without a key (heaps) are
   compared as whole rows, duplicates included.
-- **Pipelines.** `liftoff ci` writes a GitHub Actions workflow: pull requests get their migration
-  script written (or required) and numbered after main; merges deploy through your environments.
+- **Pipelines.** `liftoff ci` writes a GitHub Actions workflow or an Azure Pipelines file: pull
+  requests get their migration script written (or required) and numbered after main; merges
+  deploy through your environments.
 - **Three ways in.** The command line (every command also answers in JSON), a desktop app, and a
-  VS Code extension.
+  VS Code extension that has the whole desktop app in an editor tab.
 - **Offline.** The program only talks to your databases (and, for Azure SQL with Microsoft Entra
   ID, to Microsoft's sign-in service). Your CI runners only need to reach your databases.
 
@@ -134,23 +135,23 @@ becomes `B0001` again, and each existing database goes through the same check on
 **I already use Flyway. Can I bring my project?** Yes. `liftoff init --from-flyway` converts
 `flyway.toml` / `flyway.conf` (the originals stay), the scripts keep their names and checksums,
 Flyway-style `-key=value` options are accepted, and `import-flyway-history` copies an existing
-`flyway_schema_history` table once (PostgreSQL; on SQL Server, baseline instead).
+`flyway_schema_history` table once (PostgreSQL; on the other engines, baseline instead).
 
 **My database was never under a migration tool.** `liftoff -e prod adopt`, as above.
 
 **What does generating or comparing need?** A scratch database: an empty database on any server
 you have, which LiftOff rebuilds from your scripts to compare against. `liftoff create-scratch`
-makes one next to your dev database.
+makes one next to your dev database (on SQLite, a file next to the dev file).
 
 **Does it send anything anywhere?** No. No telemetry, no LiftOff account. Two exceptions: signing
 in to Azure SQL with Microsoft Entra ID talks to Microsoft's sign-in service, as any SQL Server
 tool does; and the desktop app asks GitHub whether there is a newer LiftOff (switch it off under
-Settings > This app). The command line never checks for updates. Passwords go to
+App settings). The command line never checks for updates. Passwords go to
 your operating system's keychain or come from environment variables, never into `liftoff.toml`.
 
-**Is it ready for production?** It is new (version 0.1). The tests run against real PostgreSQL,
-PgBouncer and SQL Server on every change. Try it on a test environment first, and
-[open an issue](../../issues) for anything that surprises you.
+**Is it ready for production?** It is young (version 0.5). The tests run against real PostgreSQL,
+PgBouncer, SQL Server, MySQL, Oracle and SQLite on every change. Try it on a test environment
+first, and [open an issue](../../issues) for anything that surprises you.
 
 ## Get started
 

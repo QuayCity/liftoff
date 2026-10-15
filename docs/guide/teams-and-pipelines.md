@@ -9,8 +9,9 @@
 | dev and scratch databases | | in `liftoff.user.toml`: everyone has their own |
 
 Each developer has their own dev and scratch database, so nobody's half-finished change shows up
-in someone else's `diff`. A dev database can be a local container: SQL Server and PostgreSQL both
-run in Docker.
+in someone else's `diff`. A dev database can be a local container: PostgreSQL, SQL Server, MySQL and
+Oracle (Oracle Database Free) all run in Docker. SQLite needs no server at all: each developer's
+dev database is a file.
 
 ## Branches
 

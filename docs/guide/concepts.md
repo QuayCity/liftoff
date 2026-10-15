@@ -34,7 +34,7 @@ never edited again: the next change is a new script. That way every database goe
 same steps and ends up the same. [Migration scripts](scripts.md) has the details.
 
 You rarely write them yourself. You change the **dev database** with whatever tool you like
-(SSMS, Azure Data Studio, pgAdmin, psql, an ORM), and `liftoff generate` writes the script by
+(pgAdmin, psql, SSMS, MySQL Workbench, SQL Developer, DB Browser for SQLite, an ORM), and `liftoff generate` writes the script by
 comparing dev with what the existing scripts build. You review it like any other code.
 
 ## Environments and roles
@@ -59,12 +59,16 @@ existing scripts build. The second it finds out by running the scripts on an emp
 with `migrations`, for checking a baseline script, and for checking that the schema model builds.
 
 Any empty database you are allowed to erase will do. It can live on the same server as dev:
-`liftoff create-scratch` makes one next to the dev database and saves it as an environment.
+`liftoff create-scratch` makes one next to the dev database and saves it as an environment. On
+SQLite it is a file next to the dev file; on Oracle, where a schema is a user, it is a user of its
+own that a DBA creates.
 
 ## The history table
 
-Every database the scripts run on gets a table, `liftoff_schema_history` (in `dbo` on SQL Server
-and `public` on PostgreSQL, unless you choose another schema), with one row per script that ran:
+Every database the scripts run on gets a table, `liftoff_schema_history` (in `public` on
+PostgreSQL and `dbo` on SQL Server, unless you choose another schema; on MySQL in the database the
+URL names, on Oracle in the signed-in user's schema, on SQLite in the file), with one row per
+script that ran:
 its version, file name, checksum, who ran it, when, how long it took and whether it worked.
 
 That table is how LiftOff knows what is **pending** on each database. It is also how it notices
@@ -76,7 +80,7 @@ a script that was **edited after it ran**: the checksum no longer matches the fi
 | --- | --- |
 | pending | not run here yet; the next `migrate` runs it |
 | applied | ran and worked. `applied (changed!)`: the file was edited after it ran |
-| failed | ran and failed (a PostgreSQL script that ran outside a transaction can leave this) |
+| failed | ran and failed, part-way: a script that ran outside a transaction (on PostgreSQL one with `CONCURRENTLY`; on MySQL and Oracle any script with DDL) can leave this. `repair` clears it |
 | outdated | a repeatable script whose file changed since it ran; the next `migrate` runs it again |
 | ignored | older than the latest applied script; `migrate --out-of-order` runs it |
 | missing | ran here, but the file is gone |

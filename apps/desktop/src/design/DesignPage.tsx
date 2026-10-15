@@ -16,10 +16,10 @@ const changes: ObjectChange[] = [
 ]
 type Row = { version: string; description: string; state: MigrationState; on: string; ms: string }
 const rows: Row[] = [
-  { version: '20261001.0912', description: 'create orders', state: 'applied', on: '2026-10-01 09:14', ms: '84 ms' },
-  { version: '20261003.1530', description: 'add order lines', state: 'applied', on: '2026-10-03 15:41', ms: '212 ms' },
-  { version: '20261007.1102', description: 'tax function', state: 'failed', on: '2026-10-07 11:05', ms: '9 ms' },
-  { version: '20261008.0840', description: 'daily totals view', state: 'pending', on: '', ms: '' },
+  { version: '0001', description: 'create orders', state: 'applied', on: '2026-10-01 09:14', ms: '84 ms' },
+  { version: '0002', description: 'add order lines', state: 'applied', on: '2026-10-03 15:41', ms: '212 ms' },
+  { version: '0003', description: 'tax function', state: 'failed', on: '2026-10-07 11:05', ms: '9 ms' },
+  { version: '0004', description: 'daily totals view', state: 'pending', on: '', ms: '' },
 ]
 const envs: Env[] = [
   { name: 'local', role: 'Dev', status: 'ok', pending: 0, lastRun: { when: '2 min ago', at: '2026-10-08 10:58' }, drift: 'none' },
@@ -91,7 +91,7 @@ function Page() {
               <Field label="Port" error="Port must be between 1 and 65535.">{(a) => <Input {...a} mono defaultValue="99999" />}</Field>
               <Field label="Password">{(a) => <PasswordInput {...a} defaultValue="hunter2" />}</Field>
               <Field label="Engine">{(a) => <Select {...a}><option>PostgreSQL</option><option disabled>SQL Server (soon)</option></Select>}</Field>
-              <Field label="Version">{(a) => <Input {...a} mono readOnly value="20261008.1104" />}</Field>
+              <Field label="Version">{(a) => <Input {...a} mono readOnly value="0005" />}</Field>
               <Field label="Notes">{(a) => <Textarea {...a} placeholder="Optional" />}</Field>
               <RadioGroup legend="How changes reach other databases" name="style" value={style} onChange={setStyle} options={[
                 { value: 'migrations', label: 'Migration scripts', help: 'Ordered, reviewable SQL files.' },
@@ -151,7 +151,7 @@ function Page() {
 
           <Section title="Migrations table + command bar">
             <Card className="overflow-hidden">
-              <DataTable caption="Migrations on staging" rows={rows} rowKey={(r) => r.version} selectedKey="20261007.1102" onSelect={() => {}} columns={[
+              <DataTable caption="Migrations on staging" rows={rows} rowKey={(r) => r.version} selectedKey="0003" onSelect={() => {}} columns={[
                 { header: 'Version', cell: (r) => <span className="font-mono">{r.version}</span> },
                 { header: 'Description', cell: (r) => r.description },
                 { header: 'State', cell: (r) => <StatePill state={r.state} /> },
@@ -175,9 +175,9 @@ function Page() {
             <LogConsole status="failed" lines={[
               { t: '11:05:01', level: 'info', text: 'Connected to staging (PostgreSQL 16.4)' },
               { t: '11:05:01', level: 'info', text: 'Lock acquired' },
-              { t: '11:05:02', level: 'warn', text: 'Script 20261007.1102 runs outside a transaction (CREATE INDEX CONCURRENTLY)' },
+              { t: '11:05:02', level: 'warn', text: 'Script 0003 runs outside a transaction (CREATE INDEX CONCURRENTLY)' },
               { t: '11:05:02', level: 'error', text: 'ERROR: function sales.calc_tax(numeric) already exists (line 3)' },
-              { t: '11:05:02', level: 'info', text: 'Rolled back 20261007.1102; lock released' },
+              { t: '11:05:02', level: 'info', text: 'Rolled back 0003; lock released' },
             ]} />
             <CodeBlock label="CLI" code="liftoff migrate --environment=staging --outputType=json" />
           </Section>

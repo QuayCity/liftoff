@@ -3,8 +3,8 @@
 # LiftOff documentation
 
 LiftOff keeps a database's schema in plain SQL scripts in git, writes those scripts from the
-changes you make in a dev database, and runs them on every environment. It works with PostgreSQL
-and SQL Server, from the command line, a desktop app or VS Code.
+changes you make in a dev database, and runs them on every environment. It works with PostgreSQL,
+SQL Server, MySQL, Oracle and SQLite, from the command line, a desktop app or VS Code.
 
 ## Start here
 
@@ -23,18 +23,18 @@ that fits your situation.
 | --- | --- |
 | [Concepts](guide/concepts.md) | projects, environments and roles, the scratch database, scripts, the history and activity tables, the schema model, drift |
 | [Installing](guide/installing.md) | the `liftoff` program, the VS Code extension, the desktop app, what each needs |
-| [Project files and connections](guide/configuration.md) | `liftoff.toml`, `liftoff.user.toml`, connection URLs, passwords, Microsoft Entra ID, environment variables, placeholders, filters |
-| [Migration scripts](guide/scripts.md) | naming, numbering, transactions, `GO` batches, repeatable, undo and baseline scripts, scripts for some environments only, topics |
+| [Project files and connections](guide/configuration.md) | `liftoff.toml`, `liftoff.user.toml`, connection URLs for each engine, passwords, Microsoft Entra ID, environment variables, placeholders, filters |
+| [Migration scripts](guide/scripts.md) | naming, numbering, transactions on each engine, `GO` batches, PL/SQL blocks, repeatable, undo and baseline scripts, scripts for some environments only, topics |
 | [Writing migrations from your changes](guide/generating.md) | `diff` and `generate`, data-loss warnings, hand-written scripts |
 | [Rules on your scripts](guide/rules.md) | `lint`: dropped tables, deletes without `WHERE`, grants, naming; severities, custom rules, allowing a finding |
 | [Deploying](guide/deploying.md) | `info`, `activity` (what ran where), `migrate`, `check`, drift, `validate`, `repair`, `undo`, running one script, `clean` |
 | [Existing databases](guide/existing-databases.md) | `adopt`, the baseline check on other environments, `baseline`, `capture` |
 | [The schema model](guide/schema-model.md) | one file per object, pulling changes, generating from the model, the pull-request check |
 | [Compare](guide/compare.md) | schema compare between any two sides; data compare, keyed tables and heaps |
-| [Teams, branches and pipelines](guide/teams-and-pipelines.md) | numbering across branches, `renumber`, `liftoff ci`, `squash`, `rebaseline` |
+| [Teams, branches and pipelines](guide/teams-and-pipelines.md) | numbering across branches, `renumber`, `liftoff ci` (GitHub Actions, Azure DevOps), `squash`, `rebaseline` |
 | [Moving from Flyway](guide/flyway.md) | converting the settings, keeping the scripts, the history |
 | [The desktop app](guide/desktop-app.md) | every screen, including the Overview of every environment and project |
-| [The VS Code extension](guide/vscode.md) | views, commands and settings |
+| [The VS Code extension](guide/vscode.md) | the LiftOff panel (the desktop app in an editor tab), views, commands and settings |
 | [Command reference](guide/cli-reference.md) | every command and option |
 | [Troubleshooting](guide/troubleshooting.md) | exit codes, common errors and what to do |
 

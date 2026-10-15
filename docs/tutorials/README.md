@@ -13,6 +13,13 @@ switch later.
 Each takes 15 to 30 minutes and uses SQL Server, with notes for PostgreSQL. All you need is a
 server you may create databases on; each tutorial shows how to start one in Docker.
 
+On MySQL, Oracle or SQLite the steps are the same; only the connection details and some SQL
+differ. [Connection URLs](../guide/configuration.md#connection-urls) has each engine's, and
+[Transactions](../guide/scripts.md#transactions) what happens when a script fails part-way (on
+MySQL and Oracle a failed script with table changes needs `repair`). For a first look without a
+server, start with SQLite: `liftoff init --sample --engine sqlite`, then an environment such as
+`url = "sqlite:data/dev.db"`.
+
 Tutorial 1 and 4 explain the most: if you use an app, skim the command-line version of your
 situation first. [The concepts](../guide/concepts.md) explain the words used throughout.
 

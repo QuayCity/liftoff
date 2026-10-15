@@ -92,6 +92,47 @@ then `migrate`. Keep such statements in a script of their own.
 Waiting for the migration lock never holds a transaction open, so `CREATE INDEX CONCURRENTLY` does
 not hang behind LiftOff itself.
 
+### MySQL
+
+MySQL commits DDL (`CREATE`, `ALTER`, `DROP`, `RENAME`, `TRUNCATE`, …) at once, and nothing can
+roll it back. So a script with DDL runs **without** a transaction: if it fails halfway, the
+statements before the failure stay done and the script is recorded as failed. Fix the database
+and the script, run `liftoff -e test repair`, then `migrate`. Keeping one change per script makes
+this easy. A script with only data changes (`INSERT`, `UPDATE`, `DELETE`) runs as one
+transaction.
+
+The statements of a script go to MySQL together, so a procedure or trigger body with `BEGIN … END`
+needs nothing special. A `DELIMITER //` line, as the mysql client takes it, works too.
+
+### Oracle
+
+As on MySQL, Oracle commits DDL at once (creating a procedure or package is DDL too), so a script
+with DDL runs without a transaction and a failure part-way is recorded for `repair`. A script
+with only data changes runs as one transaction.
+
+Scripts are read as SQL*Plus reads them: a SQL statement ends at `;`, and a PL/SQL block
+(`CREATE PROCEDURE`, `CREATE FUNCTION`, `CREATE PACKAGE` and its body, `CREATE TRIGGER`,
+`CREATE TYPE`, `BEGIN … END;`, `DECLARE …`) ends at a line with only `/`:
+
+```sql
+create table customers (id number primary key, email varchar2(320) not null);
+
+create or replace procedure add_customer(p_email varchar2) is
+begin
+  insert into customers (id, email) values (customers_seq.nextval, p_email);
+end;
+/
+```
+
+A PL/SQL unit that does not compile fails the script with Oracle's errors (`PLS-00201: identifier
+… must be declared`), instead of being left behind invalid.
+
+### SQLite
+
+A script runs as **one transaction**, DDL included, so a failure leaves nothing behind. A script
+with `VACUUM` or `PRAGMA foreign_keys` runs without one, as SQLite ignores or refuses those
+inside a transaction. Foreign keys are checked on LiftOff's connections.
+
 ## Repeatable scripts
 
 `R__name.sql` holds something you would rather redefine in full each time: a view, a function,
@@ -105,8 +146,15 @@ SELECT c.id, COUNT(o.id) AS orders FROM dbo.customers c LEFT JOIN dbo.orders o O
 ```
 
 ```sql
--- PostgreSQL
+-- PostgreSQL, MySQL and Oracle
 CREATE OR REPLACE VIEW customer_totals AS
+SELECT c.id, count(o.id) AS orders FROM customers c LEFT JOIN orders o ON o.customer_id = c.id GROUP BY c.id;
+```
+
+```sql
+-- SQLite
+DROP VIEW IF EXISTS customer_totals;
+CREATE VIEW customer_totals AS
 SELECT c.id, count(o.id) AS orders FROM customers c LEFT JOIN orders o ON o.customer_id = c.id GROUP BY c.id;
 ```
 

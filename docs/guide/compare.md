@@ -96,6 +96,15 @@ Only the columns both sides have are compared. A table that exists on one side o
 columns differ between the sides, is listed as not compared with the reason; compare the
 schemas first.
 
+Per engine:
+- **Oracle**: CLOB, BLOB, LONG and XML columns are not compared, and an empty text is NULL in
+  Oracle, so the two cannot differ. A table whose identity column is `GENERATED ALWAYS` cannot
+  take its rows with their ids: Oracle refuses it.
+- **SQLite**: values are shown as SQLite literals (`'text'`, `42`, `X'00ff'`). SQLite keeps a
+  type per value, so the integer `42` and the text `'42'` are different values.
+- **MySQL and SQLite** tables go by their name alone (`customers`), the others by
+  `schema.table`.
+
 ### Fast on big tables
 
 LiftOff does not read whole tables. Each side hashes its rows in the database, in groups; only
@@ -125,7 +134,8 @@ source's (`-` prints them).
 
 - `--no-insert`, `--no-update`, `--no-delete` leave out rows only in the source, rows that
   differ, or rows only in the target.
-- SQL Server identity columns are inserted with `SET IDENTITY_INSERT … ON`.
+- SQL Server identity columns are inserted with `SET IDENTITY_INSERT … ON`, PostgreSQL ones with
+  `OVERRIDING SYSTEM VALUE`.
 - Rows of a heap are deleted by their content, one copy at a time, with the row's values in a
   comment above the statement.
 

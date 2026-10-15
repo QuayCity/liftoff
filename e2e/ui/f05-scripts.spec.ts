@@ -14,7 +14,7 @@ test('F05-H1 new versioned script is created and selected', async ({ page }) => 
   await dialog.getByLabel('SQL').fill('update orders set total = 0 where total is null;')
   await expectNoA11yViolations(page, 'New script dialog')
   await dialog.getByRole('button', { name: 'Create script' }).click()
-  await expect(page.getByText('Created V20261008.1200__backfill_totals.sql', { exact: true })).toBeVisible()
+  await expect(page.getByText('Created V0006__backfill_totals.sql', { exact: true })).toBeVisible()
   await expect(page.getByRole('row', { name: /backfill totals/ })).toHaveAttribute('aria-selected', 'true')
   checkConsole()
 })

@@ -415,11 +415,11 @@ const fake = {
     ],
   } as Project,
   scripts: [
-    ['20261001.0912', 'create orders'], ['20261003.1530', 'add order lines'], ['20261007.1102', 'tax function'], ['20261008.0840', 'daily totals view'],
+    ['0001', 'create orders'], ['0002', 'add order lines'], ['0003', 'tax function'], ['0004', 'daily totals view'],
   ] as [string, string][],
   applied: { local: 4, scratch: 0, staging: 2, production: 0 } as Record<string, number>,
   gitFiles: [
-    { path: 'migrations/V20261008.1104__add_customers.sql', change: 'untracked' },
+    { path: 'migrations/V0005__add_customers.sql', change: 'untracked' },
     { path: 'liftoff.toml', change: 'modified' },
     { path: 'notes/todo.md', change: 'untracked' },
   ],
@@ -458,11 +458,11 @@ const fakeRun = (environment: string, operation: string, started_on: string, scr
 const ago = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString()
 const ci = 'https://github.com/acme/shop-db/actions/runs/11873'
 fake.activity.push(
-  fakeRun('staging', 'migrate', ago(3), ['V20261003.1530__add_order_lines.sql'], { by: 'deploy', from: 'runner@gh-7f2c', pipeline: ci }),
-  fakeRun('staging', 'migrate', ago(4), ['V20261007.1102__tax_function.sql'], { by: 'deploy', from: 'runner@gh-7f2c', pipeline: ci, failed: 'V20261007.1102__tax_function.sql failed: function round(double precision, integer) does not exist' }),
-  fakeRun('local', 'migrate', ago(26), ['V20261007.1102__tax_function.sql', 'V20261008.0840__daily_totals_view.sql'], { by: 'me', from: 'me@LAPTOP-7' }),
-  fakeRun('staging', 'migrate', ago(50), ['V20261001.0912__create_orders.sql'], { by: 'deploy', from: 'runner@gh-7f2c', pipeline: ci }),
-  fakeRun('local', 'mark-applied', ago(75), ['V20261003.1530__add_order_lines.sql'], { by: 'me', from: 'me@LAPTOP-7' }),
+  fakeRun('staging', 'migrate', ago(3), ['V0002__add_order_lines.sql'], { by: 'deploy', from: 'runner@gh-7f2c', pipeline: ci }),
+  fakeRun('staging', 'migrate', ago(4), ['V0003__tax_function.sql'], { by: 'deploy', from: 'runner@gh-7f2c', pipeline: ci, failed: 'V0003__tax_function.sql failed: function round(double precision, integer) does not exist' }),
+  fakeRun('local', 'migrate', ago(26), ['V0003__tax_function.sql', 'V0004__daily_totals_view.sql'], { by: 'me', from: 'me@LAPTOP-7' }),
+  fakeRun('staging', 'migrate', ago(50), ['V0001__create_orders.sql'], { by: 'deploy', from: 'runner@gh-7f2c', pipeline: ci }),
+  fakeRun('local', 'mark-applied', ago(75), ['V0002__add_order_lines.sql'], { by: 'me', from: 'me@LAPTOP-7' }),
 )
 
 const fakeRules: RulesView = {
@@ -496,8 +496,8 @@ const fakeApi: Api = {
     return {
       scripts: fakeInfo('local').filter((i) => i.kind === 'versioned').map((i) => i.script),
       findings: [
-        { rule: 'table-without-primary-key', severity: 'warn', script: 'V20261007.1102__tax_function.sql', line: 3, message: 'table tax_rates has no primary key' },
-        { rule: 'drop-column', severity: 'warn', script: 'V20261007.1102__tax_function.sql', line: 9, message: 'drops column legacy_rate of orders', allowed: 'moved to tax_rates in the previous release' },
+        { rule: 'table-without-primary-key', severity: 'warn', script: 'V0003__tax_function.sql', line: 3, message: 'table tax_rates has no primary key' },
+        { rule: 'drop-column', severity: 'warn', script: 'V0003__tax_function.sql', line: 9, message: 'drops column legacy_rate of orders', allowed: 'moved to tax_rates in the previous release' },
       ],
       errors: 0, warnings: 1,
     }
@@ -551,6 +551,13 @@ const fakeApi: Api = {
   },
   dataPage: async (_id, table, kind, offset, limit) => {
     await wait(100)
+    if (table === 'public.audit_log') {
+      // No key: whole rows, labelled by their place.
+      const log = (i: number, what: string) => [`2026-10-0${1 + (i % 9)} 09:${String(10 + i).padStart(2, '0')}`, 'login', `${what} ${i}`]
+      const rows = kind === 'only_in_source' ? [1, 2, 3].map((i) => ({ key: [`row ${i}`], source: log(i, 'user'), target: null }))
+        : kind === 'only_in_target' ? [4, 5].map((i) => ({ key: [`row ${i - 3}`], source: null, target: log(i, 'old user') })) : []
+      return { columns: ['at', 'kind', 'message'], key: [], total: rows.length, rows: rows.slice(offset, offset + limit) }
+    }
     const total = kind === 'different' ? 132 : kind === 'only_in_source' ? 2 : 1
     const n = Math.max(0, Math.min(limit, total - offset))
     const row = (i: number, note: string | null, total_: string) => [String(i), `customer ${i % 50}`, total_, note]
@@ -560,7 +567,8 @@ const fakeApi: Api = {
         const i = 1000 + offset + j
         if (kind === 'only_in_source') return { key: [String(i)], source: row(i, 'new', '10.00'), target: null }
         if (kind === 'only_in_target') return { key: [String(i)], source: null, target: row(i, 'stale', '9.00') }
-        return { key: [String(i)], source: row(i, j % 3 === 0 ? null : 'paid', '12.50'), target: row(i, j % 3 === 0 ? '' : 'paid', j % 2 ? '12.51' : '12.50') }
+        // Every row differs somewhere: the note (NULL against '') or the total.
+        return { key: [String(i)], source: row(i, i % 2 === 0 ? null : 'paid', '12.50'), target: row(i, i % 2 === 0 ? '' : 'paid', i % 2 ? '12.51' : '12.50') }
       }).filter(() => table === 'public.orders'),
     }
   },
@@ -706,7 +714,7 @@ const fakeApi: Api = {
   },
   validate: async (_p, env) => {
     await wait()
-    if (env === 'staging') throw fail('LIFTOFF_VALIDATE', 'V20261003.1530__add_order_lines.sql changed after it was applied (checksum mismatch)', 12)
+    if (env === 'staging') throw fail('LIFTOFF_VALIDATE', 'V0002__add_order_lines.sql changed after it was applied (checksum mismatch)', 12)
     return fakeInfo(env)
   },
   baseline: async (_p, env, version) => {
@@ -716,7 +724,7 @@ const fakeApi: Api = {
   repair: async () => {
     await wait()
     emit('info', 'Repair: 0 failed row(s) removed, 1 checksum(s) updated, 0 missing script(s) forgotten')
-    return { removed_failed: [], realigned: ['V20261003.1530__add_order_lines.sql'], forgotten: [] }
+    return { removed_failed: [], realigned: ['V0002__add_order_lines.sql'], forgotten: [] }
   },
   clean: async (_p, env) => {
     await wait()
@@ -739,8 +747,8 @@ const fakeApi: Api = {
     }))
   },
   scriptAdd: async (path, repeatable, description) => {
-    const name = repeatable ? `R__${description.replaceAll(' ', '_')}.sql` : `V20261008.1200__${description.replaceAll(' ', '_')}.sql`
-    if (!repeatable) fake.scripts.push(['20261008.1200', description])
+    const name = repeatable ? `R__${description.replaceAll(' ', '_')}.sql` : `V0006__${description.replaceAll(' ', '_')}.sql`
+    if (!repeatable) fake.scripts.push(['0006', description])
     return `${path}/migrations/${name}`
   },
   scratchCreate: async () => {
@@ -749,7 +757,7 @@ const fakeApi: Api = {
   },
   capture: async (_p, env, description, asBaseline) => {
     await wait(500)
-    return { file_name: `${asBaseline ? 'B' : 'V'}20261008.1200__${description.replaceAll(' ', '_')}.sql`, version: '20261008.1200', sql: `-- ${description}\n-- captured from ${env}\n\nCREATE TABLE public.orders (\n    id bigserial\n);\n`, undo: null }
+    return { file_name: `${asBaseline ? 'B' : 'V'}0006__${description.replaceAll(' ', '_')}.sql`, version: '0006', sql: `-- ${description}\n-- captured from ${env}\n\nCREATE TABLE public.orders (\n    id bigserial\n);\n`, undo: null }
   },
   squash: async (_p, upTo, description) => {
     emit('info', `Building 'scratch' from the versioned scripts up to ${upTo}`)
@@ -785,7 +793,7 @@ const fakeApi: Api = {
     ] }
   },
   migrationGenerate: async (_p, changes, description, withUndo) => {
-    const version = '20261008.1104'
+    const version = '0005'
     const sql = `-- ${description}\n-- Written by LiftOff. Review before committing.\n` + changes.map((c) => `\n-- ${c.kind} ${c.name}\n${c.sql}\n`).join('')
     const undo = withUndo ? { file_name: `U${version}__${description.replaceAll(' ', '_')}.sql`, sql: `-- Undo: ${description}\nDROP TABLE public.customer;\n` } : null
     return { file_name: `V${version}__${description.replaceAll(' ', '_')}.sql`, version, sql, undo }
@@ -794,7 +802,7 @@ const fakeApi: Api = {
     await wait(300)
     emit('info', `Undid the latest script on ${env}; it is pending again`)
     fake.applied[env] = Math.max(0, (fake.applied[env] ?? 0) - 1)
-    return { script: 'U20261008.0840__daily_totals_view.sql', version: '20261008.0840' }
+    return { script: 'U0004__daily_totals_view.sql', version: '0004' }
   },
   check: async (_p, env, o) => {
     emit('info', `Rebuilding scratch database 'scratch' from migrations`)
@@ -803,7 +811,7 @@ const fakeApi: Api = {
       sql: 'ALTER TABLE public.orders ADD COLUMN hotfix integer;', steps: [], undo_steps: [],
       before: 'CREATE TABLE public.orders (\n    id bigserial,\n    note text\n);', after: 'CREATE TABLE public.orders (\n    id bigserial,\n    note text,\n    hotfix integer\n);' }
     return {
-      environment: env, applied_up_to: '20261003.1530',
+      environment: env, applied_up_to: '0002',
       drift: o.drift ? (env === 'staging' ? [drifted] : []) : null,
       changes: o.changes ? fakeInfo(env).filter((i) => i.state === 'pending').map((i) => ({ ...drifted, id: `table:${i.description}`, name: `public.${i.description.replaceAll(' ', '_')}`, kind: 'added' as const, before: null })) : null,
       not_compared: [],
@@ -811,14 +819,14 @@ const fakeApi: Api = {
         ? {
             scripts: fakeInfo(env).filter((i) => i.state === 'pending').map((i) => i.script),
             findings: env === 'production' ? [] : [
-              { rule: 'table-without-primary-key', severity: 'warn', script: 'V20261007.1102__tax_function.sql', line: 3, message: 'table tax_rates has no primary key' },
-              { rule: 'drop-column', severity: 'warn', script: 'V20261007.1102__tax_function.sql', line: 9, message: 'drops column legacy_rate of orders', allowed: 'moved to tax_rates in the previous release' },
+              { rule: 'table-without-primary-key', severity: 'warn', script: 'V0003__tax_function.sql', line: 3, message: 'table tax_rates has no primary key' },
+              { rule: 'drop-column', severity: 'warn', script: 'V0003__tax_function.sql', line: 9, message: 'drops column legacy_rate of orders', allowed: 'moved to tax_rates in the previous release' },
             ],
             errors: 0,
             warnings: env === 'production' ? 0 : 1,
           }
         : null,
-      dry_run_sql: o.dryRun ? `-- Dry run for ${env}: nothing below has been executed.\n\n-- V20261007.1102__tax_function.sql\nBEGIN;\ncreate function tax(amount numeric) ...;\nCOMMIT;\n` : null,
+      dry_run_sql: o.dryRun ? `-- Dry run for ${env}: nothing below has been executed.\n\n-- V0003__tax_function.sql\nBEGIN;\ncreate function tax(amount numeric) ...;\nCOMMIT;\n` : null,
     }
   },
   migrationSave: async (path, fileName) => `${path}/migrations/${fileName}`,

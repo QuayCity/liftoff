@@ -19,7 +19,7 @@ test.describe('F04 Environments', () => {
     const table = page.getByRole('table', { name: 'Migrations on staging' })
     await expect(table.getByText('Pending')).toHaveCount(0)
     await expect(table.getByText('Applied')).toHaveCount(4)
-    await expect(page.getByRole('log')).toContainText('Applied V20261008.0840__daily_totals_view.sql')
+    await expect(page.getByRole('log')).toContainText('Applied V0004__daily_totals_view.sql')
   })
 
   test('F04-N1 an unreachable target says so', async ({ page }) => {

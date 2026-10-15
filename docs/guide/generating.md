@@ -88,7 +88,7 @@ warning: the script includes changes that may lose data
 
 Read those lines carefully. If a drop is not what you meant (you renamed something), write that
 part by hand: LiftOff sees a rename as a drop plus an add, and would lose the data. For example,
-on SQL Server `EXEC sp_rename 'dbo.customers.mail', 'email', 'COLUMN';`, on PostgreSQL
+on SQL Server `EXEC sp_rename 'dbo.customers.mail', 'email', 'COLUMN';`, on the other engines
 `ALTER TABLE customers RENAME COLUMN mail TO email;`.
 
 `--skip-destructive` writes the script without those changes.
@@ -103,6 +103,22 @@ types.
 keys, unique, check, exclusion and foreign keys, indexes, views and materialized views, functions
 and procedures, triggers, enums, domains, sequences, grants and comments.
 
+**MySQL:** tables (columns, keys and indexes, foreign keys, checks, table options such as the
+engine, character set and comment), views, procedures, functions and triggers. Everything is
+compared without the database name and the definer, so dev, test and prod may be databases of
+different names under different users.
+
+**Oracle:** tables (columns, identity and virtual columns, defaults), primary keys, unique, check
+and foreign keys, indexes (also on expressions), views, sequences, synonyms, procedures,
+functions, packages and their bodies, object types and triggers. Constraint names Oracle made up
+(`SYS_C…`) differ per database, so those are matched by what they say.
+
+**SQLite:** tables (columns, constraints, `WITHOUT ROWID` and `STRICT`), their indexes, views and
+triggers. SQLite's `ALTER TABLE` only adds, drops and renames columns, so a script that changes a
+table in another way rebuilds it: a new table, the rows of the columns both have copied, the old
+table dropped and the new one renamed, with foreign keys off and in one transaction. A change that
+only adds or drops columns uses `ADD COLUMN` or `DROP COLUMN`.
+
 Renames are not detected: a renamed object shows as one removed and one added.
 
 Some objects are not compared yet. When the databases have any, `diff` and `compare` say so
@@ -111,12 +127,16 @@ Some objects are not compared yet. When the databases have any, `diff` and `comp
   indexes, indexes on views, permissions, extended properties, column collations other than the
   database's;
 - PostgreSQL: row-level security policies, rules, composite and range types, aggregates,
-  operators, foreign tables, column-level privileges.
+  operators, foreign tables, column-level privileges;
+- MySQL: events, and routines the login may not read;
+- Oracle: materialized views, database links, temporary tables, grants, comments;
+- SQLite: virtual tables (full-text search and the like).
 
 Write those in hand-written scripts (`liftoff add`).
 
-Only the schemas listed in `schemas` in `liftoff.toml` are compared, and
-[filters](configuration.md#filters) leave out more.
+Only the schemas listed in `schemas` in `liftoff.toml` are compared (on MySQL, Oracle and SQLite:
+the database, schema or file the connection uses), and [filters](configuration.md#filters) leave
+out more.
 
 ## Writing scripts by hand
 

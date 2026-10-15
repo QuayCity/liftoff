@@ -6,7 +6,7 @@ test('F06-H1 scripts and settings are pre-selected; commit then push', async ({ 
   const checkConsole = watchConsole(page)
   await page.goto('/?open=1&ws=Commit')
   const files = page.getByRole('list', { name: 'Changed files' })
-  await expect(files.getByRole('checkbox', { name: 'Include migrations/V20261008.1104__add_customers.sql' })).toBeChecked()
+  await expect(files.getByRole('checkbox', { name: 'Include migrations/V0005__add_customers.sql' })).toBeChecked()
   await expect(files.getByRole('checkbox', { name: 'Include liftoff.toml' })).toBeChecked()
   await expect(files.getByRole('checkbox', { name: 'Include notes/todo.md' })).not.toBeChecked()
   await expectNoA11yViolations(page, 'Commit')

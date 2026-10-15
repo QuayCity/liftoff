@@ -50,8 +50,8 @@ The user or password is wrong. To change a password saved in the keychain, edit 
 the desktop app or the VS Code settings tab and type it again.
 
 **`connect ECONNREFUSED`, or a timeout** (exit 10)
-Nothing answers at that server and port. Check the server is running, the port (SQL Server 1433,
-PostgreSQL 5432 by default), and the firewall. A SQL Server named instance (`server\INSTANCE`)
+Nothing answers at that server and port. Check the server is running, the port (by default
+PostgreSQL 5432, SQL Server 1433, MySQL 3306, Oracle 1521), and the firewall. A SQL Server named instance (`server\INSTANCE`)
 needs the SQL Server Browser service running, or give the instance's port instead.
 
 **`self-signed certificate` / `unable to verify the first certificate`** (SQL Server)
@@ -104,9 +104,18 @@ A script with a lower number arrived after a higher one ran (a merge, or `--only
 
 **`V0004__broken.sql failed; rolled back`** (exit 11)
 The script has an error; the message has the database's error number and line. The transaction
-was rolled back, so nothing is recorded: fix the script and run `migrate` again. A PostgreSQL
-script that ran outside a transaction may be recorded as failed; then run `liftoff -e <env>
-repair` before `migrate`. See [Transactions](scripts.md#transactions).
+was rolled back, so nothing is recorded: fix the script and run `migrate` again. A script that ran
+outside a transaction (on PostgreSQL one with `CONCURRENTLY` and the like; on MySQL and Oracle any
+script with DDL) is recorded as failed instead: undo what it did, fix it, then run
+`liftoff -e <env> repair` before `migrate`. See [Transactions](scripts.md#transactions).
+
+**`… has compile errors: line 3, column 5: PLS-00201 …`** (Oracle, exit 11)
+A procedure, function, package or trigger in the script does not compile. Oracle created it
+anyway, marked invalid; fix the script and run `repair`, then `migrate`, which replaces it.
+
+**`could not connect … ECONNREFUSED … 5432` for a MySQL, Oracle or SQLite URL**
+The URL is read as PostgreSQL when it starts with none of `mysql://`, `oracle://`,
+`jdbc:oracle:` or `sqlite:`. Check the start of the URL.
 
 **`drift found on 'prod'`** (exit 13, from `check`)
 The database was changed outside the scripts. See [When there is drift](deploying.md#when-there-is-drift).
@@ -118,7 +127,7 @@ Good. `clean` only erases scratch databases and environments with `allow_clean =
 
 **`generate` wrote a drop and an add where I renamed something**
 LiftOff does not detect renames. Write the rename by hand (`sp_rename` on SQL Server, `ALTER …
-RENAME` on PostgreSQL) in the script, in place of the drop and the add.
+RENAME` on the other engines) in the script, in place of the drop and the add.
 
 **`diff` lists objects I do not manage** (another tool's tables, a staging schema)
 Leave them out with [filters](configuration.md#filters), or remove the schema from `schemas`.

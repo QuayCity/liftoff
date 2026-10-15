@@ -96,7 +96,7 @@ From the command palette (**Ctrl+Shift+P**), all starting with **LiftOff:**:
 | **Import Flyway Project** | convert `flyway.toml`: the environments and their roles, what does not carry over, then (PostgreSQL) copying the history |
 | **Adopt Existing Database…** | capture a database as `B0001` (see [Existing databases](existing-databases.md)) |
 | **Rebaseline Project…** | replace the scripts up to a version with a baseline script |
-| **Set Up Pipeline** | write the GitHub Actions workflow |
+| **Set Up Pipeline** | write the GitHub Actions workflow (for Azure DevOps, use **Pipelines** in the LiftOff panel) |
 | **Show Log** | the `liftoff` commands the extension ran and their output (no passwords) |
 | **Refresh** | read everything again |
 

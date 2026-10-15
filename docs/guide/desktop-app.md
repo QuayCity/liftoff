@@ -16,8 +16,10 @@ says how to get it.
 | **Recent** | projects opened before; **Remove** takes one off the list (the folder stays) |
 | **Overview of all projects** | the [Overview](#overview) of every recent project at once, each with an **Open** button. It connects to all their databases, so it only reads them when you ask |
 
-Several projects can be open at once, one tab each in the title bar: **+** goes back to the start
-page to open another, and × closes one (it asks first when Settings or Rules has unsaved changes).
+Several projects can be open at once, one tab each in the title bar, with its database on it (**PG**
+PostgreSQL, **MS** SQL Server, **MY** MySQL, **OR** Oracle, **LT** SQLite): **+** goes back to the
+start page to open another, and × closes one (it asks first when Settings or Rules has unsaved
+changes). Drag a tab, or press Alt+Left / Alt+Right on it, to put the tabs in the order you like.
 Each project keeps its own screen while you look at another, and the open projects come back
 when LiftOff starts again (after an update too), each on the screen it was on. The sidebar on the left has the
 workspaces: **Overview**, **Changes**, **Environments**, **Compare**, **Scripts**, **Rules**,
@@ -31,9 +33,9 @@ version, the newest LiftOff release, and what is new in it (its release notes), 
 now** and **Open on GitHub**. The notes come from the same look-up as the updates; with update
 checks off, nothing is fetched until you click **Check now**.
 
-**Light or dark.** The sun / moon / screen button, top right on the start page and in the title
-bar, switches between light, dark and the same as the system, one click at a time. The choice is
-remembered on this computer for every project.
+**Light or dark.** The theme button, top right on the start page and in the title bar, opens a
+menu: **Same as the system**, **Light** or **Dark**. The choice is remembered on this computer for
+every project.
 
 Files changed outside the app (`liftoff.toml` edited in a text editor, scripts added from git)
 are read again whenever the window gets focus. If a file cannot be read, a red banner names the
@@ -42,6 +44,8 @@ problem and the screens keep the last good state.
 ## Overview
 
 Where every environment stands, read from its databases. Scratch databases are left out.
+
+![The Overview: a card per environment with its version and what waits, a table of where each script has run, and the activity of every run with its result, who ran it and from where.](../images/overview.png)
 
 - **A card per environment**: the version it is at, how many scripts wait (or **Up to date**, or
   how many failed), and its last run: when and by whom. One that cannot be reached says why.
@@ -56,6 +60,8 @@ Where every environment stands, read from its databases. Scratch databases are l
 **Read again** reads every database once more.
 
 ## Environments
+
+![Environments: a card per environment (connected, pending scripts, last run, drift), and below the selected one its scripts with their state, Run only this and Mark as applied, and Run pending.](../images/environments.png)
 
 Each environment has a card along the top: its role, whether it connects, how many scripts are
 pending, when it last ran, and drift. Click a card to show that environment below. **Add
@@ -72,9 +78,10 @@ is only yours). A new environment goes after the others, and a scratch database 
 | --- | --- |
 | Name | letters, digits, `-` and `_` |
 | Role | Dev, Scratch, Test or Production |
-| Server, Port, Instance, Database | where the database is. An empty port is the engine's default (1433 or 5432); a SQL Server named instance needs no port |
+| Server, Port, Instance, Database | where the database is. An empty port is the engine's default (PostgreSQL 5432, SQL Server 1433, MySQL 3306, Oracle 1521); a SQL Server named instance needs no port. Oracle asks for the **Service name** instead of a database |
+| Database file | SQLite, instead of a server: the file, relative to the project folder or a full path. SQLite has no sign-in |
 | Encrypt the connection, Trust the server certificate | SQL Server. Trust only a server you know, such as a local container with a self-signed certificate |
-| SSL | PostgreSQL: prefer, require or disable |
+| SSL | PostgreSQL and MySQL: when the server offers it, always (MySQL also: with the certificate checked), or off. Oracle: off or TLS |
 | Sign in with | SQL Server: a SQL Server login, or one of the Microsoft Entra ID methods (see [Connections](configuration.md#sql-server-with-microsoft-entra-id-azure-sql)) |
 | User, Password | the password may be typed, or be `${env.NAME}` to read a variable |
 | Save the connection for | **Everyone on the project** (URL and user in `liftoff.toml`, shared through git) or **Just me** (in `liftoff.user.toml`). The password always stays private |
@@ -120,6 +127,8 @@ show with their reason), and **Save report…** for the HTML report.
 
 ## Changes
 
+![Changes: the differences between dev and what the migration scripts build, with tick boxes; a dropped table is unticked and marked data loss; the changed orders table side by side; a description and Write migration at the bottom.](../images/changes.png)
+
 Compares the dev database with the **Migration scripts** (what they build) or with the
 **Schema model**; the toggle at the top picks which. The first time, it needs a scratch database
 and offers **Create one…**.
@@ -144,6 +153,8 @@ suggests a restart.
 
 ## Rules
 
+![Rules: each built-in rule with what it checks and its severity, Save rules, and Check every script.](../images/rules.png)
+
 The policies every migration script is checked against ([Rules on your scripts](rules.md)): each
 built-in rule with what it checks and its severity here (**Off**, **Info**, **Warning**, **Error
 (stops)**), marked **changed** when it is not the default, and the project's own rules (a name, a
@@ -163,12 +174,16 @@ and:
 
 **Swap source and target** turns it round; **Snapshot the source…** saves a snapshot file.
 
+![Schema compare of two environments: the differences with tick boxes, the orders table side by side, the SQL that makes the target match, and Save script, Write migration and Apply.](../images/compare.png)
+
 **Data**: pick two environments. Each table shows its counts: only in source, only in target,
 different. Tables without a key say **no key, whole rows**. **Hide tables that are the same**
 keeps the list short. Click a count to page through the rows, source and target side by side
 with the changed cells marked. Tick or untick **Insert rows only in the source**, **Update rows that differ** and **Delete rows
 only in the target**, then
 **Save script…** or **Apply**. See [Compare](compare.md#data-compare).
+
+![Data compare: each table with its counts, and the rows of the orders table that differ, source and target side by side with the changed cells marked.](../images/data-compare.png)
 
 ## Commit
 
@@ -231,8 +246,7 @@ x.y.z**, which opens its release notes; it goes away once opened.
 - Linux: an AppImage replaces itself and restarts. Started some other way, the button says
   **Download x.y.z** and opens the release page.
 - What is contacted: `api.github.com` for the latest release, and GitHub's download servers for
-  the file. Nothing about you or your projects is sent. While the LiftOff repository is private,
-  GitHub does not answer, and the app simply finds no update.
+  the file. Nothing about you or your projects is sent.
 
 ## Without databases
 

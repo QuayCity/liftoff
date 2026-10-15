@@ -24,6 +24,12 @@ two schemas gets two files, and an editor tab says which one it is. A trigger is
 `<schema>.<table>.<trigger>.sql`. On PostgreSQL there are also `extensions/` (no schema),
 `domains/` and `materialized-views/`.
 
+On MySQL, Oracle and SQLite a project manages one database, schema or file, so files are named
+`<name>.sql` (`tables/orders.sql`), without a schema. A table's indexes and keys are in its
+table's file. Oracle adds `packages/` (`shop_api.sql` and `shop_api.body.sql`) and `synonyms/`.
+Routines and triggers are written the way their engine's own tools read them: between
+`DELIMITER` lines on MySQL, ending with a `/` line on Oracle.
+
 LiftOff 0.1 filed objects as `<schema>/<type>/<name>.sql`. A project in that layout is moved to
 this one by the next schema model command (`model`, `check --model`, the Changes screen or the
 Schema Model view), which says how many files it moved. git sees them as renames: commit them, and

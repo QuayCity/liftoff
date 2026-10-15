@@ -43,11 +43,11 @@ test.describe('F03 Changes', () => {
     await page.getByLabel('Also write an undo script').check()
     await page.getByRole('button', { name: 'Write migration…' }).click()
     const dialog = page.getByRole('dialog', { name: 'Review the migration' })
-    await expect(dialog.getByText('V20261008.1104__add_customers.sql')).toBeVisible()
+    await expect(dialog.getByText('V0005__add_customers.sql')).toBeVisible()
     await expect(dialog.getByLabel('Record it as applied on local, which already has these changes')).toBeChecked()
     await expectNoA11yViolations(page, 'Review the migration')
     await dialog.getByRole('button', { name: 'Save to migrations' }).click()
-    await expect(page.getByText('Wrote V20261008.1104__add_customers.sql and its undo script', { exact: true })).toBeVisible()
+    await expect(page.getByText('Wrote V0005__add_customers.sql and its undo script', { exact: true })).toBeVisible()
   })
 
   test('X-A11Y Changes', async ({ page }) => {

@@ -57,7 +57,7 @@ dry run; its HTML report (`--report`) has a Rules section.
 | `grant-to-public` | warn | `GRANT … TO PUBLIC` |
 | `grant-option` | warn | `WITH GRANT OPTION` |
 | `users-and-roles` | warn | creating, changing or dropping users, logins and roles (also `sp_addrolemember` and the like) |
-| `use-database` | warn | SQL Server `USE`: the rest of the script runs in another database |
+| `use-database` | warn | `USE` (SQL Server, MySQL): the rest of the script runs in another database |
 | `sensitive-columns` | info | column names that suggest personal or financial data: ssn, passport, iban, bank account, card number, cvv, tax id, national id, date of birth |
 | `table-names` | off | new table names that do not match a pattern you set |
 | `column-names` | off | new column names that do not match a pattern you set |
@@ -65,9 +65,10 @@ dry run; its HTML report (`--report`) has a Rules section.
 
 What is read: the SQL with comments and strings left out, so `-- DROP TABLE x` and
 `'DELETE FROM x'` do not count, and neither does a quoted name such as `"delete"`. The body of a
-PostgreSQL function (between `$$`) is text to LiftOff, so it is not checked; a SQL Server
-procedure body is. Statements are found by `;`, `GO` lines and the next statement's first word,
-so T-SQL without semicolons works. LiftOff does not fully parse SQL: an unusual layout can hide
+PostgreSQL function (between `$$`) is text to LiftOff, so it is not checked; a SQL Server, MySQL or
+Oracle procedure body is. MySQL's backtick names, `#` comments and backslash escapes, and Oracle's
+`q'[…]'` strings, are read as those engines read them. Statements are found by `;`, `GO` lines,
+Oracle's `/` lines and the next statement's first word, so T-SQL without semicolons works. LiftOff does not fully parse SQL: an unusual layout can hide
 something or report something that is fine. Allow it (below) and tell us.
 
 ## Settings: `[rules]` in liftoff.toml
