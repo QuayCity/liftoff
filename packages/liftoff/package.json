@@ -26,12 +26,12 @@
     "build:cli": "node scripts/build-cli.mjs"
   },
   "dependencies": {
-    "@azure/identity": "^4.13.3",
+    "@azure/identity": "^4.14.0",
     "mysql2": "^3.24.6",
     "oracledb": "^26.0.0",
     "pg": "^8.23.1",
     "smol-toml": "^1.9.1",
-    "tedious": "^20.3.3"
+    "tedious": "^20.3.8"
   },
   "optionalDependencies": {
     "@napi-rs/keyring": "^2.1.1"
