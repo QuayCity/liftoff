@@ -116,7 +116,7 @@ test('F15-H2 run only one script on test: Postgres gets that one, not the older 
   await details('test').getByRole('combobox', { name: 'Command' }).selectOption('info')
   await details('test').getByRole('button', { name: 'Refresh status' }).click()
   const table = details('test').getByRole('table', { name: 'Migrations on test' })
-  await table.getByRole('button', { name: 'Run only V3__tags.sql' }).click()
+  await table.getByRole('button', { name: 'Run only this: V3__tags.sql' }).click()
   const dialog = page.getByRole('dialog', { name: 'Run only V3__tags.sql on test?' })
   await expect(dialog.getByText('V2__notes.sql')).toBeVisible()
   await dialog.getByRole('button', { name: 'Run this script only' }).click()
