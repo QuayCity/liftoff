@@ -116,23 +116,23 @@ export function ChangeList({ changes, selected, onSelectedChange, activeId, onAc
           const Chevron = open ? ChevronDown : ChevronRight
           const gs = groupState(items)
           return (
-            <div key={n.group} {...common} aria-label={`${n.group}, ${items.length} change${items.length === 1 ? '' : 's'}`} aria-expanded={open} aria-checked={gs === 'indeterminate' ? 'mixed' : gs}
+            <div key={n.group} {...common} aria-label={`${n.group} ${items.length}`} aria-expanded={open} aria-checked={gs === 'indeterminate' ? 'mixed' : gs}
               className="flex h-8 items-center gap-2 bg-surface-sunken px-2 font-semibold">
               <button tabIndex={-1} aria-hidden onClick={() => setCollapse(n.group, open)} className="text-muted"><Chevron className="size-4" /></button>
               <Checkbox tabIndex={-1} ariaLabel={`Include all ${n.group}`} checked={gs} onChange={(on) => toggle(items.map((c) => c.id), on)} />
-              {n.group}<span className="font-normal text-muted">{items.length}</span>
+              {n.group}{' '}<span className="font-normal text-muted">{items.length}</span>
             </div>
           )
         }
         const c = n.change
         const [Icon, tone, word] = kindIcon[c.kind]
         return (
-          <div key={c.id} {...common} aria-label={`${word} ${c.name}${c.destructive ? ', may lose data' : ''}`} aria-selected={c.id === activeId} aria-checked={selected.has(c.id)}
+          <div key={c.id} {...common} aria-label={`${word} ${c.name}${c.destructive ? ' data loss' : ''}`} aria-selected={c.id === activeId} aria-checked={selected.has(c.id)}
             onClick={() => onActivate(c)}
             className={cx('flex h-8 cursor-default items-center gap-2 pr-2 pl-8 hover:bg-surface-sunken', c.id === activeId && 'bg-accent-subtle hover:bg-accent-subtle')}>
             <Checkbox tabIndex={-1} ariaLabel={`Include ${c.name}`} checked={selected.has(c.id)} onChange={(on) => toggle([c.id], on)} />
             <Icon aria-label={word} className={cx('size-3.5 shrink-0', tone)} />
-            <span className="truncate font-mono">{c.name}</span>
+            <span className="truncate font-mono">{c.name}{c.destructive ? ' ' : ''}</span>
             {c.destructive && (
               <span className="ml-auto inline-flex items-center gap-1 rounded-sm bg-danger-subtle px-1.5 text-xs leading-5 text-danger">
                 <AlertTriangle aria-hidden className="size-3" />data loss

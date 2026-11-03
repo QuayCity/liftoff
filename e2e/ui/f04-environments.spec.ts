@@ -56,7 +56,7 @@ test.describe('F04 Environments', () => {
     await page.getByRole('region', { name: 'staging environment' }).click()
     const table = page.getByRole('table', { name: 'Migrations on staging' })
     await expect(table.getByText('Pending')).toHaveCount(2)
-    await table.getByRole('button', { name: /^Mark V\S+__tax_function\.sql as applied$/ }).click()
+    await table.getByRole('button', { name: /^Mark as applied…: V\S+__tax_function\.sql$/ }).click()
     const dialog = page.getByRole('dialog', { name: /^Record V\S+__tax_function\.sql as applied on staging\?$/ })
     await expect(dialog.getByText(/already has this script's changes/)).toBeVisible()
     await expectNoA11yViolations(page, 'Mark as applied')

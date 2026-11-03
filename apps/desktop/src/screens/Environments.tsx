@@ -305,8 +305,8 @@ export function Environments({ project, onProject }: { project: Project; onProje
                     header: 'Run',
                     cell: (r) => pickable(r) && (
                       <span className="inline-flex gap-1">
-                        <Button size="sm" variant="ghost" aria-label={`Run only ${r.script}`} disabled={!!running} onClick={() => setPick({ env: sel, info: r })}>Run only this</Button>
-                        <Button size="sm" variant="ghost" aria-label={`Mark ${r.script} as applied`} disabled={!!running} onClick={() => setMarkFor({ env: sel, info: r })}>Mark as applied…</Button>
+                        <Button size="sm" variant="ghost" aria-label={`Run only this: ${r.script}`} disabled={!!running} onClick={() => setPick({ env: sel, info: r })}>Run only this</Button>
+                        <Button size="sm" variant="ghost" aria-label={`Mark as applied…: ${r.script}`} disabled={!!running} onClick={() => setMarkFor({ env: sel, info: r })}>Mark as applied…</Button>
                       </span>
                     ),
                     className: 'text-right',
