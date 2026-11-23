@@ -51,6 +51,7 @@ dry run; its HTML report (`--report`) has a Rules section.
 | `delete-without-where` | error | a `DELETE` with no `WHERE`: every row goes |
 | `update-without-where` | error | an `UPDATE` with no `WHERE`: every row changes |
 | `not-null-without-default` | warn | adding a `NOT NULL` column with no default to an existing table: fails when the table has rows (a table created in the same script is fine) |
+| `column-type-change` | warn | changing a column's type (`ALTER COLUMN … TYPE`, SQL Server's `ALTER COLUMN`, MySQL's `MODIFY` and `CHANGE`, Oracle's `MODIFY`): values that do not fit fail the script or are cut; the old type is usually not in the script, so every change is reported (a table created in the same script is fine) |
 | `table-without-primary-key` | warn | `CREATE TABLE` with no primary key, in the statement or later in the script; temporary tables are left alone |
 | `select-star` | warn | `SELECT *` (a view's columns then change when the table does); `EXISTS (SELECT * …)` is fine |
 | `permissions` | info | `GRANT`, `REVOKE` and `DENY` |
