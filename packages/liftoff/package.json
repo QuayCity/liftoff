@@ -1,6 +1,6 @@
 {
   "name": "liftoff",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Database migrations for PostgreSQL and SQL Server",
   "license": "MIT",
   "repository": {

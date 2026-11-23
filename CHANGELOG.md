@@ -5,7 +5,7 @@ workflow publishes that section as the release notes (the desktop app shows them
 What's new) and refuses a tag without one. Keep each list item on one line, and use only
 headings, list items and bold: the app shows nothing else.
 
-## 0.6.0
+## 0.6.1
 
 ### New
 - **Callbacks: SQL files that run around migrate, undo and clean.** Put before-migrate.sql, after-each-script.sql, after-migrate-error.sql, before-clean.sql and the like in the migrations folder; each runs in its own transaction and leaves no row in the history. Placeholders and -- liftoff:for work in them, and Flyway's names (beforeMigrate, afterEachMigrate and so on) are read too.
