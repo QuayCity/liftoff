@@ -21,6 +21,9 @@ updates:
       # version). Raise these by hand when the runtime moves.
       - dependency-name: '@types/node'
         update-types: ['version-update:semver-major']
+      # @types/vscode must not be newer than engines.vscode in apps/vscode (1.90): vsce refuses to
+      # package the extension otherwise. Raise both together, by hand.
+      - dependency-name: '@types/vscode'
     groups:
       minor-and-patch:
         update-types: [minor, patch]
