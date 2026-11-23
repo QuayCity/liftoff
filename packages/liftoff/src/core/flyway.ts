@@ -212,7 +212,7 @@ export function convert(root: string, name: string, useKeychain = keychainEnable
     let reason: string
     if (k.startsWith('flywayDesktop.') || k.startsWith('redgateCompare.') || ['id', 'name', 'databaseType'].includes(k)) continue
     if (k.startsWith('placeholder')) reason = 'LiftOff always replaces `${name}` placeholders, with Flyway\'s default `${` `}` markers'
-    else if (k.startsWith('callbacks')) reason = 'callbacks are not supported; turn them into scripts'
+    else if (k.startsWith('callbacks')) reason = 'Java callbacks need a JVM and are not supported; SQL callback files (beforeMigrate.sql, afterMigrate.sql, …) in the migrations folder run as they are'
     else if (k.startsWith('javaMigrations') || k.startsWith('resolvers')) reason = 'Java migrations and resolvers need a JVM; they are not supported'
     else if (['sqlMigrationPrefix', 'repeatableSqlMigrationPrefix', 'undoSqlMigrationPrefix', 'sqlMigrationSeparator', 'sqlMigrationSuffixes'].includes(k)) {
       reason = 'LiftOff uses the standard V/R/U/B prefixes, `__` and `.sql`; rename the files'

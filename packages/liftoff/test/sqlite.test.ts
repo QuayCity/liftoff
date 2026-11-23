@@ -62,6 +62,70 @@ test('the runner on SQLite', async () => {
   await assert.rejects(runner.migrate(cfg, 'dev'), /baseline|objects/i)
 })
 
+test('callbacks around migrate, each script, undo and clean, on SQLite', async () => {
+  const { DatabaseSync } = await import('node:sqlite')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-litecb-'))
+  const p = project('sqlite', [
+    ['test', `sqlite:${dir}/test.db`, 'test', { allow_clean: true }],
+    ['prod', `sqlite:${dir}/prod.db`, 'prod'],
+  ])
+  const cfg = p.cfg()
+  const log = (env: string) => {
+    const db = new DatabaseSync(path.join(dir, `${env}.db`))
+    try {
+      return (db.prepare('select what from cb_log order by n').all() as { what: string }[]).map((r) => r.what)
+    } finally {
+      db.close()
+    }
+  }
+  // The log table lives outside the migrations, as a callback's own work would.
+  await sql(cfg, 'test', 'create table cb_log (n integer primary key, what text)')
+  await sql(cfg, 'prod', 'create table cb_log (n integer primary key, what text)')
+  p.write('before-migrate.sql', "insert into cb_log (what) values ('before ${liftoff:environment}');\n")
+  p.write('beforeEachMigrate.sql', "insert into cb_log (what) values ('each');\n")
+  p.write('after-migrate__a.sql', "insert into cb_log (what) values ('after a');\n")
+  p.write('after-migrate__b.sql', "-- liftoff:for test\ninsert into cb_log (what) values ('after b, test only');\n")
+  p.write('after-undo.sql', "insert into cb_log (what) values ('undone');\n")
+  p.write('V1__start.sql', 'create table t (id integer primary key);\n')
+  p.write('V2__more.sql', 'create table u (id integer primary key);\n')
+  p.write('U2__more.sql', 'drop table u;\n')
+
+  const r = await runner.migrate(cfg, 'test', { allowNonEmpty: true })
+  assert.deepEqual(r.applied.map((a) => a.script), ['V1__start.sql', 'V2__more.sql'], 'callbacks are not migrations')
+  assert.deepEqual(log('test'), ['before test', 'each', 'each', 'after a', 'after b, test only'])
+  assert.ok(!(await runner.info(cfg, 'test')).some((i) => /migrate/.test(i.script)), 'not in the history')
+
+  // Nothing pending: before and after migrate run all the same; -- liftoff:for leaves prod out.
+  await runner.migrate(cfg, 'test')
+  await runner.migrate(cfg, 'prod', { allowNonEmpty: true })
+  assert.deepEqual(log('prod'), ['before prod', 'each', 'each', 'after a'])
+
+  const dry = (await runner.migrate(cfg, 'test', { dryRun: true })).dry_run_sql!
+  assert.ok(dry.includes('-- before-migrate.sql (callback: before-migrate)') && dry.includes("'before test'") && dry.includes('after-migrate__a.sql'), dry)
+
+  await runner.undo(cfg, 'test')
+  assert.equal(log('test').at(-1), 'undone')
+
+  // A failing script: the error callback runs, and the script's error is what comes back.
+  p.write('after-migrate-error.sql', 'create table failed_marker (id integer);\n')
+  p.write('V3__bad.sql', 'insert into no_such_table values (1);\n')
+  await assert.rejects(runner.migrate(cfg, 'test'), (e: unknown) => e instanceof MigrationError && e.message.includes('V3__bad.sql'))
+  assert.ok(await succeeds(cfg, 'test', 'select 1 from failed_marker'))
+  p.remove('V3__bad.sql')
+
+  // A failing callback stops the run like a failing script.
+  p.write('before-each-script__bad.sql', 'insert into no_such_table values (1);\n')
+  p.write('V3__fine.sql', 'create table v (id integer primary key);\n')
+  await assert.rejects(runner.migrate(cfg, 'test'), (e: unknown) => e instanceof MigrationError && e.message.includes('before-each-script__bad.sql'))
+  assert.equal((await runner.info(cfg, 'test')).find((i) => i.script === 'V3__fine.sql')?.state, 'pending')
+  p.remove('before-each-script__bad.sql')
+
+  p.write('after-clean.sql', 'create table after_clean (id integer);\n')
+  await runner.clean(cfg, 'test')
+  assert.ok(await succeeds(cfg, 'test', 'select 1 from after_clean'))
+  assert.ok(!(await succeeds(cfg, 'test', 'select 1 from t')))
+})
+
 test('the diff loop on SQLite, with table rebuilds', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-lite-'))
   const p = project('sqlite', [

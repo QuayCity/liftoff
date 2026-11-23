@@ -171,6 +171,35 @@ An undo script cannot bring back data: undoing `ADD COLUMN` drops the column and
 Use undo on dev and test environments to step back while working; on production, a new
 migration that fixes the problem is usually safer.
 
+## Callbacks
+
+A callback is SQL that runs at a moment of a run, every time: grant permissions again after objects
+were recreated, recompile what became invalid, refresh statistics, write an audit row. Put it in the
+migrations folder, named for the moment:
+
+| file | runs |
+| --- | --- |
+| `before-migrate.sql` | at the start of `migrate`, before anything else |
+| `before-each-script.sql` | before each script `migrate` runs |
+| `after-each-script.sql` | after each script `migrate` ran |
+| `after-migrate.sql` | at the end of `migrate`, also when nothing was pending |
+| `after-migrate-error.sql` | when `migrate` fails; the run still fails with the script's error |
+| `before-undo.sql`, `after-undo.sql` | around `undo` |
+| `before-clean.sql`, `after-clean.sql` | around `clean` (after it, the schemas are empty) |
+
+Several callbacks for one moment get a description: `after-migrate__grants.sql`,
+`after-migrate__stats.sql`. They run in file-name order.
+
+- A callback is not a migration: it has no version, is not in the history table and has no
+  checksum, so you can change it at any time.
+- Each runs in a transaction of its own (or outside one, as a script would), after the script before
+  it committed. A callback that fails stops the run like a failing script.
+- Placeholders work, and `-- liftoff:for` limits it to some environments. A scratch database
+  rebuilt for a check runs the migrate callbacks too.
+- `migrate --dry-run` shows them in the SQL it prints.
+- Flyway's file names (`beforeMigrate.sql`, `afterEachMigrate.sql`, `afterMigrate__grants.sql`, …)
+  work as well, so the callbacks of a project moved from Flyway run unchanged.
+
 ## Baseline scripts
 
 `B0003__baseline.sql` holds the whole schema as of version 3. On an **empty** database,
