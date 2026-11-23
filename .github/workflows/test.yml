@@ -3,7 +3,7 @@
 #   engines   the core against real MySQL and Oracle, on a runner of its own: four database
 #             containers and a VS Code download on one runner fill its disk
 #   desktop   the desktop app's screens in a browser (Playwright, with axe accessibility checks)
-#   cli       the single-file CLI builds and runs on Windows and macOS too
+#   cli       the single-file CLI builds and runs on Windows too (macOS is built only for releases: its runners cost ten times as much)
 # The Electron tests (e2e/app) need Windows and a database; run them locally (CONTRIBUTING.md).
 name: Tests
 
@@ -173,7 +173,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
