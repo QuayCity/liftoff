@@ -20,6 +20,8 @@ export type CheckReport = {
   drift: Change[] | null
   /** what the pending scripts will change on the environment */
   changes: Change[] | null
+  /** objects that drifted and that the pending scripts change too: where a deploy fails or overwrites a hand-made change */
+  drift_changed: string[]
   dry_run_sql: string | null
   /** the rules on the scripts still pending on the environment */
   rules: LintReport | null
@@ -30,13 +32,22 @@ export type CheckReport = {
 export const hasDrift = (r: CheckReport) => !!r.drift?.length
 
 /**
+ * The drifted objects the pending scripts change too, by object.
+ * ponytail: matched by object id, so a drifted index and a script that alters its table are not paired.
+ */
+export function driftChanged(r: Pick<CheckReport, 'drift' | 'changes'>): string[] {
+  const changed = new Set((r.changes ?? []).map((c) => c.id))
+  return (r.drift ?? []).filter((d) => changed.has(d.id)).map((d) => d.name)
+}
+
+/**
  * ponytail: the expected state is rebuilt by running every script up to the environment's latest
  * applied version; scripts the environment skipped (out of order) and outdated repeatables are not
  * modelled, so they can show up as drift.
  */
 export async function check(cfg: Config, envName: string | undefined, scratch: string | undefined, opts: CheckOptions, log: runner.Log = runner.quiet): Promise<CheckReport> {
   const [name, env] = cfg.pick(envName)
-  const report: CheckReport = { environment: name, applied_up_to: null, drift: null, changes: null, dry_run_sql: null, rules: null, not_compared: [] }
+  const report: CheckReport = { environment: name, applied_up_to: null, drift: null, changes: null, drift_changed: [], dry_run_sql: null, rules: null, not_compared: [] }
 
   if (opts.drift || opts.changes) {
     const [scratchName, scratchEnvironment] = scratchEnv(cfg, scratch)
@@ -76,6 +87,8 @@ export async function check(cfg: Config, envName: string | undefined, scratch: s
         if (!report.not_compared.length) report.not_compared = notComparedBetween(after, expected, 'after the scripts', 'now')
         log('info', `The pending scripts change ${report.changes.length} object(s)`)
       }
+      report.drift_changed = driftChanged(report)
+      for (const n of report.drift_changed) log('warn', `${n} differs on ${name} from what its scripts built, and the pending scripts change it`)
     } finally {
       await s.close()
     }
@@ -106,6 +119,9 @@ export function reportHtml(r: CheckReport, project: string, generatedAt: string)
     return h
   }
   let body = `<h1>Checks for ${esc(r.environment)}</h1><p>Project ${esc(project)} &middot; generated ${esc(generatedAt)} &middot; applied up to ${esc(r.applied_up_to ?? 'nothing')}</p>`
+  if (r.drift_changed.length) {
+    body += `<h2>Drifted, and changed by the pending scripts (${r.drift_changed.length})</h2><p class=warn>These differ from what the scripts built, and the deploy changes them: it may fail, or undo a change made by hand.</p><ul>${r.drift_changed.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`
+  }
   if (r.not_compared.length) body += `<h2>Not compared</h2><ul>${r.not_compared.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`
   body += section('Drift', r.drift, 'No drift: the database matches its applied scripts.')
   body += section('Pending changes', r.changes, 'The pending scripts change nothing.')

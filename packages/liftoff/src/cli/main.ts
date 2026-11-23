@@ -355,8 +355,9 @@ const COMMANDS: Record<string, Command> = {
       for (const [title, list] of [['Drift', r.drift], ['Pending changes', r.changes]] as const) {
         if (!list) continue
         text.push(`${title}: ${list.length || 'none'}`)
-        text.push(...list.map((c) => `  ${kindOf(c)} ${c.name}${c.destructive ? '  (may lose data)' : ''}`))
+        text.push(...list.map((c) => `  ${kindOf(c)} ${c.name}${c.destructive ? '  (may lose data)' : ''}${title === 'Pending changes' && r.drift_changed.includes(c.name) ? '  (drifted!)' : ''}`))
       }
+      if (r.drift_changed.length) text.push(`Drifted, and changed by the pending scripts: ${r.drift_changed.join(', ')}. The deploy may fail on them, or undo a change made by hand.`)
       if (r.rules) text.push(`Rules: ${r.rules.errors} error(s), ${r.rules.warnings} warning(s)`, ...r.rules.findings.map((f) => `  ${findingLine(f)}`))
       if (r.dry_run_sql !== null) text.push(`Dry run:\n${r.dry_run_sql}`)
       const failure = checks.hasDrift(r) ? driftError(r.environment) : r.rules?.errors ? rules.rulesError(r.rules) : undefined
