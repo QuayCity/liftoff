@@ -49,6 +49,7 @@ export const RULES: Record<string, Rule> = {
   'delete-without-where': { severity: 'error', help: 'DELETE without a WHERE clause removes every row' },
   'update-without-where': { severity: 'error', help: 'UPDATE without a WHERE clause changes every row' },
   'not-null-without-default': { severity: 'warn', help: 'Adding a NOT NULL column without a default fails on a table that has rows' },
+  'column-type-change': { severity: 'warn', help: "Changing a column's type: values that do not fit the new type fail the script or are cut" },
   'table-without-primary-key': { severity: 'warn', help: 'CREATE TABLE with no primary key (in the statement or later in the script)' },
   'select-star': { severity: 'warn', help: 'SELECT * in a view or a script: the columns change when the table does' },
   permissions: { severity: 'info', help: 'GRANT, REVOKE or DENY: permission changes, for the reviewer' },
@@ -399,6 +400,11 @@ function check(statementsOf: Token[][], engine: Engine, settings: Record<string,
             // SQL Server: DROP COLUMN a, b
           } while (engine === 'sqlserver' && s[k - 1]?.up === ',' && s[k]?.up !== 'DROP' && s[k]?.up !== 'ADD' && s[k]?.up !== 'ALTER' && k < s.length)
         }
+        if (!created.has(lastPart(table))) {
+          for (const [col, type] of typeChanges(s, i, engine)) {
+            hits.push({ rule: 'column-type-change', line: s[i].line, message: `changes column ${col} of ${table} to ${type}: values that do not fit fail the script or are cut` })
+          }
+        }
         if (s[i].up === 'ADD' || (engine === 'sqlserver' && s[i].up === ',' && inAddList(s, i, d))) {
           let k = i + 1
           if (s[k]?.up === 'COLUMN') k++
@@ -429,6 +435,64 @@ function check(statementsOf: Token[][], engine: Engine, settings: Record<string,
     if (p && !new RegExp(p, 'u').test(c.name)) hits.push({ rule: 'column-names', line: c.line, message: `column ${c.name} does not match ${p}` })
   }
   return hits
+}
+
+/** Where a column's type ends: its options, the next clause, or the end of a list. */
+const TYPE_ENDS = new Set(['NULL', 'NOT', 'DEFAULT', 'COLLATE', 'USING', 'CONSTRAINT', 'CHECK', 'FIRST', 'AFTER', 'COMMENT', 'CHARACTER', 'CHARSET', 'AUTO_INCREMENT', 'PRIMARY', 'UNIQUE', 'REFERENCES', 'ENABLE', 'DISABLE', 'VISIBLE', 'INVISIBLE', 'ENCRYPT', 'DECRYPT', 'SPARSE', 'MASKED', ',', ';'])
+
+/** The column type that starts at `k`, as text (`varchar(50)`); '' when there is none. */
+function typeAt(s: Token[], k: number): string {
+  const out: Token[] = []
+  let open = 0
+  for (let i = k; i < s.length; i++) {
+    if (open === 0 && (TYPE_ENDS.has(s[i].up) || s[i].up === ')')) break
+    open += s[i].up === '(' ? 1 : s[i].up === ')' ? -1 : 0
+    out.push(s[i])
+  }
+  return out.map((t) => t.raw).join(' ').replace(/ ?([(),]) ?/g, '$1').replace(/,/g, ', ')
+}
+
+/**
+ * The columns whose type the ALTER TABLE action at `i` changes, with the new type:
+ * PostgreSQL `ALTER [COLUMN] c [SET DATA] TYPE t`, SQL Server `ALTER COLUMN c t`,
+ * MySQL `MODIFY [COLUMN] c t` and `CHANGE [COLUMN] old new t`, Oracle `MODIFY c t` and `MODIFY (c t, …)`.
+ */
+function typeChanges(s: Token[], i: number, engine: Engine): [string, string][] {
+  const up = s[i].up
+  const col = (k: number) => (s[k]?.up === 'COLUMN' ? k + 1 : k)
+  if (up === 'ALTER' && engine === 'postgresql') {
+    const [c, n] = nameAt(s, col(i + 1))
+    const t = is(s, n, 'SET', 'DATA', 'TYPE') ? n + 3 : s[n]?.up === 'TYPE' ? n + 1 : -1
+    return t < 0 ? [] : [[c, typeAt(s, t)]]
+  }
+  if (up === 'ALTER' && engine === 'sqlserver' && s[i + 1]?.up === 'COLUMN') {
+    const [c, n] = nameAt(s, i + 2)
+    // ALTER COLUMN c ADD|DROP ROWGUIDCOL / PERSISTED / MASKED …: not a type
+    return s[n]?.up === 'ADD' || s[n]?.up === 'DROP' ? [] : [[c, typeAt(s, n)]]
+  }
+  if (up === 'CHANGE' && engine === 'mysql') {
+    const [c, n] = nameAt(s, col(i + 1))
+    const [, t] = nameAt(s, n)
+    return [[c, typeAt(s, t)]]
+  }
+  if (up === 'MODIFY' && (engine === 'mysql' || engine === 'oracle')) {
+    const one = (k: number): [string, string][] => {
+      const [c, n] = nameAt(s, k)
+      const type = typeAt(s, n)
+      return type ? [[c, type]] : []
+    }
+    let k = col(i + 1)
+    // Oracle: MODIFY CONSTRAINT / PARTITION / LOB / …, not a column
+    if (['CONSTRAINT', 'PARTITION', 'SUBPARTITION', 'LOB', 'DEFAULT', 'NESTED', 'VARRAY', 'PRIMARY', 'UNIQUE'].includes(s[k]?.up ?? '')) return []
+    if (s[k]?.up !== '(') return one(k)
+    const out: [string, string][] = []
+    const inner = s[k].depth + 1
+    for (k++; k < s.length && !(s[k].up === ')' && s[k].depth === inner - 1); k++) {
+      if (s[k].depth === inner && (s[k - 1].up === '(' || s[k - 1].up === ',')) out.push(...one(k))
+    }
+    return out
+  }
+  return []
 }
 
 /** SQL Server `ALTER TABLE t ADD a int, b int`: a comma inside an ADD list starts another column. */

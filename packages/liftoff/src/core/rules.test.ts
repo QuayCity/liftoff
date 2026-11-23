@@ -65,6 +65,31 @@ test('a NOT NULL column without a default on an existing table', () => {
   assert.deepEqual(run('ALTER TABLE t ADD CONSTRAINT u UNIQUE (a);'), [])
 })
 
+test("changing a column's type, in each engine's words", () => {
+  const types = (sql: string, engine: Engine = 'postgresql') =>
+    lintScript({ fileName: 'V1__x.sql', sql, kind: 'repeatable', version: undefined }, engine, NO_RULES)
+      .filter((f) => f.rule === 'column-type-change')
+      .map((f) => f.message.replace(/: values .*/, ''))
+  assert.deepEqual(types('ALTER TABLE t ALTER COLUMN a TYPE varchar(50), ALTER b SET DATA TYPE numeric(10, 2) USING b::numeric;'), [
+    'changes column a of t to varchar(50)',
+    'changes column b of t to numeric(10, 2)',
+  ])
+  assert.deepEqual(types('ALTER TABLE t ALTER COLUMN a SET NOT NULL, ALTER COLUMN b SET DEFAULT 0, ALTER COLUMN c DROP DEFAULT;'), [], 'not a type')
+  assert.deepEqual(types('ALTER TABLE dbo.t ALTER COLUMN a nvarchar(20) NOT NULL', 'sqlserver'), ['changes column a of dbo.t to nvarchar(20)'])
+  assert.deepEqual(types('ALTER TABLE dbo.t ALTER COLUMN a ADD ROWGUIDCOL', 'sqlserver'), [])
+  assert.deepEqual(types('ALTER TABLE t MODIFY COLUMN a int NOT NULL, CHANGE b c varchar(10) CHARACTER SET utf8mb4;', 'mysql'), [
+    'changes column a of t to int',
+    'changes column b of t to varchar(10)',
+  ])
+  assert.deepEqual(types('ALTER TABLE t MODIFY (a NUMBER(5), b VARCHAR2(10 CHAR) NOT NULL, c NOT NULL);', 'oracle'), [
+    'changes column a of t to NUMBER(5)',
+    'changes column b of t to VARCHAR2(10 CHAR)',
+  ])
+  assert.deepEqual(types('ALTER TABLE t MODIFY a DEFAULT 0;\nALTER TABLE t MODIFY CONSTRAINT pk DISABLE;', 'oracle'), [])
+  // the table is new in this script, so it is empty
+  assert.deepEqual(types('CREATE TABLE t (id int PRIMARY KEY, a text);\nALTER TABLE t ALTER COLUMN a TYPE varchar(5);'), [])
+})
+
 test('select star, grants, users and USE', () => {
   assert.deepEqual(run('CREATE VIEW v AS SELECT * FROM t;\nSELECT count(*) FROM t WHERE EXISTS (SELECT * FROM u);'), ['select-star:1'])
   assert.deepEqual(run('GRANT SELECT ON t TO PUBLIC WITH GRANT OPTION;'), ['grant-option:1', 'grant-to-public:1', 'permissions:1'])
