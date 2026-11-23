@@ -7,6 +7,7 @@
 // level. Good for the usual DDL and DML; unusual layouts can miss or over-report, which the allow
 // comment covers. Bodies of PostgreSQL functions ($$ … $$) are strings, so they are not checked.
 
+import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { Config, Engine } from './config.ts'
 import { configError, LiftoffError } from './errors.ts'
@@ -613,7 +614,17 @@ export function lintSarif(r: LintReport, cfg: Config, version: string): string {
   } catch {
     // not a git repository
   }
-  const paths = new Map(scan(cfg.migrationsDir()).map((s) => [s.fileName, path.relative(base, s.path).replaceAll('\\', '/')]))
+  // Both sides as the file system names them: git gives long names, a path from elsewhere may hold
+  // a Windows short name (RUNNER~1) or a symbolic link.
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync.native(p)
+    } catch {
+      return p
+    }
+  }
+  base = real(base)
+  const paths = new Map(scan(cfg.migrationsDir()).map((s) => [s.fileName, path.relative(base, real(s.path)).replaceAll('\\', '/')]))
   const rules = [
     ...Object.entries(RULES).map(([id, x]) => ({ id, help: x.help })),
     ...cfg.rules.custom.map((c) => ({ id: c.id, help: c.message })),
