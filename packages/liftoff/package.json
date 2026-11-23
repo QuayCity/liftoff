@@ -31,7 +31,7 @@
     "oracledb": "^26.0.0",
     "pg": "^8.23.1",
     "smol-toml": "^1.9.1",
-    "tedious": "^20.3.8"
+    "tedious": "^20.4.0"
   },
   "optionalDependencies": {
     "@napi-rs/keyring": "^2.1.2"
