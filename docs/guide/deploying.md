@@ -108,7 +108,12 @@ pipeline stops before deploying.
 
 ### When there is drift
 
-Someone changed the database outside the scripts. Decide which is right:
+Someone changed the database outside the scripts. When a drifted object is also one the pending
+scripts change, `check` says so (`(drifted!)` next to it, and a line naming them; `drift_changed` in
+the JSON, a section in the report): that deploy may fail on it, or quietly undo the change made by
+hand. Sort those out first.
+
+Decide which is right:
 - **The change should stay:** make the same change in dev and write a migration
   (`liftoff generate`). Its `CREATE` or `ALTER` may then fail on prod, where the object already
   exists: edit the script to skip what is there (`IF NOT EXISTS`, `IF COL_LENGTH(…) IS NULL`), or
