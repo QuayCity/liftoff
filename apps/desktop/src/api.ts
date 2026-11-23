@@ -590,7 +590,7 @@ const fakeApi: Api = {
   convertFlyway: async (path) => {
     await wait()
     const report: ConvertReport = { source: `${path}/flyway.toml`, written: `${path}/liftoff.toml`, environments: ['development', 'shadow', 'production'], migrations: 'migrations', schemas: ['public'], flyway_table: 'flyway_schema_history',
-      not_converted: ['placeholders.owner = app: placeholders are not supported; replace them in the scripts', 'callbacks = com.acme.Audit: callbacks are not supported; turn them into scripts'], notes: [] }
+      not_converted: ['placeholders.owner = app: placeholders are not supported; replace them in the scripts', 'callbacks = com.acme.Audit: Java callbacks need a JVM and are not supported; SQL callback files (beforeMigrate.sql, afterMigrate.sql, …) in the migrations folder run as they are'], notes: [] }
     return { report, project: { ...fakeProject(), root: path, name: 'legacy-flyway' } }
   },
   historyImport: async (_p, env) => {

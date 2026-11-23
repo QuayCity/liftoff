@@ -5,6 +5,7 @@ import * as path from 'node:path'
 import { test } from 'node:test'
 import {
   applyPlaceholders,
+  callbackEvent,
   holds,
   isFor,
   parseExpression,
@@ -28,6 +29,19 @@ test('file names', () => {
   assert.equal(parseName('R1__x.sql'), undefined)
   assert.equal(parseName('V__x.sql'), undefined)
   assert.equal(parseName('readme.md'), undefined)
+})
+
+test('callback file names', () => {
+  assert.equal(callbackEvent('after-migrate.sql'), 'after-migrate')
+  assert.equal(callbackEvent('after-migrate__grants.sql'), 'after-migrate')
+  assert.equal(callbackEvent('afterMigrate.sql'), 'after-migrate', "Flyway's name")
+  assert.equal(callbackEvent('beforeEachMigrate__log.sql'), 'before-each-script')
+  assert.equal(callbackEvent('after-migrate-error.sql'), 'after-migrate-error')
+  assert.equal(callbackEvent('after-migrate.txt'), undefined)
+  assert.equal(callbackEvent('afterValidate.sql'), undefined, 'an event LiftOff does not have')
+  assert.equal(callbackEvent('toString.sql'), undefined)
+  assert.equal(callbackEvent('V1__after-migrate.sql'), undefined)
+  assert.equal(parseName('after-migrate__grants.sql'), undefined, 'not a migration')
 })
 
 test('versions sort as numbers', () => {

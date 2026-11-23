@@ -9,7 +9,7 @@ import type { Config, Environment } from './config.ts'
 import { BaselineDiffersError, configError, DbError, MigrationError, notBaselinedError, validateError } from './errors.ts'
 import { activityTable, dialect, open, type Conn, type EngineName, type Held, type HistoryRow } from './db.ts'
 import { run as git } from './git.ts'
-import { applyPlaceholders, compareVersions, holds, isFor, parseExpression, parseVersion, scan, versionNote, type Kind, type Script, type Version } from './migration.ts'
+import { applyPlaceholders, compareVersions, holds, isFor, parseExpression, parseVersion, scan, scanCallbacks, versionNote, type Callback, type Event, type Kind, type Script, type Version } from './migration.ts'
 
 export type State =
   | 'pending'
@@ -346,6 +346,7 @@ export async function migrate(cfg: Config, envName: string | undefined, opts: Mi
   if (opts.topic !== undefined && (opts.only || opts.target !== undefined)) throw configError('use --topic on its own, without --only or --target')
   if (opts.topic !== undefined) parseExpression(opts.topic, '--topic')
   const scripts = scan(cfg.migrationsDir())
+  const callbacks = scanCallbacks(cfg.migrationsDir())
   const note = versionNote(scripts)
   if (note) log('warn', note)
   // Placeholder values are checked before anything runs (an unset variable fails here).
@@ -354,16 +355,29 @@ export async function migrate(cfg: Config, envName: string | undefined, opts: Mi
     const s = await c.serverInfo()
     log('info', `Connected to ${name} (${s.database} as ${s.user}, ${c.engine} ${s.version})`)
     const [schema, table] = [cfg.historySchema(), cfg.project.history_table]
+    const as = targetOf(cfg, name, env, opts.as)
+    const on = (event: Event) => callbacks.filter((x) => x.event === event && isFor(x, as))
     if (opts.dryRun) {
-      const result = dryRun(cfg, c.engine, name, targetOf(cfg, name, env, opts.as), scripts, await c.readHistory(schema, table), opts, target)
+      const result = dryRun(cfg, c.engine, name, as, scripts, on, await c.readHistory(schema, table), opts, target)
       result.execution_time_ms = Date.now() - started
       return result
     }
     const held = await c.lock(schema, table, cfg.project.lock, waiting(log), () => open(name, env))
     const result: MigrateResult = { environment: name, applied: [], execution_time_ms: 0, dry_run_sql: null }
     const a = { ...audit('migrate', optionsText(opts)), scripts: () => result.applied.map((x) => x.script) }
+    const run = (event: Event) => runCallbacks(c, cfg, name, on(event), log)
     try {
-      await audited(c, cfg, log, a, () => migrateLocked(c, cfg, name, targetOf(cfg, name, env, opts.as), scripts, opts, target, log, result))
+      await audited(c, cfg, log, a, async () => {
+        await run('before-migrate')
+        try {
+          await migrateLocked(c, cfg, name, as, scripts, run, opts, target, log, result)
+        } catch (e) {
+          // The run's own error is what the caller sees; a failing error callback only warns.
+          await run('after-migrate-error').catch((x) => log('warn', failure(x)))
+          throw e
+        }
+        await run('after-migrate')
+      })
     } finally {
       // Released on failure too (a dropped connection or an expired lease would free it as well).
       await held.release()
@@ -496,11 +510,25 @@ function baselineScript(scripts: Script[], target: Version | undefined): Script 
 }
 
 /** The script's SQL with this environment's placeholder values. */
-function sqlFor(cfg: Config, env: string, s: Script): string {
+function sqlFor(cfg: Config, env: string, s: Pick<Script, 'sql' | 'fileName'>): string {
   return applyPlaceholders(s.sql, cfg.placeholders(env), cfg.usesPlaceholders(), s.fileName)
 }
 
-function dryRun(cfg: Config, engine: EngineName, name: string, as: Target, scripts: Script[], rows: HistoryRow[], opts: MigrateOptions, target: Version | undefined): MigrateResult {
+/** Runs callbacks in order, each in a transaction of its own (unless its SQL cannot run in one); none goes in the history table. */
+async function runCallbacks(c: Conn, cfg: Config, name: string, callbacks: Callback[], log: Log): Promise<void> {
+  for (const cb of callbacks) {
+    log('info', `Running ${cb.fileName} (${cb.event})`)
+    const sql = sqlFor(cfg, name, cb)
+    const transactional = !dialect[c.engine].needsNoTransaction(sql)
+    try {
+      await transact(c, transactional, () => c.script(sql, transactional))
+    } catch (e) {
+      throw new MigrationError(cb.fileName, failure(e))
+    }
+  }
+}
+
+function dryRun(cfg: Config, engine: EngineName, name: string, as: Target, scripts: Script[], on: (e: Event) => Callback[], rows: HistoryRow[], opts: MigrateOptions, target: Version | undefined): MigrateResult {
   const d = dialect[engine]
   const q = d.quote
   let infos = compute(scripts, rows, as)
@@ -508,6 +536,15 @@ function dryRun(cfg: Config, engine: EngineName, name: string, as: Target, scrip
   // An engine that uses the connection's own schema (no schemas set): the history table goes without one.
   const history = cfg.historySchema() ? `${q(cfg.historySchema())}.${q(cfg.project.history_table)}` : q(cfg.project.history_table)
   let sql = `-- Dry run for ${name}: nothing below has been executed.\n-- History table: ${history}\n`
+  const callbacks = (event: Event) =>
+    on(event)
+      .map((cb) => {
+        const body = sqlFor(cfg, name, cb).trimEnd()
+        const tx = !d.needsNoTransaction(body)
+        return `\n-- ${cb.fileName} (callback: ${event})${tx ? '' : ' (runs outside a transaction)'}\n${tx ? `${d.begin};\n${body}\nCOMMIT;\n` : `${body}\n`}`
+      })
+      .join('')
+  sql += callbacks('before-migrate')
   const result: MigrateResult = { environment: name, applied: [], execution_time_ms: 0, dry_run_sql: null }
   const b = rows.length === 0 && !opts.only && opts.topic === undefined ? baselineScript(scripts, target) : undefined
   if (b) {
@@ -524,17 +561,31 @@ function dryRun(cfg: Config, engine: EngineName, name: string, as: Target, scrip
     const record =
       `INSERT INTO ${history} (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success)\n` +
       `  SELECT coalesce(max(installed_rank), 0) + 1, ${version}, '${esc(s.description)}', 'SQL', '${esc(s.fileName)}', ${s.checksum}, ${d.currentUser}, 0, ${d.true} FROM ${history};`
+    sql += callbacks('before-each-script')
     sql += `\n-- ${s.fileName}${transactional ? '' : ' (runs outside a transaction)'}\n`
     const body = sqlFor(cfg, name, s).trimEnd()
     sql += transactional ? `${d.begin};\n${body}\n${record}\nCOMMIT;\n` : `${body}\n${record}\n`
+    sql += callbacks('after-each-script')
     result.applied.push({ script: s.fileName, version: s.version?.text ?? null, execution_time_ms: 0, transactional })
   }
   if (!result.applied.length) sql += '\n-- Nothing pending.\n'
+  sql += callbacks('after-migrate')
   result.dry_run_sql = sql
   return result
 }
 
-async function migrateLocked(c: Conn, cfg: Config, name: string, as: Target, scripts: Script[], opts: MigrateOptions, target: Version | undefined, log: Log, result: MigrateResult): Promise<void> {
+async function migrateLocked(
+  c: Conn,
+  cfg: Config,
+  name: string,
+  as: Target,
+  scripts: Script[],
+  run: (event: Event) => Promise<void>,
+  opts: MigrateOptions,
+  target: Version | undefined,
+  log: Log,
+  result: MigrateResult,
+): Promise<void> {
   const [schema, table] = [cfg.historySchema(), cfg.project.history_table]
   await c.ensureHistory(schema, table)
   let rows = await c.readHistory(schema, table)
@@ -589,6 +640,7 @@ async function migrateLocked(c: Conn, cfg: Config, name: string, as: Target, scr
       if (!ddlNoted) log('info', `${c.engine} commits DDL at once: if a script with DDL fails part-way, what ran stays (repair, then fix the script)`)
       ddlNoted = true
     } else if (!transactional) log('warn', `${s.fileName} runs outside a transaction; if it fails part-way it cannot be rolled back`)
+    await run('before-each-script')
     log('info', `Running ${s.fileName}`)
     const t = Date.now()
     try {
@@ -602,6 +654,7 @@ async function migrateLocked(c: Conn, cfg: Config, name: string, as: Target, scr
     const ms = Date.now() - t
     log('info', `Applied ${s.fileName} in ${ms} ms`)
     result.applied.push({ script: s.fileName, version: s.version?.text ?? null, execution_time_ms: ms, transactional })
+    await run('after-each-script')
   }
 }
 
@@ -613,15 +666,19 @@ function failure(e: unknown): string {
 
 async function runScript(c: Conn, s: Script, sql: string, transactional: boolean, schema: string, table: string, type: string): Promise<void> {
   const t = Date.now()
-  if (!transactional) {
-    await c.script(sql, false)
-    return record(c, s, Date.now() - t, true, schema, table, type)
-  }
   // One transaction for the script and its history row: both land or neither does.
+  await transact(c, transactional, async () => {
+    await c.script(sql, transactional)
+    await record(c, s, Date.now() - t, true, schema, table, type)
+  })
+}
+
+/** Runs `work` in a transaction (rolled back when it fails), or as it is. */
+async function transact(c: Conn, transactional: boolean, work: () => Promise<void>): Promise<void> {
+  if (!transactional) return work()
   await c.batch(dialect[c.engine].begin)
   try {
-    await c.script(sql, true)
-    await record(c, s, Date.now() - t, true, schema, table, type)
+    await work()
   } catch (e) {
     // On SQL Server XACT_ABORT may have rolled back already; then this one just fails.
     await c.batch('ROLLBACK').catch(() => {})
@@ -648,6 +705,7 @@ export async function undo(cfg: Config, envName: string | undefined, log: Log = 
     const u = s.scripts.find((x) => x.kind === 'undo' && compareVersions(x.version, v) === 0)
     if (!u) throw validateError(`${latest.script} has no undo script (U${latest.version}__….sql)`)
     const transactional = !dialect[s.c.engine].needsNoTransaction(u.sql)
+    await s.callbacks('before-undo')
     log('info', `Undoing ${latest.script} with ${u.fileName}`)
     s.audit.scripts = () => [u.fileName]
     const t = Date.now()
@@ -657,6 +715,7 @@ export async function undo(cfg: Config, envName: string | undefined, log: Log = 
       throw new MigrationError(u.fileName, failure(e))
     }
     const ms = Date.now() - t
+    await s.callbacks('after-undo')
     log('info', `Undid ${latest.script} in ${ms} ms; it is pending again`)
     return { script: u.fileName, version: latest.version, execution_time_ms: ms, transactional }
   })
@@ -680,19 +739,27 @@ export async function validateEnv(cfg: Config, envName: string | undefined): Pro
   return infos
 }
 
-/** A locked connection with the history table in place; `audit` is what the activity table gets. */
-type Session = { c: Conn; name: string; schema: string; table: string; scripts: Script[]; rows: HistoryRow[]; audit: Audit }
+/** A locked connection with the history table in place; `audit` is what the activity table gets; `callbacks` runs an event's callbacks. */
+type Session = { c: Conn; name: string; schema: string; table: string; scripts: Script[]; rows: HistoryRow[]; audit: Audit; callbacks: (event: Event) => Promise<void> }
+
+/** The callbacks of the migrations folder, as a runner for one environment's events. */
+function callbacksFor(cfg: Config, c: Conn, name: string, env: Environment, log: Log): (event: Event) => Promise<void> {
+  const all = scanCallbacks(cfg.migrationsDir())
+  const target = targetOf(cfg, name, env)
+  return (event) => runCallbacks(c, cfg, name, all.filter((x) => x.event === event && isFor(x, target)), log)
+}
 
 async function withSession<T>(cfg: Config, envName: string | undefined, log: Log, operation: string, work: (s: Session) => Promise<T>): Promise<T> {
   const scripts = scan(cfg.migrationsDir())
   return withEnv(cfg, envName, async (c, name, env) => {
     const [schema, table] = [cfg.historySchema(), cfg.project.history_table]
+    const callbacks = callbacksFor(cfg, c, name, env, log)
     const held: Held = await c.lock(schema, table, cfg.project.lock, waiting(log), () => open(name, env))
     const a = audit(operation)
     try {
       return await audited(c, cfg, log, a, async () => {
         await c.ensureHistory(schema, table)
-        return work({ c, name, schema, table, scripts, rows: await c.readHistory(schema, table), audit: a })
+        return work({ c, name, schema, table, scripts, rows: await c.readHistory(schema, table), audit: a, callbacks })
       })
     } finally {
       await held.release()
@@ -754,10 +821,15 @@ export async function clean(cfg: Config, envName: string | undefined, log: Log =
     throw configError(`clean is turned off for '${name}'; set allow_clean = true for it in liftoff.toml if it really may be erased`)
   }
   await withEnv(cfg, name, async (c) => {
+    const callbacks = callbacksFor(cfg, c, name, env, log)
     const held = await c.lock(cfg.historySchema(), cfg.project.history_table, cfg.project.lock, waiting(log), () => open(name, env))
     try {
       // The activity table goes too; the clean is its first row again.
-      await audited(c, cfg, log, { ...audit('clean'), detail: `erased ${cfg.project.schemas.join(', ')}` }, () => c.resetSchemas(cfg.project.schemas))
+      await audited(c, cfg, log, { ...audit('clean'), detail: `erased ${cfg.project.schemas.join(', ')}` }, async () => {
+        await callbacks('before-clean')
+        await c.resetSchemas(cfg.project.schemas)
+        await callbacks('after-clean')
+      })
     } finally {
       await held.release()
     }

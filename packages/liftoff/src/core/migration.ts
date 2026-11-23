@@ -88,12 +88,7 @@ export function scan(dir: string): Script[] {
     }
     const file = path.join(f.parentPath, f.name)
     const bytes = fs.readFileSync(file)
-    let sql: string
-    try {
-      sql = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
-    } catch {
-      throw configError(`${f.name} is not valid UTF-8`)
-    }
+    const sql = decode(bytes, f.name)
     const restart = parsed.kind === 'baseline' && new RegExp(`^${RESTART_MARK}\\b`, 'm').test(sql)
     scripts.push({ kind: parsed.kind, version, description: parsed.description, fileName: f.name, path: file, checksum: checksum(bytes), sql, restart, ...marks(sql, f.name) })
   }
@@ -111,6 +106,57 @@ export function scan(dir: string): Script[] {
       compareVersions(a.version, b.version) ||
       (a.description < b.description ? -1 : a.description > b.description ? 1 : 0),
   )
+}
+
+function decode(bytes: Uint8Array, name: string): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+  } catch {
+    throw configError(`${name} is not valid UTF-8`)
+  }
+}
+
+/** When a callback runs. */
+export const EVENTS = ['before-migrate', 'before-each-script', 'after-each-script', 'after-migrate', 'after-migrate-error', 'before-undo', 'after-undo', 'before-clean', 'after-clean'] as const
+export type Event = (typeof EVENTS)[number]
+
+/** Flyway's file names for the same events, so the callbacks of an imported project run as they are. */
+const FLYWAY_EVENTS: Record<string, Event> = {
+  beforeMigrate: 'before-migrate',
+  beforeEachMigrate: 'before-each-script',
+  afterEachMigrate: 'after-each-script',
+  afterMigrate: 'after-migrate',
+  afterMigrateError: 'after-migrate-error',
+  beforeUndo: 'before-undo',
+  afterUndo: 'after-undo',
+  beforeClean: 'before-clean',
+  afterClean: 'after-clean',
+}
+
+/** A callback: SQL that runs at an event, never recorded in the history table. */
+export type Callback = { event: Event; fileName: string; path: string; sql: string; for?: string }
+
+/** `after-migrate.sql` and `after-migrate__grants.sql` -> after-migrate; anything else: undefined. */
+export function callbackEvent(name: string): Event | undefined {
+  if (!name.endsWith('.sql')) return undefined
+  const head = name.slice(0, -4).split('__')[0]
+  return (EVENTS as readonly string[]).includes(head) ? (head as Event) : Object.hasOwn(FLYWAY_EVENTS, head) ? FLYWAY_EVENTS[head] : undefined
+}
+
+/** Every callback under `dir` (sub-folders too), by file name. */
+export function scanCallbacks(dir: string): Callback[] {
+  const files = fs.existsSync(dir) ? (fs.readdirSync(dir, { recursive: true, withFileTypes: true }) as fs.Dirent[]) : []
+  const out: Callback[] = []
+  for (const f of files) {
+    const event = f.isFile() ? callbackEvent(f.name) : undefined
+    if (!event) continue
+    const file = path.join(f.parentPath, f.name)
+    const sql = decode(fs.readFileSync(file), f.name)
+    const { topics, ...rest } = marks(sql, f.name)
+    if (topics) throw configError(`${f.name}: a callback runs at every ${event}; -- liftoff:topic does not apply (use -- liftoff:for to limit where it runs)`)
+    out.push({ event, fileName: f.name, path: file, sql, ...rest })
+  }
+  return out.sort((a, b) => (a.fileName < b.fileName ? -1 : a.fileName > b.fileName ? 1 : 0))
 }
 
 /** The `-- liftoff:for` and `-- liftoff:topic` lines of a script, checked. */

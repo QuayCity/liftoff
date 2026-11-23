@@ -25,6 +25,7 @@ What carries over:
 | placeholders | `[project.placeholders]` |
 | `cleanDisabled` | `allow_clean` |
 | `authentication=ActiveDirectory…` in the URL | kept: the same Microsoft Entra ID sign-in |
+| SQL callback files (`beforeMigrate.sql`, `afterMigrate__grants.sql`, …) | run as they are: see [Callbacks](scripts.md#callbacks); Java callbacks are not supported |
 
 Settings with no LiftOff equivalent are listed as **not converted**, each with the reason.
 A filter is added so Flyway's own history table, `flyway_schema_history`, is never compared or
