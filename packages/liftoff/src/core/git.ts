@@ -164,5 +164,5 @@ export function filesAt(root: string, ref: string, dir: string): string[] {
   return out.split('\n').filter(Boolean).map((p) => p.split('/').pop()!)
 }
 
-/** For tests: run git and return its output. */
+/** Runs git in a folder and returns its output. */
 export const run = git

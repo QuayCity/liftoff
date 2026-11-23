@@ -121,6 +121,19 @@ The workflow `liftoff ci` writes runs `liftoff lint --since origin/<base branch>
 **New migration scripts: order and rules**. Make that job a required check and a script with a
 rule error cannot be merged. See [Teams, branches and pipelines](teams-and-pipelines.md).
 
+The same job sends the findings to GitHub's code scanning, which shows each one on its line in the
+pull request's **Files changed** tab. Code scanning is free for public repositories; a private one
+needs GitHub Advanced Security, and without it only the upload step fails (it does not stop the
+job). Elsewhere, write the file yourself and give it to whatever reads SARIF:
+
+```sh
+liftoff lint --since origin/main --sarif liftoff-rules.sarif
+liftoff -e prod check --rules --sarif liftoff-rules.sarif
+```
+
+Paths in it are relative to the root of the git repository. Allowed findings are in it as
+suppressed, with their reason.
+
 ## In the desktop app and VS Code
 
 - Desktop app: the **Rules** workspace lists every rule with what it checks and the severity it
