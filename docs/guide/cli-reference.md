@@ -172,6 +172,7 @@ Options:
       --script <FILE>                Only this script (file name; repeatable). Default: every versioned and repeatable script
       --since <REF>                  Only the scripts that are not on this git branch or commit yet (e.g. origin/main); for pull requests
       --report <FILE>                Also write a self-contained HTML report to this file
+      --sarif <FILE>                 Also write the findings as SARIF to this file, for code scanning (GitHub shows them on the pull request)
       --list                         List the rules with the severity each runs at, and stop
 ```
 
@@ -229,6 +230,7 @@ Options:
       --dry-run                      The SQL that would run
       --scratch <SCRATCH>            Scratch environment rebuilt for the comparison (default: the first with role "scratch")
       --report <FILE>                Also write a self-contained HTML report to this file
+      --sarif <FILE>                 Also write the rule findings as SARIF to this file, for code scanning
       --model                        Instead: fail (exit 14) when the schema model has changes no migration script makes; for pull requests
 ```
 

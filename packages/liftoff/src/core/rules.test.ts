@@ -7,7 +7,7 @@ import { test } from 'node:test'
 import { Config, init, saveRules, type Engine } from './config.ts'
 import { LiftoffError } from './errors.ts'
 import { parseVersion } from './migration.ts'
-import { lint, lintScript, NO_RULES, parseRules, type RulesConfig } from './rules.ts'
+import { lint, lintSarif, lintScript, NO_RULES, parseRules, type RulesConfig } from './rules.ts'
 
 const v = (text: string) => parseVersion(text)
 /** rule:line for each finding, so a test reads like the expected report */
@@ -173,6 +173,33 @@ test('lint reads [rules] from liftoff.toml, skips undo scripts, and --since pick
   assert.deepEqual(mine.scripts, ['V0002__new.sql'])
   assert.deepEqual([mine.errors, mine.warnings], [0, 1])
   assert.throws(() => lint(cfg, { scripts: ['V9__nope.sql'] }), /no script V9__nope.sql/)
+})
+
+test('SARIF: paths from the repository root, levels, and allowed findings as suppressed', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-sarif-'))
+  assert.equal(spawnSync('git', ['init', '-q'], { cwd: repo }).status, 0)
+  // The project in a sub-folder of the repository: code scanning needs paths from the repository's root.
+  const dir = path.join(repo, 'db')
+  fs.mkdirSync(dir)
+  init(dir, 'shop', 'postgresql')
+  fs.appendFileSync(path.join(dir, 'liftoff.toml'), '\n[rules]\ndrop-table = "error"\n')
+  fs.writeFileSync(path.join(dir, 'migrations', 'V0001__x.sql'), 'CREATE TABLE t (id int PRIMARY KEY);\nDROP TABLE legacy;\n-- liftoff:allow truncate: emptied on purpose\nTRUNCATE audit;\n')
+  const cfg = Config.load(dir)
+  const log = JSON.parse(lintSarif(lint(cfg), cfg, '9.9.9'))
+  assert.equal(log.version, '2.1.0')
+  assert.equal(log.runs[0].tool.driver.version, '9.9.9')
+  assert.ok(log.runs[0].tool.driver.rules.some((r: { id: string }) => r.id === 'drop-table'))
+  const results = log.runs[0].results.map((r: { ruleId: string; level: string; locations: { physicalLocation: { artifactLocation: { uri: string }; region: { startLine: number } } }[]; suppressions?: unknown }) => [
+    r.ruleId,
+    r.level,
+    r.locations[0].physicalLocation.artifactLocation.uri,
+    r.locations[0].physicalLocation.region.startLine,
+    r.suppressions,
+  ])
+  assert.deepEqual(results, [
+    ['drop-table', 'error', 'db/migrations/V0001__x.sql', 2, undefined],
+    ['truncate', 'warning', 'db/migrations/V0001__x.sql', 4, [{ kind: 'inSource', justification: 'emptied on purpose' }]],
+  ])
 })
 
 test('saveRules writes only what differs from the defaults, keeps the rest of liftoff.toml, and refuses a bad pattern', () => {

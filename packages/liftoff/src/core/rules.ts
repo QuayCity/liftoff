@@ -7,9 +7,10 @@
 // level. Good for the usual DDL and DML; unusual layouts can miss or over-report, which the allow
 // comment covers. Bodies of PostgreSQL functions ($$ … $$) are strings, so they are not checked.
 
+import * as path from 'node:path'
 import type { Config, Engine } from './config.ts'
 import { configError, LiftoffError } from './errors.ts'
-import { filesAt } from './git.ts'
+import { filesAt, run as gitRun } from './git.ts'
 import { scan, type Script } from './migration.ts'
 
 export type Severity = 'off' | 'info' | 'warn' | 'error'
@@ -597,6 +598,44 @@ export function findingsHtml(r: LintReport): string {
 export const FINDINGS_CSS =
   'table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #d5d9de;padding:.3rem .5rem;text-align:left;vertical-align:top}' +
   'tr.error td:nth-child(3){color:#b42d25;font-weight:600}tr.warn td:nth-child(3){color:#8a5a00}tr.allowed{color:#5d6670}'
+
+const LEVEL = { error: 'error', warn: 'warning', info: 'note' } as const
+
+/**
+ * The findings as SARIF 2.1.0, for code scanning (GitHub shows each one on its line in a pull
+ * request). Paths are relative to the git repository's root, or to the project folder outside one.
+ * Allowed findings go in as suppressed, with the reason.
+ */
+export function lintSarif(r: LintReport, cfg: Config, version: string): string {
+  let base = cfg.root
+  try {
+    base = gitRun(cfg.root, ['rev-parse', '--show-toplevel']).trim() || cfg.root
+  } catch {
+    // not a git repository
+  }
+  const paths = new Map(scan(cfg.migrationsDir()).map((s) => [s.fileName, path.relative(base, s.path).replaceAll('\\', '/')]))
+  const rules = [
+    ...Object.entries(RULES).map(([id, x]) => ({ id, help: x.help })),
+    ...cfg.rules.custom.map((c) => ({ id: c.id, help: c.message })),
+  ]
+  const log = {
+    $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
+    version: '2.1.0',
+    runs: [
+      {
+        tool: { driver: { name: 'LiftOff', version, informationUri: 'https://github.com/QuayCity/liftoff', rules: rules.map((x) => ({ id: x.id, shortDescription: { text: x.help } })) } },
+        results: r.findings.map((f) => ({
+          ruleId: f.rule,
+          level: LEVEL[f.severity],
+          message: { text: f.message },
+          locations: [{ physicalLocation: { artifactLocation: { uri: paths.get(f.script) ?? f.script }, region: { startLine: f.line } } }],
+          ...(f.allowed !== undefined && { suppressions: [{ kind: 'inSource', justification: f.allowed }] }),
+        })),
+      },
+    ],
+  }
+  return `${JSON.stringify(log, null, 2)}\n`
+}
 
 /** A self-contained HTML report of a lint run. */
 export function lintReportHtml(r: LintReport, project: string, generatedAt: string): string {

@@ -324,6 +324,7 @@ const COMMANDS: Record<string, Command> = {
       'dry-run': { type: 'boolean', help: 'The SQL that would run' },
       scratch: { type: 'string', help: 'Scratch environment rebuilt for the comparison (default: the first with role "scratch")' },
       report: { type: 'string', help: 'Also write a self-contained HTML report to this file', value: 'FILE' },
+      sarif: { type: 'string', help: 'Also write the rule findings as SARIF to this file, for code scanning', value: 'FILE' },
       model: { type: 'boolean', help: 'Instead: fail (exit 14) when the schema model has changes no migration script makes; for pull requests' },
     },
     async run(ctx, v) {
@@ -349,6 +350,7 @@ const COMMANDS: Record<string, Command> = {
         fs.writeFileSync(report, checks.reportHtml(r, cfg.project.name, new Date().toISOString()))
         log('info', `Report written to ${report}`)
       }
+      if (r.rules) writeSarif(cfg, r.rules, str(v, 'sarif'))
       const text: string[] = []
       for (const [title, list] of [['Drift', r.drift], ['Pending changes', r.changes]] as const) {
         if (!list) continue
@@ -372,6 +374,7 @@ const COMMANDS: Record<string, Command> = {
       script: { type: 'string', multiple: true, help: 'Only this script (file name; repeatable). Default: every versioned and repeatable script', value: 'FILE' },
       since: { type: 'string', help: 'Only the scripts that are not on this git branch or commit yet (e.g. origin/main); for pull requests', value: 'REF' },
       report: { type: 'string', help: 'Also write a self-contained HTML report to this file', value: 'FILE' },
+      sarif: { type: 'string', help: 'Also write the findings as SARIF to this file, for code scanning (GitHub shows them on the pull request)', value: 'FILE' },
       list: { type: 'boolean', help: 'List the rules with the severity each runs at, and stop' },
     },
     async run(ctx, v) {
@@ -390,6 +393,7 @@ const COMMANDS: Record<string, Command> = {
         fs.writeFileSync(report, rules.lintReportHtml(r, cfg.project.name, new Date().toISOString()))
         log('info', `Report written to ${report}`)
       }
+      writeSarif(cfg, r, str(v, 'sarif'))
       const text = [...r.findings.map(findingLine), `${r.scripts.length} script(s): ${r.errors} error(s), ${r.warnings} warning(s)`].join('\n')
       if (r.errors) {
         process.stdout.write(ctx.json ? `${JSON.stringify({ ok: false, result: r, error: rules.rulesError(r).report() })}\n` : `${text}\n`)
@@ -813,6 +817,13 @@ const COMMANDS: Record<string, Command> = {
 }
 
 /** The report was already printed on stdout; only the message (stderr) and the exit code are left. */
+/** `--sarif FILE`: the findings for code scanning, written before any exit code. */
+function writeSarif(cfg: Config, r: rules.LintReport, file: string | undefined): void {
+  if (!file) return
+  fs.writeFileSync(file, rules.lintSarif(r, cfg, VERSION))
+  log('info', `SARIF written to ${file}`)
+}
+
 /** `V0003__x.sql:12  warn   drop-table  drops table orders` */
 const findingLine = (f: rules.Finding) =>
   `${`${f.script}:${f.line}`.padEnd(30)} ${(f.allowed !== undefined ? 'allowed' : f.severity).padEnd(7)} ${f.rule.padEnd(26)} ${f.message}${f.allowed ? `  (${f.allowed})` : ''}`

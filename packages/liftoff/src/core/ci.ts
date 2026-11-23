@@ -81,10 +81,15 @@ function scratchService(engine: string): { service: string; url: string; prepare
 function orderJob(o: CiOptions): string {
   return (
     "  migration-order:\n    name: 'New migration scripts: order and rules'\n    if: github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n" +
+    // security-events: the findings go to code scanning, which shows them on the pull request's lines.
+    '    permissions:\n      contents: read\n      security-events: write\n' +
     '    steps:\n      - uses: actions/checkout@v7\n        with:\n          fetch-depth: 0\n' +
     `      - name: Install LiftOff\n        run: ${yamlStr(o.install)}\n` +
     '      - name: Check the numbering\n        env:\n          BASE: ${{ github.base_ref }}\n        run: liftoff renumber --check --after "origin/$BASE"\n' +
-    '      - name: The rules on the new scripts\n        env:\n          BASE: ${{ github.base_ref }}\n        run: liftoff lint --since "origin/$BASE"\n'
+    '      - name: The rules on the new scripts\n        env:\n          BASE: ${{ github.base_ref }}\n        run: liftoff lint --since "origin/$BASE" --sarif liftoff-rules.sarif\n' +
+    // Code scanning needs a public repository or GitHub Advanced Security; without it only this step fails.
+    "      - name: Show the findings on the pull request\n        if: always() && hashFiles('liftoff-rules.sarif') != ''\n        continue-on-error: true\n" +
+    '        uses: github/codeql-action/upload-sarif@v4\n        with:\n          sarif_file: liftoff-rules.sarif\n          category: liftoff-rules\n'
   )
 }
 
