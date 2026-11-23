@@ -27,6 +27,7 @@ migrations/
   U0002__orders.sql            undo: reverses V0002
   R__customer_totals.sql       repeatable: runs again whenever the file changes
   B0001__existing_schema.sql   baseline: where empty databases start
+  after-migrate.sql            callback: runs at the end of every migrate
 ```
 
 Every database is built by running the scripts in order. Once a script has run somewhere, it is

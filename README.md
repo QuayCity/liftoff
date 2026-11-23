@@ -67,6 +67,8 @@ up. PostgreSQL, SQL Server, MySQL, Oracle and SQLite. Free and open source (MIT)
 - **Versioned migrations.** `V0001__orders.sql`, `U0001__orders.sql` (undo), `R__views.sql`
   (repeatable), `B0001__baseline.sql`. A history table per database, checks that scripts were not
   edited after they ran. A hotfix? `migrate --only 5` runs one script and nothing else.
+- **Callbacks.** `after-migrate.sql`, `before-each-script.sql` and the like run around every
+  migrate, undo and clean: grants, recompiles, statistics.
 - **Schema model.** One file per database object in `schema-model/`, so git shows the history of
   every table and view.
 - **Compare.** The schema of any two: environments, the schema model, what the migrations build, a
