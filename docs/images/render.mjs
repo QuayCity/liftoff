@@ -24,11 +24,11 @@ for (let i = 0; ; i++) {
 
 const browser = await chromium.launch()
 /** One screenshot: a screen of the demo project, made ready by `ready`, in a 1280×760 window at twice the pixels. */
-async function shot(file, query, ready, theme = 'light') {
+async function shot(file, query, ready, theme = 'light', open = 'open=1&') {
   const page = await browser.newPage({ viewport: { width: 1280, height: 760 }, deviceScaleFactor: 2, colorScheme: theme })
   // The sidebar with the screens' names, so a reader sees where they are.
   await page.addInitScript(() => localStorage.setItem('liftoff:sidebar', 'wide'))
-  await page.goto(`${base}?open=1&theme=${theme}&${query}`)
+  await page.goto(`${base}?${open}theme=${theme}&${query}`)
   await ready(page)
   // Let transitions and fonts settle.
   await page.waitForTimeout(400)
@@ -59,6 +59,26 @@ await shot('data-compare.png', 'ws=Compare', async (page) => {
   await page.getByRole('tab', { name: /Different/ }).click()
 })
 await shot('rules.png', 'ws=Rules', (page) => page.getByText('drop-table').first().waitFor())
+await shot('start.png', '', (page) => page.getByRole('heading', { name: 'Start a project' }).waitFor(), 'light', '')
+await shot('connection.png', 'ws=Environments', async (page) => {
+  await page.getByRole('button', { name: 'Add environment' }).first().click()
+  const d = page.getByRole('dialog')
+  await d.getByLabel('Name', { exact: true }).fill('staging')
+  await d.getByLabel('Role').selectOption('test')
+  await d.getByLabel('Server', { exact: true }).fill('db-staging.example.com')
+  await d.getByLabel('Database', { exact: true }).fill('shop')
+  await d.getByLabel('User', { exact: true }).fill('liftoff')
+  await d.getByLabel('Password', { exact: true }).fill('not-a-real-password')
+})
+await shot('scripts.png', 'ws=Scripts', (page) => page.getByRole('button', { name: 'New script' }).waitFor())
+await shot('commit.png', 'ws=Commit', (page) => page.getByRole('heading', { name: 'Commit', exact: true }).waitFor())
+await shot('history.png', 'ws=History', async (page) => {
+  await page.getByRole('button', { name: 'tables/public.orders', exact: true }).click()
+  await page.getByText('Track when orders are paid').first().waitFor()
+  await page.waitForTimeout(300)
+})
+await shot('pipelines.png', 'ws=Pipelines', (page) => page.getByRole('region', { name: 'Workflow preview' }).getByText('liftoff').first().waitFor())
+await shot('settings.png', 'ws=Settings', (page) => page.getByRole('button', { name: 'Save settings' }).waitFor())
 
 await browser.close()
 preview.kill()

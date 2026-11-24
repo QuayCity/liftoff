@@ -93,6 +93,8 @@ empty file on the left, the `CREATE TABLE` on the right.
 **Pull All into Schema Model**. The files appear: `schema-model/tables/dbo.customers.sql` and
 `orders.sql`. Source Control shows them as new.
 
+![The Schema Model view with a table changed in dev, and its difference in the diff editor. (The picture is of a later change in a SQLite project: a new column. Yours shows a whole new table.)](../images/vscode-schema-model.png)
+
 ## Step 5: generate the migration
 
 Turn on the setting `liftoff.generateUndo` (**File > Preferences > Settings**, search for
@@ -116,6 +118,8 @@ Right-click **test**:
 
 - **Show the SQL That Would Run**: the exact SQL in an editor, history insert included.
 - **Run Pending Migrations**: V0001 runs on test, and its state turns to applied.
+
+![The Environments view with two environments expanded and each script's state on them. (The picture is of a SQLite project with more scripts.)](../images/vscode-environments.png)
 
 ## Step 7: production, carefully
 

@@ -8,6 +8,8 @@ says how to get it.
 
 ## The start page
 
+![The start page: Start a project with New project…, Open a project with Open folder…, Try the sample with Create sample…, and the Recent projects with Overview of all projects; a project whose folder is gone says Folder not found, with Remove.](../images/start.png)
+
 | button | does |
 | --- | --- |
 | **New project…** | pick an empty folder, a project name and the database engine (PostgreSQL, SQL Server, MySQL, Oracle or SQLite); writes `liftoff.toml`, `migrations/` and `schema-model/` |
@@ -73,6 +75,8 @@ order is written as `order` in `liftoff.toml` (or `liftoff.user.toml` for an env
 is only yours). A new environment goes after the others, and a scratch database stays last.
 
 ### The connection dialog
+
+![Add environment for a PostgreSQL project: name staging, role Test, the server, port, database and SSL, the connection URL it makes, user and password, and whether the connection is saved for just me or everyone on the project.](../images/connection.png)
 
 | field | what |
 | --- | --- |
@@ -146,6 +150,8 @@ Unticked differences stay listed for next time.
 
 ## Scripts
 
+![Scripts: every script with its version, description and type, the selected one's SQL beside the list, Squash or rebaseline… and New script.](../images/scripts.png)
+
 Every script in the migrations folder. **New script** writes the next one from a description and
 SQL. **Squash or rebaseline…** replaces scripts up to a version with a baseline script (see
 [Teams, branches and pipelines](teams-and-pipelines.md#too-many-scripts)). From `V9990` on, a note
@@ -187,16 +193,22 @@ only in the target**, then
 
 ## Commit
 
+![Commit: the changed files with tick boxes (a new migration and liftoff.toml ticked), the selected file's contents, a commit message, Commit 2 files, Pull and Push.](../images/commit.png)
+
 The changed files in the project, a message box, **Commit**, and **Pull** / **Push** for the
 project's git repository.
 
 ## History
+
+![History: the schema model's objects, the three commits that changed the orders table with who made them and when, and what the newest one changed, before and after side by side.](../images/history.png)
 
 The history of every object in the schema model, straight from git: pick an object (the filter
 narrows the list), then one of the commits that changed its file to see what that commit changed.
 Renames are followed. Objects not committed yet say so.
 
 ## Pipelines
+
+![Pipelines: Runs on GitHub Actions, staging then production ticked, the branch that deploys, validate and check for drift first, what pull requests that change the schema model do, and the workflow file it writes.](../images/pipelines.png)
 
 Writes a GitHub Actions workflow or, with **Runs on: Azure DevOps**, an Azure Pipelines file: pick
 the environments to deploy to, in order, and the branch that deploys. It shows the **Workflow
@@ -206,6 +218,8 @@ preview** and the secrets to add, then writes `.github/workflows/liftoff.yml` or
 ## Settings
 
 Two kinds, each with its own gear.
+
+![Project settings: the project's name, migrations folder, schemas, history table and run lock, and the comparison filters.](../images/settings.png)
 
 **Project settings**, the gear at the foot of the sidebar, are this project's, kept in its
 `liftoff.toml`. **Project**: name, migrations folder, schemas, the history table (fixed once databases
