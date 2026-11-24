@@ -83,6 +83,8 @@ up. PostgreSQL, SQL Server, MySQL, Oracle and SQLite. Free and open source (MIT)
 - **Offline.** The program only talks to your databases (and, for Azure SQL with Microsoft Entra
   ID, to Microsoft's sign-in service). Your CI runners only need to reach your databases.
 
+<img src="docs/images/vscode-schema-model.png" alt="LiftOff in VS Code: the Environments view with each script's state on test and prod, and the Schema Model view showing a table changed in dev, with its difference in the diff editor.">
+
 ## Price
 
 Free. MIT licence, no editions, no account, no licence key, no seat count. Everything on this page

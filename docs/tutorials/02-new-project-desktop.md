@@ -31,6 +31,8 @@ CREATE DATABASE shop_prod;
 The start page has **New project…**, **Open folder…**, **Create sample…** and the projects you
 opened before under **Recent**.
 
+![The start page, with New project…, Open folder… and Create sample…, and the recent projects.](../images/start.png)
+
 ## Step 2: create the project
 
 **New project…**:
@@ -144,6 +146,8 @@ set up, **Push** sends it.
 **Run pending**. The log shows it running; V0001 becomes **applied**, with the time.
 
 Dev shows V0001 as applied too: it was recorded there in step 7, not run.
+
+![Environments with an environment selected: its scripts, their state and when they ran, Run only this and Mark as applied…, and Run pending. (The picture is of a PostgreSQL project; SQL Server's looks the same.)](../images/environments.png)
 
 ## Step 10: check, then deploy to production
 

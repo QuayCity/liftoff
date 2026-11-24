@@ -60,6 +60,11 @@ The screenshots in `docs/images/` are taken from the desktop app's screens on th
 After a change to the screens, make them again: `npm run build` in `apps/desktop`, then
 `node docs/images/render.mjs` (it uses the Playwright from `e2e/`).
 
+The `vscode-*.png` ones are taken from a real VS Code with the extension installed, on a SQLite copy
+of the sample project (no database server needed): `npm run build:cli` in `packages/liftoff`,
+`npm run build` and `npm run copy-ui` in `apps/vscode`, then `node docs/images/render-vscode.mjs`.
+It uses the VS Code that `npm run test:vscode` downloaded into `apps/vscode/.vscode-test`.
+
 ## Pull requests
 
 - One change per pull request, with a test that fails without it.

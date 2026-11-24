@@ -10,6 +10,8 @@ Flyway Project**.
 
 ## The LiftOff panel
 
+![The LiftOff panel in VS Code: the desktop app's Environments screen in an editor tab, with a card per environment and the test database's scripts, next to the LiftOff views in the sidebar.](../images/vscode-panel.png)
+
 **Open LiftOff** (the rocket on the status bar, the rocket at the top of the Environments view, or
 the command palette) opens the [desktop app](desktop-app.md)'s screens in an editor tab, so you
 have everything without leaving VS Code: Overview with each database's activity, Changes,
@@ -23,6 +25,8 @@ lists the same recent projects as the desktop app.
 The views below stay for quick work beside the code.
 
 ## The Environments view
+
+![The Environments view: test and prod expanded, each script with its state there (applied with its date, or pending), and the pending V0002 script open in the editor.](../images/vscode-environments.png)
 
 Every environment in `liftoff.toml` and `liftoff.user.toml`, and under each one every migration
 script with its state there: pending, applied, failed, edited since it ran, or not for this
@@ -50,7 +54,11 @@ change goes into a new script instead.
 findings show in **Problems** and as squiggles on their line. **LiftOff: Check the Rules on the
 Scripts** (the checklist button at the top of the view) checks every script again.
 
+![A script that drops a table: the line is underlined, and Problems shows the drop-table rule's warning for it.](../images/vscode-rules.png)
+
 ## The Schema Model view
+
+![The Schema Model view after Compare with Dev: the customers table, changed in dev, and its difference in the diff editor, the model file on the left and dev on the right with the new phone column.](../images/vscode-schema-model.png)
 
 **Compare with Dev** lists the objects where the dev database and `schema-model/` differ. Click
 one (**Show the Difference**) for a side-by-side diff. **Pull into Schema Model** writes the
